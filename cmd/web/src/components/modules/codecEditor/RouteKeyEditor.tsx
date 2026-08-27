@@ -23,7 +23,8 @@ export interface RouteKeyEditorProps {
 }
 
 export function RouteKeyEditor({ raw, schema, onEdit }: RouteKeyEditorProps) {
-  const template: string = typeof schema.routeKeyTemplate === 'string' ? schema.routeKeyTemplate : '';
+  const template: string =
+    typeof schema.routeKeyTemplate === 'string' ? schema.routeKeyTemplate : '';
 
   // route 字段清单
   const routeFields = collectRouteFieldNames(schema);
@@ -42,7 +43,9 @@ export function RouteKeyEditor({ raw, schema, onEdit }: RouteKeyEditorProps) {
       title={
         <Space size={8} align="center">
           <span className="pce-bench-title">路由键</span>
-          <Typography.Text type="secondary" className="pce-bench-meta">模板与示例</Typography.Text>
+          <Typography.Text type="secondary" className="pce-bench-meta">
+            模板与示例
+          </Typography.Text>
         </Space>
       }
       styles={{ body: { padding: 12 } }}
@@ -61,7 +64,9 @@ export function RouteKeyEditor({ raw, schema, onEdit }: RouteKeyEditorProps) {
               onChange={(e) => onEdit(setRouteKeyTemplate(raw, e.target.value))}
             />
             <div>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>可用 route 字段：</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                可用 route 字段：
+              </Typography.Text>
               {routeFields.length === 0 ? (
                 <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>
                   （当前 header 无 role:&quot;route&quot; 字段）
@@ -91,15 +96,31 @@ export function RouteKeyEditor({ raw, schema, onEdit }: RouteKeyEditorProps) {
 
         {/* 右：实时样例 */}
         <div className="split-2-right">
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+          <Typography.Text
+            type="secondary"
+            style={{ fontSize: 12, display: 'block', marginBottom: 6 }}
+          >
             样例 routeKey
           </Typography.Text>
-          <div style={{
-            fontFamily: 'monospace', fontSize: 16, fontWeight: 600,
-            padding: '10px 12px', background: 'var(--hover-bg)', borderRadius: 6,
-            wordBreak: 'break-all', minHeight: 44, display: 'flex', alignItems: 'center',
-          }}>
-            {sample || <Typography.Text type="secondary" style={{ fontSize: 12 }}>（空）</Typography.Text>}
+          <div
+            style={{
+              fontFamily: 'monospace',
+              fontSize: 16,
+              fontWeight: 600,
+              padding: '10px 12px',
+              background: 'var(--hover-bg)',
+              borderRadius: 6,
+              wordBreak: 'break-all',
+              minHeight: 44,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            {sample || (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                （空）
+              </Typography.Text>
+            )}
           </div>
         </div>
       </div>
@@ -141,5 +162,7 @@ function extractPlaceholders(template: string): string[] {
 function renderSample(template: string, routeFields: string[]): string {
   const known = new Set(routeFields);
   // 用函数 replacement 避免 `$` 特殊语义。
-  return template.replace(ROUTE_KEY_PLACEHOLDER_RE, (_full, name: string) => (known.has(name) ? name : `{${name}}`));
+  return template.replace(ROUTE_KEY_PLACEHOLDER_RE, (_full, name: string) =>
+    known.has(name) ? name : `{${name}}`,
+  );
 }

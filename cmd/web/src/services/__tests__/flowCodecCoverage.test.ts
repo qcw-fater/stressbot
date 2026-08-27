@@ -50,7 +50,13 @@ describe('collectFlowCodecConnections', () => {
 
   it('flow.actions 缺失/为空对象时返回空数组', () => {
     expect(collectFlowCodecConnections({ defaultDelayMs: 0, nodes: {} } as FlowJson)).toEqual([]);
-    expect(collectFlowCodecConnections({ defaultDelayMs: 0, nodes: {}, actions: {} } as unknown as FlowJson)).toEqual([]);
+    expect(
+      collectFlowCodecConnections({
+        defaultDelayMs: 0,
+        nodes: {},
+        actions: {},
+      } as unknown as FlowJson),
+    ).toEqual([]);
   });
 
   it('容忍动作缺 pattern 字段', () => {
@@ -89,7 +95,7 @@ describe('findMissingCodecConnections', () => {
     expect(findMissingCodecConnections(referenced, files)).toEqual([]);
   });
 
-  it('缺 udp:battle → 返回 [\'udp:battle\']', () => {
+  it("缺 udp:battle → 返回 ['udp:battle']", () => {
     const referenced = ['tcp:logic', 'udp:battle'];
     const files = ['tcp_logic_codec.json']; // 缺 udp_battle_codec.json
     expect(findMissingCodecConnections(referenced, files)).toEqual(['udp:battle']);

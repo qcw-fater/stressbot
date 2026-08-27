@@ -5,12 +5,26 @@
  */
 
 import { App as AntApp, Button, Input, Modal, Space, Table, Popconfirm, Tooltip } from 'antd';
-import { DeleteOutlined, DownloadOutlined, FolderOpenOutlined, ImportOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  DownloadOutlined,
+  FolderOpenOutlined,
+  ImportOutlined,
+  SaveOutlined,
+  SyncOutlined,
+} from '@ant-design/icons';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import { FLOW_NAME_MAX_LENGTH, getFlow, saveFlow, deleteFlow, renameFlow, type ManagedFlow } from '../store/flowManagerStore';
+import {
+  FLOW_NAME_MAX_LENGTH,
+  getFlow,
+  saveFlow,
+  deleteFlow,
+  renameFlow,
+  type ManagedFlow,
+} from '../store/flowManagerStore';
 import { cancelInactiveQuery, flowListQueryOptions, queryKeys } from '@/services';
 import { useFlowStore } from '../store/flowStore';
 import { useFlowFileIO } from './useFlowFileIO';
@@ -42,7 +56,8 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
   const invalidateFlows = () => queryClient.invalidateQueries({ queryKey: queryKeys.flows.all });
   const notifiedErrorAtRef = useRef(0);
   useEffect(() => {
-    if (!open || !flowsQuery.error || flowsQuery.errorUpdatedAt === notifiedErrorAtRef.current) return;
+    if (!open || !flowsQuery.error || flowsQuery.errorUpdatedAt === notifiedErrorAtRef.current)
+      return;
     notifiedErrorAtRef.current = flowsQuery.errorUpdatedAt;
     message.error(`加载流程列表失败：${flowsQuery.error.message}`);
   }, [flowsQuery.error, flowsQuery.errorUpdatedAt, message, open]);
@@ -218,14 +233,20 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
       dataIndex: 'nodeCount',
       key: 'nodeCount',
       width: 70,
-      render: (v: number) => <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{v}</span>,
+      render: (v: number) => (
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{v}</span>
+      ),
     },
     {
       title: '更新时间',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
       width: 160,
-      render: (v: string) => <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{dayjs(v).format('YYYY-MM-DD HH:mm:ss')}</span>,
+      render: (v: string) => (
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          {dayjs(v).format('YYYY-MM-DD HH:mm:ss')}
+        </span>
+      ),
     },
     {
       title: '操作',
@@ -235,16 +256,39 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
         const editingThisRow = record.id === renamingId;
         return (
           <Space size="middle">
-            <Button type="link" size="small" icon={<FolderOpenOutlined />} disabled={editingThisRow} onClick={() => handleOpen(record.id, record.name)}>
+            <Button
+              type="link"
+              size="small"
+              icon={<FolderOpenOutlined />}
+              disabled={editingThisRow}
+              onClick={() => handleOpen(record.id, record.name)}
+            >
               打开
             </Button>
-            <Popconfirm title={`用当前草稿覆盖 "${record.name}"？`} onConfirm={() => handleOverwrite(record.id, record.name)} okText="覆盖" cancelText="取消">
+            <Popconfirm
+              title={`用当前草稿覆盖 "${record.name}"？`}
+              onConfirm={() => handleOverwrite(record.id, record.name)}
+              okText="覆盖"
+              cancelText="取消"
+            >
               <Button type="link" size="small" icon={<SyncOutlined />} disabled={editingThisRow}>
                 覆盖
               </Button>
             </Popconfirm>
-            <Popconfirm title={`确定要删除 "${record.name}" 吗？`} onConfirm={() => handleDelete(record.id, record.name)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
-              <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled={editingThisRow} />
+            <Popconfirm
+              title={`确定要删除 "${record.name}" 吗？`}
+              onConfirm={() => handleDelete(record.id, record.name)}
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                disabled={editingThisRow}
+              />
             </Popconfirm>
           </Space>
         );

@@ -109,7 +109,9 @@ export function NodePalette() {
     const unsubscribe = onTemplateChange(() => {
       void refresh();
     });
-    const onFocus = () => { void refresh(); };
+    const onFocus = () => {
+      void refresh();
+    };
     window.addEventListener('focus', onFocus);
     return () => {
       refreshRequestRef.current += 1;
@@ -203,10 +205,7 @@ export function NodePalette() {
     kind: 'action' | 'listen',
     template: ActionTemplate | ListenTemplate,
   ) => {
-    e.dataTransfer.setData(
-      'application/stressbot-template',
-      JSON.stringify({ kind, template }),
-    );
+    e.dataTransfer.setData('application/stressbot-template', JSON.stringify({ kind, template }));
     e.dataTransfer.effectAllowed = 'copy';
   };
 
@@ -236,155 +235,175 @@ export function NodePalette() {
         {templateLibrary !== true ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={capabilityLoading
-              ? '正在确认共享模板库状态'
-              : '共享模板库功能未启用，请检查服务器配置'}
+            description={
+              capabilityLoading
+                ? '正在确认共享模板库状态'
+                : '共享模板库功能未启用，请检查服务器配置'
+            }
           />
         ) : (
           <>
-        {/* Action 模板段 */}
-        <section className="palette-section">
-          <div className="palette-section-header">
-            <span className="palette-section-title">Action 模板（{actions.length}）</span>
-            <Button
-              type="text"
-              size="small"
-              icon={<ReloadOutlined />}
-              loading={refreshing}
-              onClick={() => { void onManualRefresh(); }}
-              aria-label="刷新模板库"
-            />
-          </div>
-          <Input.Search
-            size="small"
-            placeholder="搜索"
-            value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value)}
-            allowClear
-            className="palette-section-toolbar"
-          />
-          <div className="palette-template-list">
-            {filteredActions.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 11 }}>暂无</span>} />
-            ) : (
-              filteredActions.map((t) => (
-                <Tooltip key={t.id} title={t.description ?? `${t.name} · ${t.pattern}（双击编辑 / 右键菜单 / 拖入画布）`} mouseEnterDelay={0.4}>
-                  <div
-                    className="tpl-card tpl-card-action"
-                    draggable
-                    onDragStart={(e) => onTemplateDragStart(e, 'action', t)}
-                    onContextMenu={(e) => onTemplateContextMenu(e, 'action', t)}
-                    onDoubleClick={() => onEditAction(t)}
-                  >
-                    <div className="tpl-card-title">{t.name}</div>
-                  <div className="tpl-card-meta">
-                    <span className="pattern-badge" data-pattern={t.pattern}>
-                      {t.pattern}
-                    </span>
-                  </div>
-                </div>
-              </Tooltip>
-            ))
-          )}
-        </div>
-      </section>
-
-      {/* Listen 模板段 */}
-        <section className="palette-section">
-          <div className="palette-section-header">
-            <span className="palette-section-title">Listen 模板（{listens.length}）</span>
-          </div>
-          <Input.Search
-            size="small"
-            placeholder="搜索"
-            value={listenFilter}
-            onChange={(e) => setListenFilter(e.target.value)}
-            allowClear
-            className="palette-section-toolbar"
-          />
-          <div className="palette-template-list">
-            {filteredListens.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 11 }}>暂无</span>} />
-            ) : (
-              filteredListens.map((t) => {
-                const kind = t.kind || classifyListen(t.data);
-                const refSummary = defaultRefSummary(t.defaultRef);
-                const title = t.description ?? `${t.name} · ${kind}${refSummary ? ` · ${refSummary}` : ''}（双击编辑 / 右键菜单 / 拖入画布）`;
-                return (
-                  <Tooltip key={t.id} title={title} mouseEnterDelay={0.4}>
-                    <div
-                      className="tpl-card tpl-card-listen"
-                      draggable
-                      onDragStart={(e) => onTemplateDragStart(e, 'listen', t)}
-                      onContextMenu={(e) => onTemplateContextMenu(e, 'listen', t)}
-                      onDoubleClick={() => onEditListen(t)}
+            {/* Action 模板段 */}
+            <section className="palette-section">
+              <div className="palette-section-header">
+                <span className="palette-section-title">Action 模板（{actions.length}）</span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={refreshing}
+                  onClick={() => {
+                    void onManualRefresh();
+                  }}
+                  aria-label="刷新模板库"
+                />
+              </div>
+              <Input.Search
+                size="small"
+                placeholder="搜索"
+                value={actionFilter}
+                onChange={(e) => setActionFilter(e.target.value)}
+                allowClear
+                className="palette-section-toolbar"
+              />
+              <div className="palette-template-list">
+                {filteredActions.length === 0 ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={<span style={{ fontSize: 11 }}>暂无</span>}
+                  />
+                ) : (
+                  filteredActions.map((t) => (
+                    <Tooltip
+                      key={t.id}
+                      title={
+                        t.description ??
+                        `${t.name} · ${t.pattern}（双击编辑 / 右键菜单 / 拖入画布）`
+                      }
+                      mouseEnterDelay={0.4}
                     >
-                      <div className="tpl-card-title">{t.name}</div>
-                      <div className="tpl-card-meta">
-                        <span className="pattern-badge" data-pattern={kind}>
-                          {kind}
-                        </span>
-                        {/* 服务器名直接展示；外层卡片 Tooltip 已含 refSummary，不再叠加原生 title 避免双提示 */}
-                        {refSummary && <span>{t.defaultRef?.server}</span>}
+                      <div
+                        className="tpl-card tpl-card-action"
+                        draggable
+                        onDragStart={(e) => onTemplateDragStart(e, 'action', t)}
+                        onContextMenu={(e) => onTemplateContextMenu(e, 'action', t)}
+                        onDoubleClick={() => onEditAction(t)}
+                      >
+                        <div className="tpl-card-title">{t.name}</div>
+                        <div className="tpl-card-meta">
+                          <span className="pattern-badge" data-pattern={t.pattern}>
+                            {t.pattern}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  </Tooltip>
-                );
-              })
-            )}
-          </div>
-        </section>
+                    </Tooltip>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* Listen 模板段 */}
+            <section className="palette-section">
+              <div className="palette-section-header">
+                <span className="palette-section-title">Listen 模板（{listens.length}）</span>
+              </div>
+              <Input.Search
+                size="small"
+                placeholder="搜索"
+                value={listenFilter}
+                onChange={(e) => setListenFilter(e.target.value)}
+                allowClear
+                className="palette-section-toolbar"
+              />
+              <div className="palette-template-list">
+                {filteredListens.length === 0 ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={<span style={{ fontSize: 11 }}>暂无</span>}
+                  />
+                ) : (
+                  filteredListens.map((t) => {
+                    const kind = t.kind || classifyListen(t.data);
+                    const refSummary = defaultRefSummary(t.defaultRef);
+                    const title =
+                      t.description ??
+                      `${t.name} · ${kind}${refSummary ? ` · ${refSummary}` : ''}（双击编辑 / 右键菜单 / 拖入画布）`;
+                    return (
+                      <Tooltip key={t.id} title={title} mouseEnterDelay={0.4}>
+                        <div
+                          className="tpl-card tpl-card-listen"
+                          draggable
+                          onDragStart={(e) => onTemplateDragStart(e, 'listen', t)}
+                          onContextMenu={(e) => onTemplateContextMenu(e, 'listen', t)}
+                          onDoubleClick={() => onEditListen(t)}
+                        >
+                          <div className="tpl-card-title">{t.name}</div>
+                          <div className="tpl-card-meta">
+                            <span className="pattern-badge" data-pattern={kind}>
+                              {kind}
+                            </span>
+                            {/* 服务器名直接展示；外层卡片 Tooltip 已含 refSummary，不再叠加原生 title 避免双提示 */}
+                            {refSummary && <span>{t.defaultRef?.server}</span>}
+                          </div>
+                        </div>
+                      </Tooltip>
+                    );
+                  })
+                )}
+              </div>
+            </section>
           </>
         )}
       </div>
 
       {/* 右键菜单 */}
-      {menu && createPortal(
-        <div
-          className="palette-context-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
+      {menu &&
+        createPortal(
           <div
-            className="palette-context-item"
-            onClick={() => {
-              if (menu.kind === 'action') onEditAction(menu.template as ActionTemplate);
-              else onEditListen(menu.template as ListenTemplate);
-              setMenu(null);
-            }}
+            className="palette-context-menu"
+            style={{ left: menu.x, top: menu.y }}
+            onClick={(e) => e.stopPropagation()}
           >
-            编辑模板
-          </div>
-          <div
-            className="palette-context-item"
-            onClick={() => {
-              if (menu.kind === 'action') onCopyAction(menu.template as ActionTemplate);
-              else onCopyListen(menu.template as ListenTemplate);
-              setMenu(null);
-            }}
-          >
-            复制到剪贴板
-          </div>
-          <div
-            className="palette-context-item palette-context-danger"
-            onClick={async () => {
-              try {
-                if (menu.kind === 'action') {
-                  await removeActionTemplate(menu.template.id);
-                } else {
-                  await removeListenTemplate(menu.template.id);
-                }
+            <div
+              className="palette-context-item"
+              onClick={() => {
+                if (menu.kind === 'action') onEditAction(menu.template as ActionTemplate);
+                else onEditListen(menu.template as ListenTemplate);
                 setMenu(null);
-              } catch (error) {
-                showApiError(error);
-              }
-            }}
-          >
-            删除模板
-          </div>
-        </div>,
-        document.body,
-      )}
+              }}
+            >
+              编辑模板
+            </div>
+            <div
+              className="palette-context-item"
+              onClick={() => {
+                if (menu.kind === 'action') onCopyAction(menu.template as ActionTemplate);
+                else onCopyListen(menu.template as ListenTemplate);
+                setMenu(null);
+              }}
+            >
+              复制到剪贴板
+            </div>
+            <div
+              className="palette-context-item palette-context-danger"
+              onClick={async () => {
+                try {
+                  if (menu.kind === 'action') {
+                    await removeActionTemplate(menu.template.id);
+                  } else {
+                    await removeListenTemplate(menu.template.id);
+                  }
+                  setMenu(null);
+                } catch (error) {
+                  showApiError(error);
+                }
+              }}
+            >
+              删除模板
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

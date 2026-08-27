@@ -48,9 +48,7 @@ export function dagreLayout(
 
   for (const n of nodes) {
     const w =
-      typeof n.width === 'number' && n.width > 0
-        ? n.width
-        : (n.measured?.width ?? opts.nodeWidth);
+      typeof n.width === 'number' && n.width > 0 ? n.width : (n.measured?.width ?? opts.nodeWidth);
     const h =
       typeof n.height === 'number' && n.height > 0
         ? n.height

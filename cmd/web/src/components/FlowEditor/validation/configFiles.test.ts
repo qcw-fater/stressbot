@@ -12,7 +12,10 @@ describe('仓库流程配置', () => {
       const flow = JSON.parse(fs.readFileSync(path.join(flowDir, file), 'utf8')) as TaskFlow;
       const report = validateFlow(flow);
 
-      expect(report.errors, report.errors.map((issue) => `${issue.code}: ${issue.message}`).join('\n')).toEqual([]);
+      expect(
+        report.errors,
+        report.errors.map((issue) => `${issue.code}: ${issue.message}`).join('\n'),
+      ).toEqual([]);
     });
   }
 });

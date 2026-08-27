@@ -101,14 +101,24 @@ function emitEdgesFor(id: string, node: FlowNode, flow: FlowJsonInput): Edge[] {
     case 'action':
       return [...emitListenEdges(id, node.listenRefs ?? [], flow), ...emitOnErrorEdges(id, node)];
     case 'loop':
-      return node.body ? [makeEdge(`${id}->body->${node.body}`, id, node.body, 'loopBody', 'body')] : [];
+      return node.body
+        ? [makeEdge(`${id}->body->${node.body}`, id, node.body, 'loopBody', 'body')]
+        : [];
     case 'boolean': {
       const out: Edge[] = [];
       if (node.trueNext) {
-        out.push(makeEdge(`${id}->true->${node.trueNext}`, id, node.trueNext, 'branch', 'true', { branch: 'true' }));
+        out.push(
+          makeEdge(`${id}->true->${node.trueNext}`, id, node.trueNext, 'branch', 'true', {
+            branch: 'true',
+          }),
+        );
       }
       if (node.falseNext) {
-        out.push(makeEdge(`${id}->false->${node.falseNext}`, id, node.falseNext, 'branch', 'false', { branch: 'false' }));
+        out.push(
+          makeEdge(`${id}->false->${node.falseNext}`, id, node.falseNext, 'branch', 'false', {
+            branch: 'false',
+          }),
+        );
       }
       return out;
     }
@@ -117,7 +127,9 @@ function emitEdgesFor(id: string, node: FlowNode, flow: FlowJsonInput): Edge[] {
     case 'weighted':
       return emitWeightedEdges(id, node.options ?? []);
     case 'wait':
-      return node.then ? [makeEdge(`${id}->then->${node.then}`, id, node.then, 'waitThen', 'out')] : [];
+      return node.then
+        ? [makeEdge(`${id}->then->${node.then}`, id, node.then, 'waitThen', 'out')]
+        : [];
     case 'break':
     case 'continue':
       return [];
@@ -146,13 +158,19 @@ function emitSwitchEdges(id: string, cases: SwitchCase[], defaultNext?: string):
   const out: Edge[] = [];
   cases.forEach((c, i) => {
     if (!c.next) return;
-    out.push(makeEdge(`${id}->case[${i}]->${c.next}`, id, c.next, 'branch', `case-${i}`, {
-      branch: 'case',
-      caseIndex: i,
-    }));
+    out.push(
+      makeEdge(`${id}->case[${i}]->${c.next}`, id, c.next, 'branch', `case-${i}`, {
+        branch: 'case',
+        caseIndex: i,
+      }),
+    );
   });
   if (defaultNext) {
-    out.push(makeEdge(`${id}->default->${defaultNext}`, id, defaultNext, 'branch', 'default', { branch: 'default' }));
+    out.push(
+      makeEdge(`${id}->default->${defaultNext}`, id, defaultNext, 'branch', 'default', {
+        branch: 'default',
+      }),
+    );
   }
   return out;
 }
@@ -179,7 +197,11 @@ function emitListenEdges(id: string, refs: ListenRef[], flow: FlowJsonInput): Ed
 function emitOnErrorEdges(id: string, node: FlowNode): Edge[] {
   const handler = node.onError?.handler;
   if (!handler) return [];
-  return [makeEdge(`${id}->error->${handler}`, id, handler, 'error', 'error', { relation: 'onErrorHandler' })];
+  return [
+    makeEdge(`${id}->error->${handler}`, id, handler, 'error', 'error', {
+      relation: 'onErrorHandler',
+    }),
+  ];
 }
 
 function makeEdge(

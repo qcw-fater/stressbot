@@ -76,12 +76,21 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         <Form.Item label="pattern">
           <Space>
             <PatternSelector value={effectiveAction.pattern} onChange={onPatternChange} />
-            <SaveTemplateButton kind="action" name={actionName} data={effectiveAction} description={node.description} />
+            <SaveTemplateButton
+              kind="action"
+              name={actionName}
+              data={effectiveAction}
+              description={node.description}
+            />
             {PREVIEWABLE_PATTERNS.includes(effectiveAction.pattern) && (
               <Button
                 size="small"
                 icon={<EyeOutlined />}
-                disabled={!effectiveAction.c2sProto && !effectiveAction.s2cProto && effectiveAction.pattern !== 'setState'}
+                disabled={
+                  !effectiveAction.c2sProto &&
+                  !effectiveAction.s2cProto &&
+                  effectiveAction.pattern !== 'setState'
+                }
                 onClick={() => setPreviewOpen(true)}
               >
                 预览
@@ -97,7 +106,8 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
           message="动作尚未创建"
           description={
             <span>
-              actions 表中尚未存在 <code>{actionName || '(空)'}</code>，将在第一次保存字段时自动创建。
+              actions 表中尚未存在 <code>{actionName || '(空)'}</code>
+              ，将在第一次保存字段时自动创建。
             </span>
           }
           showIcon
@@ -125,7 +135,10 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
               <Form layout="vertical">
                 <OnErrorEditor nodeId={nodeId} node={node} />
                 <Form.Item label="节点延迟 delayMs">
-                  <DelayInput value={node.delayMs} onChange={(v) => updateNode(nodeId, { delayMs: v })} />
+                  <DelayInput
+                    value={node.delayMs}
+                    onChange={(v) => updateNode(nodeId, { delayMs: v })}
+                  />
                 </Form.Item>
               </Form>
             ),
@@ -143,7 +156,8 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         open={previewOpen}
         title={
           <span>
-            消息预览 <code style={{ color: 'var(--text-secondary)' }}>{actionName || '(未命名)'}</code>
+            消息预览{' '}
+            <code style={{ color: 'var(--text-secondary)' }}>{actionName || '(未命名)'}</code>
           </span>
         }
         onCancel={() => setPreviewOpen(false)}
@@ -163,6 +177,12 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
 }
 
 const PREVIEWABLE_PATTERNS: ActionPattern[] = [
-  'tcpSend', 'tcpRequest', 'udpSend', 'udpRequest',
-  'httpRequest', 'setState', 'tcpListen', 'udpListen',
+  'tcpSend',
+  'tcpRequest',
+  'udpSend',
+  'udpRequest',
+  'httpRequest',
+  'setState',
+  'tcpListen',
+  'udpListen',
 ];

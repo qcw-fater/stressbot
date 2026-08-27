@@ -18,18 +18,30 @@ export function BranchEdge({
   markerEnd,
   selected,
 }: EdgeProps) {
-  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
   const d = data as { branch?: string; caseIndex?: number; sourceNodeType?: string } | undefined;
   const branch = d?.branch;
   // case 边显示序号（case 1/2/…，与节点行序号、编辑器 Case N 对齐）；true/false/default 用本身
-  const label = branch === 'case' && typeof d?.caseIndex === 'number' ? `case ${d.caseIndex + 1}` : branch;
+  const label =
+    branch === 'case' && typeof d?.caseIndex === 'number' ? `case ${d.caseIndex + 1}` : branch;
   // boolean true/false 走固定绿/红；其余（switch case/default 等）跟随源节点配色
   const isBooleanBranch = branch === 'true' || branch === 'false';
   const color = isBooleanBranch
-    ? branch === 'true' ? 'var(--edge-true)' : 'var(--edge-false)'
+    ? branch === 'true'
+      ? 'var(--edge-true)'
+      : 'var(--edge-false)'
     : colorOfNodeType(d?.sourceNodeType);
   const deep = isBooleanBranch
-    ? branch === 'true' ? 'var(--edge-true-deep)' : 'var(--edge-false-deep)'
+    ? branch === 'true'
+      ? 'var(--edge-true-deep)'
+      : 'var(--edge-false-deep)'
     : deepColorOfNodeType(d?.sourceNodeType);
   const style = buildEdgeStyle({
     width: 1.6,

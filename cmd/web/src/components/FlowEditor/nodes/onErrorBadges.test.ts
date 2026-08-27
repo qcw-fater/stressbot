@@ -9,11 +9,15 @@ function actionNode(onError?: FlowNode['onError']): FlowNode {
 describe('buildOnErrorBadges', () => {
   it('无配置或只有隐藏配置时不显示标签', () => {
     expect(buildOnErrorBadges(actionNode())).toEqual([]);
-    expect(buildOnErrorBadges(actionNode({
-      handler: 'recover',
-      ignoreCodes: [1001],
-      retry: { retryDelayMs: 500 },
-    }))).toEqual([]);
+    expect(
+      buildOnErrorBadges(
+        actionNode({
+          handler: 'recover',
+          ignoreCodes: [1001],
+          retry: { retryDelayMs: 500 },
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it('显示额外重试次数及其说明', () => {
@@ -33,10 +37,14 @@ describe('buildOnErrorBadges', () => {
   });
 
   it('将重试和最终策略拆分为独立标签', () => {
-    expect(buildOnErrorBadges(actionNode({
-      retry: { maxRetries: 2, retryDelayMs: 100 },
-      strategy: 'skip',
-    }))).toEqual([
+    expect(
+      buildOnErrorBadges(
+        actionNode({
+          retry: { maxRetries: 2, retryDelayMs: 100 },
+          strategy: 'skip',
+        }),
+      ),
+    ).toEqual([
       { label: 'retry:2', tooltip: '失败后最多额外重试 2 次', tone: 'warning' },
       { label: 'skip', tooltip: '错误处理和重试结束后，跳过当前层级', tone: 'continue' },
     ]);

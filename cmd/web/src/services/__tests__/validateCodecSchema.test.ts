@@ -148,7 +148,9 @@ describe('validateCodecSchema — header 字段', () => {
     const s = validSchema();
     s.header[1].role = 'length'; // errCode 也变 length
     const errs = validateCodecSchema(JSON.stringify(s));
-    expect(errs.some((e) => e.includes('role:"length" 字段') && e.includes('必须有且仅有 1 个'))).toBe(true);
+    expect(
+      errs.some((e) => e.includes('role:"length" 字段') && e.includes('必须有且仅有 1 个')),
+    ).toBe(true);
   });
 
   it('缺 route role', () => {
@@ -218,7 +220,9 @@ describe('validateCodecSchema — routeKeyTemplate 占位', () => {
     const s = validSchema();
     s.routeKeyTemplate = '{cmd}:{nonexistent}';
     const errs = validateCodecSchema(JSON.stringify(s));
-    expect(errs.some((e) => e.includes('routeKeyTemplate 占位') && e.includes('role:"route"'))).toBe(true);
+    expect(
+      errs.some((e) => e.includes('routeKeyTemplate 占位') && e.includes('role:"route"')),
+    ).toBe(true);
   });
 });
 
@@ -283,14 +287,18 @@ describe('validateCodecSchema — pipeline', () => {
     const s = validSchema();
     s.pipeline[0].when!.appliesWith = 'ghost-step';
     const errs = validateCodecSchema(JSON.stringify(s));
-    expect(errs.some((e) => e.includes('when.appliesWith') && e.includes('不存在的 step'))).toBe(true);
+    expect(errs.some((e) => e.includes('when.appliesWith') && e.includes('不存在的 step'))).toBe(
+      true,
+    );
   });
 
   it('guard op 非法', () => {
     const s = validSchema();
     s.pipeline[1].when!.guards![0].op = 'matches';
     const errs = validateCodecSchema(JSON.stringify(s));
-    expect(errs.some((e) => e.includes('guard') && e.includes('op') && e.includes('不合法'))).toBe(true);
+    expect(errs.some((e) => e.includes('guard') && e.includes('op') && e.includes('不合法'))).toBe(
+      true,
+    );
   });
 });
 
@@ -320,7 +328,11 @@ describe('validateCodecSchema — heartbeat', () => {
 
   it('requireSecretKey 必须是布尔值', () => {
     const s = validSchema();
-    s.heartbeat = { intervalMs: 5000, route: { cmd: 1, act: 2 }, requireSecretKey: 'yes' as unknown as boolean };
+    s.heartbeat = {
+      intervalMs: 5000,
+      route: { cmd: 1, act: 2 },
+      requireSecretKey: 'yes' as unknown as boolean,
+    };
     const errs = validateCodecSchema(JSON.stringify(s));
     expect(errs.some((e) => e.includes('heartbeat.requireSecretKey 必须是布尔值'))).toBe(true);
   });
@@ -353,14 +365,24 @@ describe('validateCodecSchema — heartbeat', () => {
 
   it('bindings 只能配合 c2sProto 使用', () => {
     const s = validSchema();
-    s.heartbeat = { intervalMs: 5000, route: { cmd: 1, act: 2 }, bindings: [{ field: 'seq', type: 'fixed', value: 1 }] };
+    s.heartbeat = {
+      intervalMs: 5000,
+      route: { cmd: 1, act: 2 },
+      bindings: [{ field: 'seq', type: 'fixed', value: 1 }],
+    };
     const errs = validateCodecSchema(JSON.stringify(s));
-    expect(errs.some((e) => e.includes('heartbeat.bindings 只能在配置 c2sProto 时使用'))).toBe(true);
+    expect(errs.some((e) => e.includes('heartbeat.bindings 只能在配置 c2sProto 时使用'))).toBe(
+      true,
+    );
   });
 
   it('校验 heartbeatFields 字段参数', () => {
     const s = validSchema();
-    s.heartbeat = { intervalMs: 5000, route: { cmd: 1, act: 2 }, heartbeatFields: [{ type: 'f32', source: 'randomInt', min: 1, max: 2 }] };
+    s.heartbeat = {
+      intervalMs: 5000,
+      route: { cmd: 1, act: 2 },
+      heartbeatFields: [{ type: 'f32', source: 'randomInt', min: 1, max: 2 }],
+    };
     const errs = validateCodecSchema(JSON.stringify(s));
     expect(errs.some((e) => e.includes('浮点字段仅支持 fixed/state source'))).toBe(true);
   });

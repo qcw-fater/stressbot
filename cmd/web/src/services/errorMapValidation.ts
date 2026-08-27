@@ -61,11 +61,7 @@ export function parseErrorMapSafe(json: string): ErrorMapEntry[] {
   }
 }
 
-export function isDraftEngaged(
-  code: number | null,
-  desc: string,
-  editing: number | null,
-): boolean {
+export function isDraftEngaged(code: number | null, desc: string, editing: number | null): boolean {
   return editing !== null || code !== null || desc.trim() !== '';
 }
 
@@ -82,7 +78,10 @@ export function validateErrorMap(entries: ErrorMapEntry[]): ErrorMapError[] {
     if (!Number.isInteger(entry.code) || entry.code <= 0) {
       errors.push({ index, message: `第 ${index + 1} 行：码必须为正整数` });
     } else if (entry.code < 100) {
-      errors.push({ index, message: `第 ${index + 1} 行：码 ${entry.code} < 100 属框架保留段，不可用` });
+      errors.push({
+        index,
+        message: `第 ${index + 1} 行：码 ${entry.code} < 100 属框架保留段，不可用`,
+      });
     } else if (seen.has(entry.code)) {
       errors.push({
         index,

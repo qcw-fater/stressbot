@@ -21,7 +21,13 @@ import type { ProtoField } from '@/types/proto';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export type StateKeySourceType =
-  | 'store' | 'listenStore' | 'stateExtra' | 'storeAs' | 'setState' | 'lua' | 'builtin';
+  | 'store'
+  | 'listenStore'
+  | 'stateExtra'
+  | 'storeAs'
+  | 'setState'
+  | 'lua'
+  | 'builtin';
 
 export interface StateKeyInfo {
   key: string;
@@ -40,9 +46,27 @@ export const BUILTIN_STATE_KEYS = ['id', 'index', 'account'] as const;
 
 /** 内置 state 字段定义：每个机器人启动时自动注入，不可覆盖 */
 export const BUILTIN_KEYS: StateKeyInfo[] = [
-  { key: 'id', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '机器人编号（= startNumber + index）' },
-  { key: 'index', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '任务全局序号（0-based，不含 startNumber 偏移）' },
-  { key: 'account', sourceType: 'builtin', sourceName: '内置', builtinType: 'string', builtinDesc: '完整账号名（如 bot_100）' },
+  {
+    key: 'id',
+    sourceType: 'builtin',
+    sourceName: '内置',
+    builtinType: 'int',
+    builtinDesc: '机器人编号（= startNumber + index）',
+  },
+  {
+    key: 'index',
+    sourceType: 'builtin',
+    sourceName: '内置',
+    builtinType: 'int',
+    builtinDesc: '任务全局序号（0-based，不含 startNumber 偏移）',
+  },
+  {
+    key: 'account',
+    sourceType: 'builtin',
+    sourceName: '内置',
+    builtinType: 'string',
+    builtinDesc: '完整账号名（如 bot_100）',
+  },
 ];
 
 /** 判断某个 key 是否为内置 state key（内置 key 一旦播种即不可被流程写入覆盖） */
@@ -232,10 +256,7 @@ export function collectUsedScriptNames(
  * 则返回 "GameModeInfo"（map value 的消息类型）。
  * 如果路径中遇到标量类型或找不到字段，返回 undefined。
  */
-function resolveFieldProto(
-  rootProto: string,
-  fieldPath: string,
-): string | undefined {
+function resolveFieldProto(rootProto: string, fieldPath: string): string | undefined {
   if (!protoRegistry.isLoaded()) return undefined;
 
   // 去掉数组下标：items[0].id → items.id
@@ -269,14 +290,15 @@ function formatFieldType(field: ProtoField): string {
   if (field.kind === 'map') {
     const valName = field.messageName
       ? field.messageName.split('.').pop()!
-      : field.mapValue ?? field.type;
+      : (field.mapValue ?? field.type);
     return `map<${field.mapKey}, ${valName}>`;
   }
-  const baseName = field.kind === 'message'
-    ? field.messageName?.split('.').pop() ?? field.type
-    : field.kind === 'enum'
-      ? field.enumName?.split('.').pop() ?? field.type
-      : field.type;
+  const baseName =
+    field.kind === 'message'
+      ? (field.messageName?.split('.').pop() ?? field.type)
+      : field.kind === 'enum'
+        ? (field.enumName?.split('.').pop() ?? field.type)
+        : field.type;
   return field.repeated ? `${baseName}[]` : baseName;
 }
 

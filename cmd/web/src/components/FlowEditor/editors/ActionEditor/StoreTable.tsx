@@ -6,7 +6,12 @@
  */
 
 import { Button, Collapse, Space, Tag, Tooltip } from 'antd';
-import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import type { CollapseProps } from 'antd';
 import type { StoreMapping } from '@/types/action';
 import { ProtoPathInput } from './ProtoPathInput';
@@ -105,13 +110,18 @@ export function StoreTable({ s2cProto, value, onChange, label }: StoreTableProps
 
   return (
     <div style={{ paddingLeft: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <strong>{label ?? 'store'} ({list.length})</strong>
-        <Button
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={() => set([...list, { setter: '' }])}
-        >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
+        <strong>
+          {label ?? 'store'} ({list.length})
+        </strong>
+        <Button size="small" icon={<PlusOutlined />} onClick={() => set([...list, { setter: '' }])}>
           添加映射
         </Button>
       </div>

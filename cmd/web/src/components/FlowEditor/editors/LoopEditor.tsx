@@ -21,10 +21,7 @@ export function LoopEditor({ nodeId }: LoopEditorProps) {
 
   return (
     <Form layout="vertical">
-      <Form.Item
-        label="循环次数 loopCount"
-        help="<0 = 无限循环；=0 = 跳过循环体；>0 = 固定次数"
-      >
+      <Form.Item label="循环次数 loopCount" help="<0 = 无限循环；=0 = 跳过循环体；>0 = 固定次数">
         <InputNumber
           value={node.loopCount ?? -1}
           onChange={(v) => updateNode(nodeId, { loopCount: (v as number) ?? -1 })}
@@ -45,7 +42,14 @@ export function LoopEditor({ nodeId }: LoopEditorProps) {
         label="前置条件 condition"
         help={hasCondition ? '每次迭代开始前求值，false 退出循环' : '未启用，每次迭代不判断'}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: hasCondition ? 8 : 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: hasCondition ? 8 : 0,
+          }}
+        >
           <Switch
             size="small"
             checked={hasCondition}
@@ -67,7 +71,14 @@ export function LoopEditor({ nodeId }: LoopEditorProps) {
         label="后置条件 breakCondition"
         help={hasBreakCondition ? '每次迭代结束后求值，true 退出循环' : '未启用，每次迭代不判断'}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: hasBreakCondition ? 8 : 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: hasBreakCondition ? 8 : 0,
+          }}
+        >
           <Switch
             size="small"
             checked={hasBreakCondition}

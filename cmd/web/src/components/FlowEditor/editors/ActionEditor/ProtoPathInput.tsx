@@ -20,9 +20,25 @@ interface Option {
 }
 
 function shortType(type: string): string {
-  if (['string', 'int32', 'int64', 'uint32', 'uint64', 'sint32', 'sint64',
-       'fixed32', 'fixed64', 'sfixed32', 'sfixed64', 'float', 'double',
-       'bool', 'bytes'].includes(type)) {
+  if (
+    [
+      'string',
+      'int32',
+      'int64',
+      'uint32',
+      'uint64',
+      'sint32',
+      'sint64',
+      'fixed32',
+      'fixed64',
+      'sfixed32',
+      'sfixed64',
+      'float',
+      'double',
+      'bool',
+      'bytes',
+    ].includes(type)
+  ) {
     return type;
   }
   return type.split('.').pop() ?? type;
@@ -51,11 +67,24 @@ export function ProtoPathInput({
         return {
           value: f.name,
           label: (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%' }}>
-              <span>{f.name}{f.repeated ? '[]' : ''}</span>
+            <span
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%' }}
+            >
+              <span>
+                {f.name}
+                {f.repeated ? '[]' : ''}
+              </span>
               <span style={{ fontSize: 10, color: 'var(--text-terti)' }}>{typeLabel}</span>
               {f.comment && (
-                <span style={{ fontSize: 10, color: 'var(--text-quaternary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--text-quaternary)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   — {f.comment}
                 </span>
               )}
@@ -93,7 +122,7 @@ export function ProtoPathInput({
           if (!selectedOptions || selectedOptions.length === 0) return;
           const dataPathParts = selectedOptions.map((opt, index) => {
             const isLast = index === selectedOptions.length - 1;
-            return (opt.isRepeated && !isLast) ? `${opt.value}[0]` : String(opt.value);
+            return opt.isRepeated && !isLast ? `${opt.value}[0]` : String(opt.value);
           });
           onChange?.(dataPathParts.join('.'));
         }}

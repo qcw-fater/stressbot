@@ -17,7 +17,13 @@ import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
 import { getCapabilities } from './capabilitiesApi';
-import { listProto, listScript, listCodecFiles, getErrorMap, markResourcesAsBaselineSynced } from './resourcesStore';
+import {
+  listProto,
+  listScript,
+  listCodecFiles,
+  getErrorMap,
+  markResourcesAsBaselineSynced,
+} from './resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
 import { syncProtosToIdb, missingProtoImports } from './protoSync';
 import { collectFlowCodecConnections, findMissingCodecConnections } from './taskResourceDiff';
@@ -37,9 +43,7 @@ const SHARE_REQUIRE_RE = /require\s*\(?\s*['"]share['"]/;
  * 仅做前端预检，最终以服务端检测为准，因此实现保持轻量。
  */
 function stripLuaComments(content: string): string {
-  return content
-    .replace(/--\[(=*)\[[\s\S]*?\]\1\]/g, ' ')
-    .replace(/--[^\n]*/g, ' ');
+  return content.replace(/--\[(=*)\[[\s\S]*?\]\1\]/g, ' ').replace(/--[^\n]*/g, ' ');
 }
 
 /** 脚本内容里是否使用了共享状态模块。 */
@@ -147,7 +151,12 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     );
   }
 
-  const [protos, scripts, codecs, errorMapRes] = await Promise.all([listProto(), listScript(), listCodecFiles(), getErrorMap()]);
+  const [protos, scripts, codecs, errorMapRes] = await Promise.all([
+    listProto(),
+    listScript(),
+    listCodecFiles(),
+    getErrorMap(),
+  ]);
 
   // proto 依赖完整性校验：任一 import 目标不在本地集合即残缺，硬拦截。
   // 避免把缺依赖的任务下发到 Agent 才编译失败（如 custom_activity.proto 找不到 custom_task.proto）。
@@ -215,7 +224,8 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
       throw new ApiError(
         {
           code: 'SHARED_STATE_UNAVAILABLE',
-          message: '该流程使用共享状态，但服务器未配置 Redis。请先在服务器配置中启用共享状态后再启动。',
+          message:
+            '该流程使用共享状态，但服务器未配置 Redis。请先在服务器配置中启用共享状态后再启动。',
         },
         400,
       );
@@ -253,7 +263,11 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   fd.append('robotConfig', JSON.stringify(opts.robotConfig));
   if (opts.deadline) fd.append('deadline', opts.deadline);
   if (opts.flowTemplateId) fd.append('flowTemplateId', opts.flowTemplateId);
-  fd.append('flow.json', new Blob([JSON.stringify(flowJson, null, 2)], { type: 'application/json' }), 'flow.json');
+  fd.append(
+    'flow.json',
+    new Blob([JSON.stringify(flowJson, null, 2)], { type: 'application/json' }),
+    'flow.json',
+  );
   for (const f of protos) {
     fd.append(`proto/${f.name}`, new Blob([f.content], { type: 'text/plain' }), f.name);
   }
@@ -265,7 +279,11 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   }
   const errorMapContent = errorMapRes?.content ?? null;
   if (errorMapContent) {
-    fd.append('adapter/errors.json', new Blob([errorMapContent], { type: 'application/json' }), 'errors.json');
+    fd.append(
+      'adapter/errors.json',
+      new Blob([errorMapContent], { type: 'application/json' }),
+      'errors.json',
+    );
   }
 
   // 5. 提交。createTask 成功后服务器已写回 conf/ 基线，立即标记本次上传资源为新基线。
@@ -311,7 +329,8 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
  * 没有则跳过即时更新，靠轮询补齐。
  */
 export async function stopTask(taskId?: string): Promise<TaskBrief | null> {
-  const id = taskId ?? useRuntimeStore.getState().ownedTaskId ?? useRuntimeStore.getState().activeTask?.id;
+  const id =
+    taskId ?? useRuntimeStore.getState().ownedTaskId ?? useRuntimeStore.getState().activeTask?.id;
   if (!id) {
     throw new Error('当前没有可停止的任务');
   }
@@ -370,7 +389,6 @@ export async function attachToActive(taskId: string): Promise<void> {
   // proto 资源同步：留给后续，proto 是按 messageType 名引用的，无法从 flow 静态推断
   // 应该带哪些 .proto 文件；用户需主动到「资源管理」上传。
   void useProtoStore.getState();
-
 }
 
 /**
@@ -431,4 +449,3 @@ export function hasStashedDraft(): boolean {
     return false;
   }
 }
-

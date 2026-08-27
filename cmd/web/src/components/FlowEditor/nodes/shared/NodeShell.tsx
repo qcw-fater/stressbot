@@ -94,30 +94,21 @@ export function NodeShell({
           }
           placement="top"
         >
-          <div
-            className="node-issue-badge"
-            data-severity={errCount > 0 ? 'error' : 'warning'}
-          >
+          <div className="node-issue-badge" data-severity={errCount > 0 ? 'error' : 'warning'}>
             {errCount > 0 ? '!' : '?'}
           </div>
         </Tooltip>
       )}
       {executing > 0 && (
         <Tooltip title={`当前正在执行：${executing} 个机器人`} placement="top">
-          <div className="node-executing-badge">
-            {executing}
-          </div>
+          <div className="node-executing-badge">{executing}</div>
         </Tooltip>
       )}
       <div className="node-header">
         <span className="node-title">{title}</span>
         {subtitle && <span className="node-subtitle">{subtitle}</span>}
       </div>
-      {description && (
-        <div className="node-description">
-          {description}
-        </div>
-      )}
+      {description && <div className="node-description">{description}</div>}
       {children && <div className="node-body">{children}</div>}
       <MetricsBadge metric={metrics} />
     </div>

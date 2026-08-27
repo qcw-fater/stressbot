@@ -36,7 +36,12 @@ const DEFAULT_KEYS: StateKeyInfo[] = [
   { key: 'index', sourceType: 'builtin', sourceName: '内置', builtinType: 'int' },
   { key: 'account', sourceType: 'builtin', sourceName: '内置', builtinType: 'string' },
   { key: 'battleId', sourceType: 'store', sourceName: 'loginResp', s2cProto: 'Game.LoginResp' },
-  { key: 'battleSession', sourceType: 'store', sourceName: 'matchResp', s2cProto: 'Game.MatchResp' },
+  {
+    key: 'battleSession',
+    sourceType: 'store',
+    sourceName: 'matchResp',
+    s2cProto: 'Game.MatchResp',
+  },
 ];
 
 describe('ClearStateEditor', () => {
@@ -47,7 +52,15 @@ describe('ClearStateEditor', () => {
   /** 受控多选 Harness：用 state 回写 value，同时把每次 onChange 透传给 spy 便于断言顺序。 */
   function SelectionHarness({ spy }: { spy: (keys: string[]) => void }) {
     const [value, setValue] = useState<string[]>([]);
-    return <ClearStateEditor value={value} onChange={(next) => { setValue(next); spy(next); }} />;
+    return (
+      <ClearStateEditor
+        value={value}
+        onChange={(next) => {
+          setValue(next);
+          spy(next);
+        }}
+      />
+    );
   }
 
   it.each(['id', 'index', 'account'])('内置状态 %s 可见但禁用且不可选中', async (key) => {
@@ -95,8 +108,9 @@ describe('ClearStateEditor', () => {
     expect(onChange).toHaveBeenLastCalledWith([]);
     await user.click(screen.getByRole('combobox'));
     // 直接断言真实候选项文本中不含未知 key
-    const optionTexts = Array.from(document.querySelectorAll('.ant-select-item-option'))
-      .map((o) => o.textContent || '');
+    const optionTexts = Array.from(document.querySelectorAll('.ant-select-item-option')).map(
+      (o) => o.textContent || '',
+    );
     expect(optionTexts.some((t) => t.includes('legacyBattle'))).toBe(false);
   });
 

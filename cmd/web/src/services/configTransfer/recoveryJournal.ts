@@ -25,7 +25,10 @@ export interface RecoveryJournal {
   pendingRollback: BackupSection[];
 }
 
-interface LegacyRecoveryJournal extends Omit<RecoveryJournal, 'version' | 'mode' | 'versionedBefore' | 'afterFingerprints' | 'appliedRevisions'> {
+interface LegacyRecoveryJournal extends Omit<
+  RecoveryJournal,
+  'version' | 'mode' | 'versionedBefore' | 'afterFingerprints' | 'appliedRevisions'
+> {
   flowBefore?: { revision: string; items: unknown };
   flowAfterFingerprint?: string;
   flowAppliedRevision?: string;
@@ -75,9 +78,10 @@ export interface RecoveryJournalStore {
 }
 
 export const recoveryJournal: RecoveryJournalStore = {
-  load: () => get<unknown>(ACTIVE_KEY, recoveryStore).then((value) => (
-    value === undefined ? null : normalizeRecoveryJournal(value)
-  )),
+  load: () =>
+    get<unknown>(ACTIVE_KEY, recoveryStore).then((value) =>
+      value === undefined ? null : normalizeRecoveryJournal(value),
+    ),
   save: (value) => set(ACTIVE_KEY, value, recoveryStore),
   clear: () => del(ACTIVE_KEY, recoveryStore),
 };

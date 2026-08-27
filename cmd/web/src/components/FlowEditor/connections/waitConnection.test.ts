@@ -21,7 +21,11 @@ describe('resolveWaitConnection', () => {
   });
 
   it('ignores other node types and handles', () => {
-    expect(resolveWaitConnection({ type: 'action' }, 'action', 'out', 'after')).toEqual({ matched: false });
-    expect(resolveWaitConnection({ type: 'wait', waitMs: 10 }, 'wait', 'in', 'after')).toEqual({ matched: false });
+    expect(resolveWaitConnection({ type: 'action' }, 'action', 'out', 'after')).toEqual({
+      matched: false,
+    });
+    expect(resolveWaitConnection({ type: 'wait', waitMs: 10 }, 'wait', 'in', 'after')).toEqual({
+      matched: false,
+    });
   });
 });

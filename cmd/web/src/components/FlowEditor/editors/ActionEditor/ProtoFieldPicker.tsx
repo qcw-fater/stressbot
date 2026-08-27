@@ -53,7 +53,15 @@ export function ProtoFieldPicker({
           {f.kind === 'map' ? `map<${f.mapKey},${f.mapValue}>` : f.type}
         </Tag>
         {f.comment && (
-          <span style={{ fontSize: 10, color: 'var(--text-quaternary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--text-quaternary)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {f.comment}
           </span>
         )}

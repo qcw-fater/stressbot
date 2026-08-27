@@ -228,9 +228,7 @@ describe('section validation', () => {
       updatedAt: 10,
     };
 
-    expect(() =>
-      registry.actionTemplates.validate([{ ...action, id: 'x'.repeat(33) }]),
-    ).toThrow();
+    expect(() => registry.actionTemplates.validate([{ ...action, id: 'x'.repeat(33) }])).toThrow();
     expect(() =>
       registry.actionTemplates.validate([{ ...action, name: 'x'.repeat(81) }]),
     ).toThrow();
@@ -401,25 +399,33 @@ describe('section IO and backup parsing', () => {
       idPolicy: 'generate-missing',
       items: [generated],
     });
-    expect(merged?.value[0]).toMatchObject({ id: 'server-listen-0', createdAt: 200, updatedAt: 201 });
+    expect(merged?.value[0]).toMatchObject({
+      id: 'server-listen-0',
+      createdAt: 200,
+      updatedAt: 201,
+    });
   });
 
   it('合并恢复指纹忽略服务器生成的身份，完整恢复指纹保留全部元数据', () => {
     const registry = createSectionRegistry(dependencies());
-    const planned: ActionTemplate[] = [{
-      id: '',
-      name: '登录',
-      pattern: 'setState',
-      data: { pattern: 'setState' },
-      createdAt: 0,
-      updatedAt: 0,
-    }];
-    const persisted: ActionTemplate[] = [{
-      ...planned[0],
-      id: 'server-generated',
-      createdAt: 100,
-      updatedAt: 101,
-    }];
+    const planned: ActionTemplate[] = [
+      {
+        id: '',
+        name: '登录',
+        pattern: 'setState',
+        data: { pattern: 'setState' },
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ];
+    const persisted: ActionTemplate[] = [
+      {
+        ...planned[0],
+        id: 'server-generated',
+        createdAt: 100,
+        updatedAt: 101,
+      },
+    ];
     const fingerprint = registry.actionTemplates.versioned?.fingerprint;
 
     expect(fingerprint?.(planned, 'merge')).toBe(fingerprint?.(persisted, 'merge'));

@@ -4,8 +4,14 @@
 
 import { create } from 'zustand';
 
-export interface WindowPosition { x: number; y: number }
-export interface WindowSize { width: number; height: number }
+export interface WindowPosition {
+  x: number;
+  y: number;
+}
+export interface WindowSize {
+  width: number;
+  height: number;
+}
 
 export interface WindowState {
   id: string;
@@ -19,11 +25,7 @@ interface FloatingWindowStore {
   /** 单调递增的 zIndex 计数器 */
   _nextZ: number;
 
-  openWindow: (
-    id: string,
-    defaultSize: WindowSize,
-    defaultPosition?: WindowPosition,
-  ) => void;
+  openWindow: (id: string, defaultSize: WindowSize, defaultPosition?: WindowPosition) => void;
   closeWindow: (id: string) => void;
   closeAllWindows: () => void;
   focusWindow: (id: string) => void;
@@ -146,7 +148,12 @@ export const useFloatingWindowStore = create<FloatingWindowStore>()((set, get) =
       for (const [id, w] of entries) {
         const size = clampSize(w.size);
         const position = clampPosition(w.position, size);
-        if (size.width !== w.size.width || size.height !== w.size.height || position.x !== w.position.x || position.y !== w.position.y) {
+        if (
+          size.width !== w.size.width ||
+          size.height !== w.size.height ||
+          position.x !== w.position.x ||
+          position.y !== w.position.y
+        ) {
           changed = true;
         }
         windows[id] = { ...w, size, position };

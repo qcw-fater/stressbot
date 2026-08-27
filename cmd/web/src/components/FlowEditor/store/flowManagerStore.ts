@@ -40,7 +40,8 @@ export const FLOW_NAME_MAX_LENGTH = 80;
 function normalizeFlowName(name: string): string {
   const nextName = name.trim();
   if (!nextName) throw new Error('流程名称不能为空');
-  if (nextName.length > FLOW_NAME_MAX_LENGTH) throw new Error(`流程名称不能超过 ${FLOW_NAME_MAX_LENGTH} 个字符`);
+  if (nextName.length > FLOW_NAME_MAX_LENGTH)
+    throw new Error(`流程名称不能超过 ${FLOW_NAME_MAX_LENGTH} 个字符`);
   return nextName;
 }
 

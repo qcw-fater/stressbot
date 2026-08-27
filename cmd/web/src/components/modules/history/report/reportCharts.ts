@@ -15,11 +15,12 @@ import {
   TooltipComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import type { DefaultLabelFormatterCallbackParams, EChartsOption, GraphicComponentOption } from 'echarts';
 import type {
-  HistoryActionMetric,
-  HistoryTrendPoint,
-} from '@/types/api';
+  DefaultLabelFormatterCallbackParams,
+  EChartsOption,
+  GraphicComponentOption,
+} from 'echarts';
+import type { HistoryActionMetric, HistoryTrendPoint } from '@/types/api';
 import { classifyApdex } from '@/services/metricsBinding';
 import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
 
@@ -37,11 +38,7 @@ echarts.use([
 
 /* ── 离屏渲染工具 ── */
 
-export function captureChartAsPng(
-  option: EChartsOption,
-  width: number,
-  height: number,
-): string {
+export function captureChartAsPng(option: EChartsOption, width: number, height: number): string {
   const canvas = document.createElement('canvas');
   const chart = echarts.init(canvas as unknown as HTMLElement, undefined, {
     width,
@@ -71,9 +68,7 @@ const COLORS = {
 
 /* ── 1. QPS 趋势 ── */
 
-export function buildQpsTrendOption(
-  points: HistoryTrendPoint[],
-): EChartsOption | null {
+export function buildQpsTrendOption(points: HistoryTrendPoint[]): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -89,24 +84,24 @@ export function buildQpsTrendOption(
       axisLabel: { fontSize: 10, hideOverlap: true },
     },
     yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-    series: [{
-      name: 'QPS',
-      type: 'line',
-      smooth: true,
-      symbol: 'none',
-      data,
-      itemStyle: { color: COLORS.blue },
-      areaStyle: { opacity: 0.08 },
-      lineStyle: { width: 2 },
-    }],
+    series: [
+      {
+        name: 'QPS',
+        type: 'line',
+        smooth: true,
+        symbol: 'none',
+        data,
+        itemStyle: { color: COLORS.blue },
+        areaStyle: { opacity: 0.08 },
+        lineStyle: { width: 2 },
+      },
+    ],
   };
 }
 
 /* ── 2. Apdex 趋势 ── */
 
-export function buildApdexTrendOption(
-  points: HistoryTrendPoint[],
-): EChartsOption | null {
+export function buildApdexTrendOption(points: HistoryTrendPoint[]): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -120,7 +115,9 @@ export function buildApdexTrendOption(
       smooth: true,
       symbol: 'none',
       connectNulls: false,
-      data: points.map((p) => p.rttApdex !== null && Number.isFinite(p.rttApdex) ? p.rttApdex : null),
+      data: points.map((p) =>
+        p.rttApdex !== null && Number.isFinite(p.rttApdex) ? p.rttApdex : null,
+      ),
       itemStyle: { color: COLORS.red },
       areaStyle: { opacity: 0.08 },
       lineStyle: { width: 2 },
@@ -144,9 +141,7 @@ export function buildApdexTrendOption(
 
 /* ── 3. CPU 趋势 ── */
 
-export function buildCpuTrendOption(
-  points: HistoryTrendPoint[],
-): EChartsOption | null {
+export function buildCpuTrendOption(points: HistoryTrendPoint[]): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -162,24 +157,24 @@ export function buildCpuTrendOption(
       axisLabel: { fontSize: 10, hideOverlap: true },
     },
     yAxis: { type: 'value', max: 100, axisLabel: { fontSize: 10 } },
-    series: [{
-      name: 'CPU%',
-      type: 'line',
-      smooth: true,
-      symbol: 'none',
-      data,
-      itemStyle: { color: COLORS.orange },
-      areaStyle: { opacity: 0.08 },
-      lineStyle: { width: 2 },
-    }],
+    series: [
+      {
+        name: 'CPU%',
+        type: 'line',
+        smooth: true,
+        symbol: 'none',
+        data,
+        itemStyle: { color: COLORS.orange },
+        areaStyle: { opacity: 0.08 },
+        lineStyle: { width: 2 },
+      },
+    ],
   };
 }
 
 /* ── 4. 带宽趋势 ── */
 
-export function buildBwTrendOption(
-  points: HistoryTrendPoint[],
-): EChartsOption | null {
+export function buildBwTrendOption(points: HistoryTrendPoint[]): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -229,20 +224,18 @@ export function buildBwTrendOption(
 
 /* ── 5. 动作性能排行（p99 水平条形图） ── */
 
-export function buildRankingOption(
-  actions: HistoryActionMetric[],
-): EChartsOption | null {
+export function buildRankingOption(actions: HistoryActionMetric[]): EChartsOption | null {
   const top = [...actions]
-    .filter((a) => !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 && a.rtt.p99Ms != null)
+    .filter(
+      (a) => !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 && a.rtt.p99Ms != null,
+    )
     .sort((a, b) => (a.rtt.p99Ms ?? -1) - (b.rtt.p99Ms ?? -1))
     .slice(-15);
   if (top.length === 0) return null;
 
-  const names = top.map((a) => a.name.length > 22 ? a.name.slice(0, 20) + '…' : a.name);
+  const names = top.map((a) => (a.name.length > 22 ? a.name.slice(0, 20) + '…' : a.name));
   const values = top.map((a) => a.rtt.p99Ms!);
-  const colors = values.map((v) =>
-    v < 100 ? COLORS.green : v < 500 ? COLORS.yellow : COLORS.red,
-  );
+  const colors = values.map((v) => (v < 100 ? COLORS.green : v < 500 ? COLORS.yellow : COLORS.red));
 
   return {
     animation: false,
@@ -254,38 +247,43 @@ export function buildRankingOption(
       data: names,
       axisLabel: { fontSize: 10, width: 140, overflow: 'truncate' },
     },
-    series: [{
-      type: 'bar',
-      data: values.map((v, i) => ({
-        value: v,
-        itemStyle: { color: colors[i] },
-      })),
-      barMaxWidth: 18,
-      label: {
-        show: true,
-        position: 'right',
-        fontSize: 10,
-        formatter: (p: DefaultLabelFormatterCallbackParams) => `${formatterNumber(p.value).toFixed(0)}ms`,
+    series: [
+      {
+        type: 'bar',
+        data: values.map((v, i) => ({
+          value: v,
+          itemStyle: { color: colors[i] },
+        })),
+        barMaxWidth: 18,
+        label: {
+          show: true,
+          position: 'right',
+          fontSize: 10,
+          formatter: (p: DefaultLabelFormatterCallbackParams) =>
+            `${formatterNumber(p.value).toFixed(0)}ms`,
+        },
       },
-    }],
+    ],
   };
 }
 
 /* ── 6. 延迟分布（分组柱状图） ── */
 
-export function buildLatencyOption(
-  actions: HistoryActionMetric[],
-): EChartsOption | null {
+export function buildLatencyOption(actions: HistoryActionMetric[]): EChartsOption | null {
   const top = [...actions]
-    .filter((a) =>
-      !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 &&
-      a.rtt.p50Ms != null && a.rtt.p95Ms != null && a.rtt.p99Ms != null,
+    .filter(
+      (a) =>
+        !a.name.startsWith('callback:') &&
+        (a.rttSampleCount ?? 0) > 0 &&
+        a.rtt.p50Ms != null &&
+        a.rtt.p95Ms != null &&
+        a.rtt.p99Ms != null,
     )
     .sort((a, b) => (b.rtt.p99Ms ?? -1) - (a.rtt.p99Ms ?? -1))
     .slice(0, 10);
   if (top.length === 0) return null;
 
-  const names = top.map((a) => a.name.length > 16 ? a.name.slice(0, 14) + '…' : a.name);
+  const names = top.map((a) => (a.name.length > 16 ? a.name.slice(0, 14) + '…' : a.name));
 
   return {
     animation: false,
@@ -295,19 +293,37 @@ export function buildLatencyOption(
     xAxis: { type: 'category', data: names, axisLabel: { fontSize: 9, rotate: 20 } },
     yAxis: { type: 'value', name: 'ms', axisLabel: { fontSize: 10 } },
     series: [
-      { name: 'p50', type: 'bar', data: top.map((a) => a.rtt.p50Ms!), itemStyle: { color: COLORS.green }, barMaxWidth: 14 },
-      { name: 'p95', type: 'bar', data: top.map((a) => a.rtt.p95Ms!), itemStyle: { color: COLORS.yellow }, barMaxWidth: 14 },
-      { name: 'p99', type: 'bar', data: top.map((a) => a.rtt.p99Ms!), itemStyle: { color: COLORS.red }, barMaxWidth: 14 },
+      {
+        name: 'p50',
+        type: 'bar',
+        data: top.map((a) => a.rtt.p50Ms!),
+        itemStyle: { color: COLORS.green },
+        barMaxWidth: 14,
+      },
+      {
+        name: 'p95',
+        type: 'bar',
+        data: top.map((a) => a.rtt.p95Ms!),
+        itemStyle: { color: COLORS.yellow },
+        barMaxWidth: 14,
+      },
+      {
+        name: 'p99',
+        type: 'bar',
+        data: top.map((a) => a.rtt.p99Ms!),
+        itemStyle: { color: COLORS.red },
+        barMaxWidth: 14,
+      },
     ],
   };
 }
 
 /* ── 7. 成功/失败构成（环形图） ── */
 
-export function buildSuccessDonutOption(
-  actions: HistoryActionMetric[],
-): EChartsOption {
-  let success = 0, failure = 0, timeout = 0;
+export function buildSuccessDonutOption(actions: HistoryActionMetric[]): EChartsOption {
+  let success = 0,
+    failure = 0,
+    timeout = 0;
   for (const a of actions) {
     success += a.successCount;
     failure += a.failureCount;
@@ -319,40 +335,48 @@ export function buildSuccessDonutOption(
     animation: false,
     tooltip: { trigger: 'item', textStyle: { fontSize: 11 } },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    series: [{
-      type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['50%', '45%'],
-      avoidLabelOverlap: true,
-      label: { show: true, fontSize: 11, formatter: '{b}: {d}%' },
-      data: [
-        { value: success, name: '成功', itemStyle: { color: COLORS.green } },
-        { value: failure, name: '失败', itemStyle: { color: COLORS.red } },
-        { value: timeout, name: '超时', itemStyle: { color: COLORS.orange } },
-      ].filter((d) => d.value > 0),
-    }],
-    graphic: total > 0 ? [{
-      type: 'text',
-      left: 'center',
-      top: '38%',
-      style: {
-        text: total.toLocaleString(),
-        fontSize: 16,
-        fontWeight: 700,
-        fill: '#1a1a1a',
-        align: 'center' as const,
+    series: [
+      {
+        type: 'pie',
+        radius: ['40%', '70%'],
+        center: ['50%', '45%'],
+        avoidLabelOverlap: true,
+        label: { show: true, fontSize: 11, formatter: '{b}: {d}%' },
+        data: [
+          { value: success, name: '成功', itemStyle: { color: COLORS.green } },
+          { value: failure, name: '失败', itemStyle: { color: COLORS.red } },
+          { value: timeout, name: '超时', itemStyle: { color: COLORS.orange } },
+        ].filter((d) => d.value > 0),
       },
-    }, {
-      type: 'text',
-      left: 'center',
-      top: '50%',
-      style: {
-        text: '总样本',
-        fontSize: 10,
-        fill: '#8c8c8c',
-        align: 'center' as const,
-      },
-    }] as GraphicComponentOption[] : [],
+    ],
+    graphic:
+      total > 0
+        ? ([
+            {
+              type: 'text',
+              left: 'center',
+              top: '38%',
+              style: {
+                text: total.toLocaleString(),
+                fontSize: 16,
+                fontWeight: 700,
+                fill: '#1a1a1a',
+                align: 'center' as const,
+              },
+            },
+            {
+              type: 'text',
+              left: 'center',
+              top: '50%',
+              style: {
+                text: '总样本',
+                fontSize: 10,
+                fill: '#8c8c8c',
+                align: 'center' as const,
+              },
+            },
+          ] as GraphicComponentOption[])
+        : [],
   };
 }
 
@@ -367,16 +391,19 @@ const APDEX_COLORS: Record<string, string> = {
   unknown: COLORS.lightGray,
 };
 
-export function buildApdexOption(
-  actions: HistoryActionMetric[],
-): EChartsOption | null {
+export function buildApdexOption(actions: HistoryActionMetric[]): EChartsOption | null {
   // 只排往返类：其余类别没有 Apdex，混进来会以 0 分霸占「最差」的位置。
   const sorted = [...actions]
-    .filter((a) => !a.name.startsWith('callback:') && resolveKind(a) === 'networked' && (a.rttSampleCount ?? 0) > 0)
+    .filter(
+      (a) =>
+        !a.name.startsWith('callback:') &&
+        resolveKind(a) === 'networked' &&
+        (a.rttSampleCount ?? 0) > 0,
+    )
     .sort((a, b) => a.rttApdex - b.rttApdex);
   if (sorted.length === 0) return null;
 
-  const names = sorted.map((a) => a.name.length > 18 ? a.name.slice(0, 16) + '…' : a.name);
+  const names = sorted.map((a) => (a.name.length > 18 ? a.name.slice(0, 16) + '…' : a.name));
 
   return {
     animation: false,
@@ -384,19 +411,25 @@ export function buildApdexOption(
     grid: { left: 50, right: 20, top: 16, bottom: 28 },
     xAxis: { type: 'category', data: names, axisLabel: { fontSize: 9, rotate: 20 } },
     yAxis: { type: 'value', max: 1, min: 0, axisLabel: { fontSize: 10 } },
-    series: [{
-      type: 'bar',
-      data: sorted.map((a) => ({
-        value: a.rttApdex,
-        itemStyle: { color: APDEX_COLORS[classifyApdex(a.rttApdex)] },
-      })),
-      barMaxWidth: 24,
-    }],
+    series: [
+      {
+        type: 'bar',
+        data: sorted.map((a) => ({
+          value: a.rttApdex,
+          itemStyle: { color: APDEX_COLORS[classifyApdex(a.rttApdex)] },
+        })),
+        barMaxWidth: 24,
+      },
+    ],
     markLine: {
       silent: true,
       lineStyle: { type: 'dashed' },
       data: [
-        { yAxis: 0.94, label: { formatter: 'excellent', fontSize: 9 }, lineStyle: { color: COLORS.green } },
+        {
+          yAxis: 0.94,
+          label: { formatter: 'excellent', fontSize: 9 },
+          lineStyle: { color: COLORS.green },
+        },
         { yAxis: 0.85, label: { formatter: 'good', fontSize: 9 }, lineStyle: { color: '#bae637' } },
       ],
     },
@@ -405,9 +438,7 @@ export function buildApdexOption(
 
 /* ── 9. 错误分布（环形图） ── */
 
-export function buildErrorOption(
-  actions: HistoryActionMetric[],
-): EChartsOption | null {
+export function buildErrorOption(actions: HistoryActionMetric[]): EChartsOption | null {
   const errorMap = new Map<string, { count: number; label: string }>();
   for (const a of actions) {
     for (const e of a.errors ?? []) {
@@ -423,40 +454,49 @@ export function buildErrorOption(
   }
   if (errorMap.size === 0) return null;
 
-  const sorted = [...errorMap.entries()]
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 8);
+  const sorted = [...errorMap.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 8);
 
-  const errorColors = ['#f5222d', '#fa541c', '#fa8c16', '#faad14', '#fadb14', '#d48806', '#ad6800', '#874d00'];
+  const errorColors = [
+    '#f5222d',
+    '#fa541c',
+    '#fa8c16',
+    '#faad14',
+    '#fadb14',
+    '#d48806',
+    '#ad6800',
+    '#874d00',
+  ];
 
   return {
     animation: false,
     tooltip: { trigger: 'item', textStyle: { fontSize: 11 } },
-    series: [{
-      type: 'pie',
-      radius: ['30%', '65%'],
-      center: ['50%', '50%'],
-      label: {
-        show: true,
-        fontSize: 10,
-        formatter: (p: DefaultLabelFormatterCallbackParams) => {
-          const name = p.name.length > 20 ? p.name.slice(0, 18) + '…' : p.name;
-          const percent = 'percent' in p && typeof p.percent === 'number' ? p.percent : 0;
-          return `{cnt|×${formatterNumber(p.value)}}  {name|${name}}\n{pct|${percent}%}`;
+    series: [
+      {
+        type: 'pie',
+        radius: ['30%', '65%'],
+        center: ['50%', '50%'],
+        label: {
+          show: true,
+          fontSize: 10,
+          formatter: (p: DefaultLabelFormatterCallbackParams) => {
+            const name = p.name.length > 20 ? p.name.slice(0, 18) + '…' : p.name;
+            const percent = 'percent' in p && typeof p.percent === 'number' ? p.percent : 0;
+            return `{cnt|×${formatterNumber(p.value)}}  {name|${name}}\n{pct|${percent}%}`;
+          },
+          rich: {
+            cnt: { fontSize: 10, fontWeight: 700, color: '#cf1322', lineHeight: 16 },
+            name: { fontSize: 10, color: '#333', lineHeight: 16 },
+            pct: { fontSize: 9, color: '#8c8c8c', lineHeight: 14 },
+          },
         },
-        rich: {
-          cnt: { fontSize: 10, fontWeight: 700, color: '#cf1322', lineHeight: 16 },
-          name: { fontSize: 10, color: '#333', lineHeight: 16 },
-          pct: { fontSize: 9, color: '#8c8c8c', lineHeight: 14 },
-        },
+        labelLayout: { hideOverlap: true },
+        data: sorted.map(([, info], i) => ({
+          value: info.count,
+          name: info.label,
+          itemStyle: { color: errorColors[i % errorColors.length] },
+        })),
       },
-      labelLayout: { hideOverlap: true },
-      data: sorted.map(([, info], i) => ({
-        value: info.count,
-        name: info.label,
-        itemStyle: { color: errorColors[i % errorColors.length] },
-      })),
-    }],
+    ],
   };
 }
 
@@ -483,11 +523,7 @@ export function captureAllCharts(
   actions: HistoryActionMetric[],
   points: HistoryTrendPoint[],
 ): ChartImages {
-  const safeCapture = (
-    fn: () => EChartsOption | null,
-    w: number,
-    h: number,
-  ): string | null => {
+  const safeCapture = (fn: () => EChartsOption | null, w: number, h: number): string | null => {
     const opt = fn();
     if (!opt) return null;
     return captureChartAsPng(opt, w, h);
@@ -501,11 +537,14 @@ export function captureAllCharts(
   const cpu = safeCapture(() => buildCpuTrendOption(points), trendW, trendH);
   const bandwidth = safeCapture(() => buildBwTrendOption(points), trendW, trendH);
 
-  const ranking = safeCapture(() => buildRankingOption(actions), 700, Math.max(200, Math.min(actions.length, 15) * 32));
+  const ranking = safeCapture(
+    () => buildRankingOption(actions),
+    700,
+    Math.max(200, Math.min(actions.length, 15) * 32),
+  );
   const rtt = safeCapture(() => buildLatencyOption(actions), 700, 300);
-  const successDonut = actions.length > 0
-    ? captureChartAsPng(buildSuccessDonutOption(actions), 350, 280)
-    : null;
+  const successDonut =
+    actions.length > 0 ? captureChartAsPng(buildSuccessDonutOption(actions), 350, 280) : null;
   const apdexBar = safeCapture(() => buildApdexOption(actions), 700, 260);
   const errors = safeCapture(() => buildErrorOption(actions), 500, 300);
 

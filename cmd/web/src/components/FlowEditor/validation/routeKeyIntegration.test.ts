@@ -81,7 +81,9 @@ describe('routeKey 集成校验（ROUTEKEY_CODEC_MISSING）', () => {
           listenRefs: [{ server: 'tcp:logic', route: { cmd: 1 }, listen: 'cbA' }],
         },
       },
-      actions: { A1: { pattern: 'tcpSend', service: 'logic', route: { cmd: 1 }, c2sProto: 'X.Foo' } },
+      actions: {
+        A1: { pattern: 'tcpSend', service: 'logic', route: { cmd: 1 }, c2sProto: 'X.Foo' },
+      },
       listens: { cbA: {} },
     };
     const r = validateFlow(flow);

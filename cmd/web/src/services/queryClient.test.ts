@@ -39,7 +39,9 @@ describe('query client', () => {
       queryFn: ({ signal: requestSignal }) => {
         signal = requestSignal;
         return new Promise<never>((_, reject) => {
-          requestSignal.addEventListener('abort', () => reject(new DOMException('已取消', 'AbortError')));
+          requestSignal.addEventListener('abort', () =>
+            reject(new DOMException('已取消', 'AbortError')),
+          );
         });
       },
     });

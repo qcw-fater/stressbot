@@ -4,7 +4,9 @@ export function normalizeOnError(onError: OnErrorDef | undefined): OnErrorDef | 
   if (!onError) return undefined;
   const out: OnErrorDef = {};
 
-  const ignoreCodes = (onError.ignoreCodes ?? []).filter((code) => Number.isInteger(code) && code > 0);
+  const ignoreCodes = (onError.ignoreCodes ?? []).filter(
+    (code) => Number.isInteger(code) && code > 0,
+  );
   if (ignoreCodes.length > 0) out.ignoreCodes = ignoreCodes;
 
   const handler = onError.handler?.trim();
@@ -21,7 +23,9 @@ export function normalizeOnError(onError: OnErrorDef | undefined): OnErrorDef | 
 function normalizeRetry(retry: RetryDef | undefined): RetryDef | undefined {
   if (!retry) return undefined;
   const out: RetryDef = {};
-  if (typeof retry.maxRetries === 'number' && retry.maxRetries > 0) out.maxRetries = retry.maxRetries;
-  if (typeof retry.retryDelayMs === 'number' && retry.retryDelayMs > 0) out.retryDelayMs = retry.retryDelayMs;
+  if (typeof retry.maxRetries === 'number' && retry.maxRetries > 0)
+    out.maxRetries = retry.maxRetries;
+  if (typeof retry.retryDelayMs === 'number' && retry.retryDelayMs > 0)
+    out.retryDelayMs = retry.retryDelayMs;
   return Object.keys(out).length > 0 ? out : undefined;
 }

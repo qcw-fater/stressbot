@@ -12,7 +12,10 @@ describe('JsonDraftInput helpers', () => {
   });
 
   it('parses JSON and empty values in json mode', () => {
-    expect(parseJsonDraftValue('{"a":1}', 'json', undefined)).toEqual({ ok: true, value: { a: 1 } });
+    expect(parseJsonDraftValue('{"a":1}', 'json', undefined)).toEqual({
+      ok: true,
+      value: { a: 1 },
+    });
     expect(parseJsonDraftValue('', 'json', undefined)).toEqual({ ok: true, value: undefined });
   });
 

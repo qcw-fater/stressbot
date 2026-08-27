@@ -91,9 +91,10 @@ export async function syncFlowScriptsToIdb(
         return;
       }
       try {
-        const text = baseUrl === `${BASELINE_PREFIX}/scripts/`
-          ? await fetchBaselineScript(name)
-          : await fetch(baseUrl + encodeURIComponent(name)).then((r) => (r.ok ? r.text() : null));
+        const text =
+          baseUrl === `${BASELINE_PREFIX}/scripts/`
+            ? await fetchBaselineScript(name)
+            : await fetch(baseUrl + encodeURIComponent(name)).then((r) => (r.ok ? r.text() : null));
         if (text === null) {
           missing.push(name);
           return;

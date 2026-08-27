@@ -9,7 +9,9 @@
   font-size: 11px;
   box-shadow: var(--shadow-node);
   cursor: pointer;
-  transition: box-shadow 0.15s ease, transform 0.1s ease;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
 }
 
 .listen-card:hover {
@@ -18,7 +20,9 @@
 
 .listen-card.selected {
   border-width: 2.5px;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-listen) 35%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-listen) 35%, transparent),
+    var(--shadow-node-hover);
 }
 
 /* 标题独占第一行（同 ActionNode：第一行只显示 ID） */
@@ -91,7 +95,6 @@
 }
 
 /* silent 形态：无需特殊弱化，与其他 kind 保持一致 */
-
 
 .card-description {
   font-size: 8px;

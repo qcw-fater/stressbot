@@ -57,12 +57,12 @@ describe('codec round-trip', () => {
     let expectedLoopBody = 0;
     for (const node of Object.values(raw.nodes)) {
       if (node.type === 'sequence') expectedSeq += node.next?.length ?? 0;
-      else if (node.type === 'boolean') expectedBranch += (node.trueNext ? 1 : 0) + (node.falseNext ? 1 : 0);
+      else if (node.type === 'boolean')
+        expectedBranch += (node.trueNext ? 1 : 0) + (node.falseNext ? 1 : 0);
       else if (node.type === 'switch') {
         expectedBranch += (node.cases ?? []).filter((item) => item.next).length;
         expectedBranch += node.defaultNext ? 1 : 0;
-      }
-      else if (node.type === 'weighted') expectedWeight += node.options?.length ?? 0;
+      } else if (node.type === 'weighted') expectedWeight += node.options?.length ?? 0;
       else if (node.type === 'loop' && node.body) expectedLoopBody += 1;
     }
     expect(rfEdges.filter((e) => e.type === 'seq').length).toBe(expectedSeq);
@@ -75,7 +75,15 @@ describe('codec round-trip', () => {
     const exported = flowToJson({
       defaultDelayMs: 1000,
       nodes: {
-        main: { type: 'action', action: 'A1', onError: { strategy: 'abort', ignoreCodes: [1001], retry: { maxRetries: 2, retryDelayMs: 500 } } },
+        main: {
+          type: 'action',
+          action: 'A1',
+          onError: {
+            strategy: 'abort',
+            ignoreCodes: [1001],
+            retry: { maxRetries: 2, retryDelayMs: 500 },
+          },
+        },
       },
       actions: { A1: { pattern: 'clearState', keys: ['x'] } },
       listens: {},
@@ -83,15 +91,31 @@ describe('codec round-trip', () => {
     expect(exported.nodes.main).toEqual({
       type: 'action',
       action: 'A1',
-      onError: { ignoreCodes: [1001], retry: { maxRetries: 2, retryDelayMs: 500 }, strategy: 'abort' },
+      onError: {
+        ignoreCodes: [1001],
+        retry: { maxRetries: 2, retryDelayMs: 500 },
+        strategy: 'abort',
+      },
     });
-    expect('errorStrategy' in (exported.nodes.main as unknown as Record<string, unknown>)).toBe(false);
+    expect('errorStrategy' in (exported.nodes.main as unknown as Record<string, unknown>)).toBe(
+      false,
+    );
   });
 
   it('空 onError 在导出时被裁剪', () => {
     const exported = flowToJson({
       defaultDelayMs: 1000,
-      nodes: { main: { type: 'action', action: 'A1', onError: { strategy: 'resume', retry: { maxRetries: 0, retryDelayMs: 0 }, ignoreCodes: [] } } },
+      nodes: {
+        main: {
+          type: 'action',
+          action: 'A1',
+          onError: {
+            strategy: 'resume',
+            retry: { maxRetries: 0, retryDelayMs: 0 },
+            ignoreCodes: [],
+          },
+        },
+      },
       actions: { A1: { pattern: 'clearState', keys: ['x'] } },
       listens: {},
     });
@@ -106,7 +130,10 @@ describe('codec round-trip', () => {
         act: { type: 'action', action: 'A1', onError: { handler: 'cleanup' } },
         cleanup: { type: 'action', action: 'Cleanup' },
       },
-      actions: { A1: { pattern: 'clearState', keys: ['x'] }, Cleanup: { pattern: 'clearState', keys: ['y'] } },
+      actions: {
+        A1: { pattern: 'clearState', keys: ['x'] },
+        Cleanup: { pattern: 'clearState', keys: ['y'] },
+      },
       listens: {},
     });
     const edge = rfEdges.find((e) => e.type === 'error');
@@ -219,7 +246,13 @@ describe('codec round-trip', () => {
       actions: {
         A1: {
           pattern: 'tcpSend',
-          bindings: [{ type: 'stateRandom', source: 'shopList', filters: [{ path: 'shopData[].ID', op: 'eq', value: 1, mode: 'none' }] }],
+          bindings: [
+            {
+              type: 'stateRandom',
+              source: 'shopList',
+              filters: [{ path: 'shopData[].ID', op: 'eq', value: 1, mode: 'none' }],
+            },
+          ],
         },
       },
       listens: raw.listens,
@@ -261,7 +294,10 @@ describe('codec round-trip', () => {
       listens: raw.listens,
     });
     // 写到系统临时目录，避免翻动仓库内 tracked 文件（非 hermetic 修正）
-    const outPath = path.join(os.tmpdir(), `stressbot-codec-export-${process.pid}-${Date.now()}.json`);
+    const outPath = path.join(
+      os.tmpdir(),
+      `stressbot-codec-export-${process.pid}-${Date.now()}.json`,
+    );
     fs.writeFileSync(outPath, JSON.stringify(exported, null, 2), 'utf-8');
     // 文件能读回
     const reread = JSON.parse(fs.readFileSync(outPath, 'utf-8')) as FlowJson;
@@ -283,7 +319,17 @@ describe('codec round-trip', () => {
               field: 'heroMap',
               type: 'map',
               entries: [
-                { key: 'name', value: { type: 'fixed', value: 'test', field: 'should_be_stripped', storeAs: 'x', condition: 'lua:foo', wrap: true } },
+                {
+                  key: 'name',
+                  value: {
+                    type: 'fixed',
+                    value: 'test',
+                    field: 'should_be_stripped',
+                    storeAs: 'x',
+                    condition: 'lua:foo',
+                    wrap: true,
+                  },
+                },
                 { key: 'level', value: { type: 'randomInt', min: 1, max: 100 } },
               ],
             },

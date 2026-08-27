@@ -50,7 +50,9 @@ export function ActionNode({ id, data, selected }: NodeProps) {
           </Tooltip>
           {onErrorBadges.map((badge) => (
             <Tooltip key={badge.label} title={badge.tooltip}>
-              <span className="onerror-badge" data-tone={badge.tone}>{badge.label}</span>
+              <span className="onerror-badge" data-tone={badge.tone}>
+                {badge.label}
+              </span>
             </Tooltip>
           ))}
           {listens > 0 && (
@@ -61,7 +63,12 @@ export function ActionNode({ id, data, selected }: NodeProps) {
         </div>
       </NodeShell>
       <Handle type="source" position={Position.Right} id="listen" />
-      <Handle type="source" position={Position.Bottom} id="error" style={{ background: 'var(--color-error)' }} />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="error"
+        style={{ background: 'var(--color-error)' }}
+      />
     </>
   );
 }

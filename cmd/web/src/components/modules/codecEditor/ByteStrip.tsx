@@ -94,7 +94,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
   const ticks = rulerTicks(totalBytes);
   const dividers = dividerBytes(totalBytes);
   const selectedRange = selectedIndex !== null ? ranges[selectedIndex] : undefined;
-  const selectedCenter = selectedRange ? selectedRange.start + (selectedRange.end - selectedRange.start) / 2 : null;
+  const selectedCenter = selectedRange
+    ? selectedRange.start + (selectedRange.end - selectedRange.start) / 2
+    : null;
 
   return (
     <div className="byte-bench-ruler">
@@ -126,7 +128,10 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
               );
             })}
             {trailerSize > 0 && (
-              <span className="bs-field-label" style={{ left: pct(headerSize + trailerSize / 2, totalBytes) }}>
+              <span
+                className="bs-field-label"
+                style={{ left: pct(headerSize + trailerSize / 2, totalBytes) }}
+              >
                 trailer
               </span>
             )}
@@ -170,7 +175,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
                     }}
                   >
                     {renderPx >= OFFSET_LABEL_MIN_PX && sizeBytes > 0 && (
-                      <span className="bs-field-offset">{r.start}..{r.end - 1}</span>
+                      <span className="bs-field-offset">
+                        {r.start}..{r.end - 1}
+                      </span>
                     )}
                   </div>
                 </Tooltip>
@@ -178,12 +185,16 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
             })}
 
             {trailerSize > 0 && (
-              <Tooltip title={`trailer · ${headerSize}–${headerSize + trailerSize}（灰色：不计入 header 字段）`}>
+              <Tooltip
+                title={`trailer · ${headerSize}–${headerSize + trailerSize}（灰色：不计入 header 字段）`}
+              >
                 <div
                   className="bs-trailer"
                   style={{ left: pct(headerSize, totalBytes), width: pct(trailerSize, totalBytes) }}
                 >
-                  {trailerSize * pxPerByte >= OFFSET_LABEL_MIN_PX && <span className="bs-trailer-label">trailer</span>}
+                  {trailerSize * pxPerByte >= OFFSET_LABEL_MIN_PX && (
+                    <span className="bs-trailer-label">trailer</span>
+                  )}
                 </div>
               </Tooltip>
             )}
@@ -191,7 +202,11 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
 
           <div className="bs-ruler-layer">
             {ticks.map((tick) => (
-              <span key={`tick-${tick}`} className={tickClass(tick, totalBytes)} style={{ left: pct(tick, totalBytes) }}>
+              <span
+                key={`tick-${tick}`}
+                className={tickClass(tick, totalBytes)}
+                style={{ left: pct(tick, totalBytes) }}
+              >
                 {tick}
               </span>
             ))}

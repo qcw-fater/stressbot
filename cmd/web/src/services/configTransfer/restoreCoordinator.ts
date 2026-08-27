@@ -300,11 +300,7 @@ function orderedSections(
   ];
 }
 
-function sectionFingerprint(
-  adapter: RestoreAdapter,
-  value: unknown,
-  mode: RestoreMode,
-): string {
+function sectionFingerprint(adapter: RestoreAdapter, value: unknown, mode: RestoreMode): string {
   return adapter.versioned?.fingerprint?.(value, mode) ?? fingerprintRestoreValue(value);
 }
 
@@ -317,8 +313,8 @@ async function assertTargetsUnchanged(
     if (adapter.versioned) {
       const snapshot = await adapter.versioned.read();
       if (
-        !plan.expectedRevisions[section]
-        || snapshot.revision !== plan.expectedRevisions[section]
+        !plan.expectedRevisions[section] ||
+        snapshot.revision !== plan.expectedRevisions[section]
       ) {
         throw new RestoreTargetChangedError(section);
       }

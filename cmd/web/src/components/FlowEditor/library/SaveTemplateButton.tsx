@@ -78,7 +78,9 @@ export function SaveTemplateButton(props: ActionProps | ListenProps) {
             }
           } else {
             const inferred = inferListenDefaultRef(useFlowStore.getState().nodes, props.name);
-            const defaultRef = inferred.defaultRef ?? (existing && 'defaultRef' in existing ? existing.defaultRef : undefined);
+            const defaultRef =
+              inferred.defaultRef ??
+              (existing && 'defaultRef' in existing ? existing.defaultRef : undefined);
             if (existing) {
               await updateListenTemplate({
                 ...existing,

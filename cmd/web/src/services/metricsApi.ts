@@ -6,11 +6,7 @@
  */
 
 import { buildQuery, getJson } from './api';
-import type {
-  ClusterSystemSnapshot,
-  PerAgentMetrics,
-  StressAggregate,
-} from '@/types/api';
+import type { ClusterSystemSnapshot, PerAgentMetrics, StressAggregate } from '@/types/api';
 
 export interface MetricsParams {
   taskId?: string;
@@ -133,7 +129,12 @@ function requireString(record: Record<string, unknown>, field: string): void {
 
 function requireCount(record: Record<string, unknown>, field: string): void {
   const value = record[field];
-  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
     throw new Error(`监控响应字段 ${field} 缺失或不是非负整数`);
   }
 }

@@ -74,7 +74,11 @@ export function ErrorMapEditor({ value, onChange, frameworkCodes }: Props) {
     const codeVal = code as number;
     const descVal = desc.trim();
     if (editing != null) {
-      onChange(serializeErrorMap(entries.map((e) => (e.code === editing ? { code: codeVal, desc: descVal } : e))));
+      onChange(
+        serializeErrorMap(
+          entries.map((e) => (e.code === editing ? { code: codeVal, desc: descVal } : e)),
+        ),
+      );
       setEditing(null);
     } else {
       onChange(serializeErrorMap([...entries, { code: codeVal, desc: descVal }]));
@@ -125,7 +129,9 @@ export function ErrorMapEditor({ value, onChange, frameworkCodes }: Props) {
           value={code ?? undefined}
           min={1}
           placeholder={`如 ${suggestCode}`}
-          status={visibleDraftErr && /正整数|保留|已存在/.test(visibleDraftErr) ? 'error' : undefined}
+          status={
+            visibleDraftErr && /正整数|保留|已存在/.test(visibleDraftErr) ? 'error' : undefined
+          }
           onChange={(v) => setCode(typeof v === 'number' ? v : null)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') descRef.current?.focus();
@@ -141,7 +147,13 @@ export function ErrorMapEditor({ value, onChange, frameworkCodes }: Props) {
             if (e.key === 'Enter' && !draftErr) commit();
           }}
         />
-        <Button type="primary" icon={<CheckOutlined />} disabled={!!draftErr} onClick={commit} size="small">
+        <Button
+          type="primary"
+          icon={<CheckOutlined />}
+          disabled={!!draftErr}
+          onClick={commit}
+          size="small"
+        >
           {editing != null ? '保存' : '添加'}
         </Button>
         {editing != null && (
@@ -169,11 +181,17 @@ export function ErrorMapEditor({ value, onChange, frameworkCodes }: Props) {
       <div className="eme-framework">
         <div className="eme-framework-title">框架保留码（&lt; 100，只读）</div>
         {frameworkCodes.length === 0 ? (
-          <div className="eme-empty">未加载到框架保留码，请确认服务器已连接后重新切入本页（接口 /sbot/api/error-codes）</div>
+          <div className="eme-empty">
+            未加载到框架保留码，请确认服务器已连接后重新切入本页（接口 /sbot/api/error-codes）
+          </div>
         ) : (
           <Space size={[4, 4]} wrap>
             {frameworkCodes.map((c, i) => (
-              <Tag key={c.code} className="eme-reserved-tag" color={TAG_PALETTE[i % TAG_PALETTE.length]}>
+              <Tag
+                key={c.code}
+                className="eme-reserved-tag"
+                color={TAG_PALETTE[i % TAG_PALETTE.length]}
+              >
                 {c.code}={c.name}
               </Tag>
             ))}

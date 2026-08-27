@@ -71,11 +71,23 @@ describe('renderSignature / renderDoc', () => {
 
   it('renderSignature 支持请求/响应路由分离接口', () => {
     const fn = getLuaFunction('network', 'tcp_request_route')!;
-    expect(renderSignature(fn)).toBe('(service, request_route, response_route, msg, [s2c_proto], [timeout_sec])');
+    expect(renderSignature(fn)).toBe(
+      '(service, request_route, response_route, msg, [s2c_proto], [timeout_sec])',
+    );
   });
 
   it('network API 不再向脚本返回 sent/recv 字节数', () => {
-    const names = ['tcp_request', 'tcp_request_route', 'udp_request', 'udp_request_route', 'tcp_send', 'udp_send', 'tcp_listen', 'udp_listen', 'http_request'];
+    const names = [
+      'tcp_request',
+      'tcp_request_route',
+      'udp_request',
+      'udp_request_route',
+      'tcp_send',
+      'udp_send',
+      'tcp_listen',
+      'udp_listen',
+      'http_request',
+    ];
     for (const name of names) {
       const fn = getLuaFunction('network', name)!;
       expect(fn.returns, `network.${name}.returns`).not.toMatch(/sent|recv/);
@@ -141,7 +153,22 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
   it('robot 模块覆盖关键函数', () => {
     const m = getLuaModule('robot')!;
     const names = m.functions.map((f) => f.name);
-    for (const expected of ['get', 'get_view', 'set', 'has', 'delete', 'clear', 'increment', 'get_path', 'set_path', 'get_id', 'get_index', 'get_account', 'get_context', 'keys']) {
+    for (const expected of [
+      'get',
+      'get_view',
+      'set',
+      'has',
+      'delete',
+      'clear',
+      'increment',
+      'get_path',
+      'set_path',
+      'get_id',
+      'get_index',
+      'get_account',
+      'get_context',
+      'keys',
+    ]) {
       expect(names, `robot.${expected}`).toContain(expected);
     }
   });
@@ -177,7 +204,18 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
   it('proto 模块覆盖关键函数', () => {
     const m = getLuaModule('proto')!;
     const names = m.functions.map((f) => f.name);
-    for (const expected of ['create', 'set_field', 'get_field', 'get_path', 'serialize', 'parse', 'get_field_map', 'iter_list', 'list_size', 'list_get']) {
+    for (const expected of [
+      'create',
+      'set_field',
+      'get_field',
+      'get_path',
+      'serialize',
+      'parse',
+      'get_field_map',
+      'iter_list',
+      'list_size',
+      'list_get',
+    ]) {
       expect(names, `proto.${expected}`).toContain(expected);
     }
   });

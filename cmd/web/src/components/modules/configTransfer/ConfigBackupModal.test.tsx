@@ -97,7 +97,13 @@ describe('ConfigBackupModal', () => {
   it('does not allow a download when no section is selected', async () => {
     const user = userEvent.setup();
     render(
-      <ConfigBackupModal open onClose={() => undefined} flowLibrary templateLibrary registry={registryWith()} />,
+      <ConfigBackupModal
+        open
+        onClose={() => undefined}
+        flowLibrary
+        templateLibrary
+        registry={registryWith()}
+      />,
     );
 
     await user.click(await screen.findByRole('button', { name: '清空' }));
@@ -110,10 +116,18 @@ describe('ConfigBackupModal', () => {
 
   it('明确说明备份不包含服务器环境数据', async () => {
     render(
-      <ConfigBackupModal open onClose={() => undefined} flowLibrary templateLibrary registry={registryWith()} />,
+      <ConfigBackupModal
+        open
+        onClose={() => undefined}
+        flowLibrary
+        templateLibrary
+        registry={registryWith()}
+      />,
     );
 
-    expect(await screen.findByText(/不包含服务器连接、数据库凭据、运行历史和界面偏好/)).toBeTruthy();
+    expect(
+      await screen.findByText(/不包含服务器连接、数据库凭据、运行历史和界面偏好/),
+    ).toBeTruthy();
   });
 
   it('shows the final payload size error without creating a download URL', async () => {
@@ -122,7 +136,13 @@ describe('ConfigBackupModal', () => {
       throw new Error('备份文件超过 100 MiB，请减少选择内容');
     });
     render(
-      <ConfigBackupModal open onClose={() => undefined} flowLibrary templateLibrary registry={registryWith()} />,
+      <ConfigBackupModal
+        open
+        onClose={() => undefined}
+        flowLibrary
+        templateLibrary
+        registry={registryWith()}
+      />,
     );
 
     await user.click(await screen.findByRole('button', { name: /下载备份/ }));
@@ -137,7 +157,13 @@ describe('ConfigBackupModal', () => {
       protoFiles: [{ name: 'login.proto', content: 'syntax = "proto3";' }],
     });
     render(
-      <ConfigBackupModal open onClose={() => undefined} flowLibrary={false} templateLibrary registry={registry} />,
+      <ConfigBackupModal
+        open
+        onClose={() => undefined}
+        flowLibrary={false}
+        templateLibrary
+        registry={registry}
+      />,
     );
 
     await user.click(await screen.findByRole('button', { name: '清空' }));

@@ -5,15 +5,11 @@ import { JsonDraftInput } from './JsonDraftInput';
 describe('JsonDraftInput interactions', () => {
   it('keeps an incomplete JSON draft across a parent rerender and blur', async () => {
     const onChange = vi.fn();
-    const view = render(
-      <JsonDraftInput value={{ saved: 1 }} onChange={onChange} mode="json" />,
-    );
+    const view = render(<JsonDraftInput value={{ saved: 1 }} onChange={onChange} mode="json" />);
     const input = view.getByRole('textbox') as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: '{' } });
-    view.rerender(
-      <JsonDraftInput value={{ external: 2 }} onChange={onChange} mode="json" />,
-    );
+    view.rerender(<JsonDraftInput value={{ external: 2 }} onChange={onChange} mode="json" />);
     input.blur();
 
     expect(input.value).toBe('{');
@@ -22,9 +18,7 @@ describe('JsonDraftInput interactions', () => {
 
   it('commits structured data once an incomplete draft becomes valid', async () => {
     const onChange = vi.fn();
-    const view = render(
-      <JsonDraftInput value={undefined} onChange={onChange} mode="json" />,
-    );
+    const view = render(<JsonDraftInput value={undefined} onChange={onChange} mode="json" />);
     const input = view.getByRole('textbox') as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: '{' } });

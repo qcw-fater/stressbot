@@ -15,8 +15,21 @@ import type { BindingType, FieldBind } from '@/types/action';
  * 不同 —— 状态动作更偏向「先选来源，再选具体取值方式」，分组语义需独立维护。
  */
 export const SET_STATE_TYPE_GROUPS: Array<{ label: string; types: BindingType[] }> = [
-  { label: '常用', types: ['fixed', 'state', 'randomInt', 'randomFloat', 'randomBool', 'randomString'] },
-  { label: '从已有状态取值', types: ['stateFirst', 'stateRandom', 'stateRandomN', 'stateMapKey', 'stateMapValue', 'listSize'] },
+  {
+    label: '常用',
+    types: ['fixed', 'state', 'randomInt', 'randomFloat', 'randomBool', 'randomString'],
+  },
+  {
+    label: '从已有状态取值',
+    types: [
+      'stateFirst',
+      'stateRandom',
+      'stateRandomN',
+      'stateMapKey',
+      'stateMapValue',
+      'listSize',
+    ],
+  },
   { label: '从候选值取值', types: ['randomPick', 'randomPickN', 'randomPickMap', 'randomExclude'] },
   { label: '复合值', types: ['map'] },
 ];
@@ -30,7 +43,14 @@ export const SET_STATE_TYPE_GROUPS: Array<{ label: string; types: BindingType[] 
  * 其他字段（source / path / values / count / min / max / filters / entries / ...）
  * 都是某一种 type 的专属参数，切换类型时一律丢弃，由用户重新填写。
  */
-const COMMON_BINDING_KEYS = ['field', 'required', 'optional', 'wrap', 'storeAs', 'condition'] as const;
+const COMMON_BINDING_KEYS = [
+  'field',
+  'required',
+  'optional',
+  'wrap',
+  'storeAs',
+  'condition',
+] as const;
 
 /** 切换 binding 类型：保留通用字段与目标 type，丢弃所有 type 专属字段。 */
 export function changeBindingType(binding: FieldBind, type: BindingType): FieldBind {

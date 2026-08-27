@@ -39,7 +39,10 @@ function readInitialTheme(): ThemeMode {
   } catch {
     // SSR / 无 localStorage
   }
-  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+  if (
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches
+  ) {
     return 'dark';
   }
   return 'light';
@@ -193,10 +196,12 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   codecSchemaErrors: null,
   setCodecSchemaErrors: (v) => set({ codecSchemaErrors: v }),
   routeKeyTemplatesVersion: 0,
-  bumpRouteKeyTemplatesVersion: () => set((s) => ({ routeKeyTemplatesVersion: s.routeKeyTemplatesVersion + 1 })),
+  bumpRouteKeyTemplatesVersion: () =>
+    set((s) => ({ routeKeyTemplatesVersion: s.routeKeyTemplatesVersion + 1 })),
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
-  requestFocusNode: (nodeId) => set((s) => ({ focusRequestNodeId: nodeId, focusRequestNonce: s.focusRequestNonce + 1 })),
+  requestFocusNode: (nodeId) =>
+    set((s) => ({ focusRequestNodeId: nodeId, focusRequestNonce: s.focusRequestNonce + 1 })),
   setSelectedListen: (name) => set({ selectedListenName: name }),
   setHoveredListen: (name) => set({ hoveredListen: name }),
   setEdgeHighlightNodes: (ids) => set({ edgeHighlightNodeIds: ids }),

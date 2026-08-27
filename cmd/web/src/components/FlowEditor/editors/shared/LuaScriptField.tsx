@@ -27,15 +27,15 @@ export interface LuaScriptFieldProps {
 const DEFAULT_HELP: Record<LuaMode, React.ReactNode> = {
   action: (
     <>
-      入口 <code>function execute(r)</code>，返回 <code>nil</code>（成功）/ <code>err table</code>（失败）。
-      点「编辑」按钮可在编辑器里直接写脚本，按 Ctrl+S 保存到本地。
+      入口 <code>function execute(r)</code>，返回 <code>nil</code>（成功）/ <code>err table</code>
+      （失败）。 点「编辑」按钮可在编辑器里直接写脚本，按 Ctrl+S 保存到本地。
     </>
   ),
   listen: (
     <>
-      入口 <code>function on_message(r, msg)</code>，
-      配置响应消息类型时 <code>msg</code> 为字段表；未配置时为 <code>nil</code>。
-      点「编辑」按钮可在编辑器里直接写脚本，按 Ctrl+S 保存到本地。
+      入口 <code>function on_message(r, msg)</code>， 配置响应消息类型时 <code>msg</code>{' '}
+      为字段表；未配置时为 <code>nil</code>。 点「编辑」按钮可在编辑器里直接写脚本，按 Ctrl+S
+      保存到本地。
     </>
   ),
   boolean: (
@@ -112,10 +112,11 @@ export function LuaScriptField({ mode, value, onChange, helpText }: LuaScriptFie
             (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
           }
         />
-        {scriptName.trim() && !scriptName.trim().endsWith('.lua') && (
-          <Tag color="purple">.lua</Tag>
-        )}
-        <Tooltip title={!scriptName.trim() ? '先填写脚本文件名再编辑' : '在编辑器里编辑该脚本内容'} mouseEnterDelay={0.4}>
+        {scriptName.trim() && !scriptName.trim().endsWith('.lua') && <Tag color="purple">.lua</Tag>}
+        <Tooltip
+          title={!scriptName.trim() ? '先填写脚本文件名再编辑' : '在编辑器里编辑该脚本内容'}
+          mouseEnterDelay={0.4}
+        >
           <Button
             icon={<EditOutlined />}
             onClick={() => setEditorOpen(true)}
@@ -133,7 +134,8 @@ export function LuaScriptField({ mode, value, onChange, helpText }: LuaScriptFie
         open={editorOpen}
         title={
           <span>
-            {MODAL_TITLE_PREFIX[mode]} <code style={{ color: 'var(--text-secondary)' }}>{scriptName || '(未命名)'}</code>
+            {MODAL_TITLE_PREFIX[mode]}{' '}
+            <code style={{ color: 'var(--text-secondary)' }}>{scriptName || '(未命名)'}</code>
           </span>
         }
         onCancel={closeEditor}

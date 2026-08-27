@@ -35,9 +35,7 @@ function Harness({ initial }: { initial: FieldBind[] }) {
 describe('SetStateEditor', () => {
   it('摘要显示目标状态、取值方式和值', () => {
     render(
-      <Harness
-        initial={[{ field: 'battleId', type: 'state', source: 'matchInfo', path: 'id' }]}
-      />,
+      <Harness initial={[{ field: 'battleId', type: 'state', source: 'matchInfo', path: 'id' }]} />,
     );
     expect(screen.getByText('battleId')).toBeTruthy();
     expect(screen.getByText('state')).toBeTruthy();

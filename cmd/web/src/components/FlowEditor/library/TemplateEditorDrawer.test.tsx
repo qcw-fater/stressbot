@@ -5,7 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TemplateEditorDrawer } from './TemplateEditorDrawer';
 
 const mocks = vi.hoisted(() => ({
-  capability: { templateLibrary: true as boolean | undefined, loading: false, error: undefined as Error | undefined, refresh: vi.fn() },
+  capability: {
+    templateLibrary: true as boolean | undefined,
+    loading: false,
+    error: undefined as Error | undefined,
+    refresh: vi.fn(),
+  },
   closePanel: vi.fn(),
   getAction: vi.fn(),
   updateAction: vi.fn(),
@@ -17,10 +22,13 @@ vi.mock('./useTemplateLibraryCapability', () => ({
 }));
 vi.mock('@/services/errorHandler', () => ({ showApiError: mocks.showApiError }));
 vi.mock('../store/editorStore', () => ({
-  useEditorStore: (selector: (state: unknown) => unknown) => selector({
-    activePanel: { templateEdit: { kind: 'templateEdit', templateKind: 'action', templateId: 'a1' } },
-    closePanel: mocks.closePanel,
-  }),
+  useEditorStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      activePanel: {
+        templateEdit: { kind: 'templateEdit', templateKind: 'action', templateId: 'a1' },
+      },
+      closePanel: mocks.closePanel,
+    }),
 }));
 vi.mock('./templateStore', () => ({
   getActionTemplate: mocks.getAction,
@@ -29,16 +37,35 @@ vi.mock('./templateStore', () => ({
   updateListenTemplate: vi.fn(),
 }));
 vi.mock('../panels/FloatingWindow', () => ({
-  FloatingWindow: ({ open, title, footer, children }: { open: boolean; title: React.ReactNode; footer: React.ReactNode; children: React.ReactNode }) => (
-    open ? <div>{title}{children}{footer}</div> : null
-  ),
+  FloatingWindow: ({
+    open,
+    title,
+    footer,
+    children,
+  }: {
+    open: boolean;
+    title: React.ReactNode;
+    footer: React.ReactNode;
+    children: React.ReactNode;
+  }) =>
+    open ? (
+      <div>
+        {title}
+        {children}
+        {footer}
+      </div>
+    ) : null,
 }));
 vi.mock('../editors/ActionEditor/PatternSelector', () => ({ PatternSelector: () => null }));
-vi.mock('../editors/ActionEditor/DeclarativeForm', () => ({ DeclarativeForm: () => <div>动作内容</div> }));
+vi.mock('../editors/ActionEditor/DeclarativeForm', () => ({
+  DeclarativeForm: () => <div>动作内容</div>,
+}));
 vi.mock('../editors/ActionEditor/LuaForm', () => ({ LuaForm: () => null }));
 vi.mock('../editors/ActionEditor/StoreTable', () => ({ StoreTable: () => null }));
 vi.mock('../proto/ProtoBrowser', () => ({ ProtoBrowser: () => null }));
-vi.mock('../codec/TargetConnectionRouteEditor', () => ({ TargetConnectionRouteEditor: () => null }));
+vi.mock('../codec/TargetConnectionRouteEditor', () => ({
+  TargetConnectionRouteEditor: () => null,
+}));
 vi.mock('../codec/useCodecConnections', () => ({
   useCodecConnections: () => ({ connections: [], loading: false }),
   useCodecRouteSpecs: () => ({ specs: [], loading: false }),
@@ -63,7 +90,11 @@ beforeEach(() => {
 describe('TemplateEditorDrawer', () => {
   it('能力不可用时禁用保存', async () => {
     mocks.capability.templateLibrary = false;
-    render(<AntApp><TemplateEditorDrawer /></AntApp>);
+    render(
+      <AntApp>
+        <TemplateEditorDrawer />
+      </AntApp>,
+    );
     expect(screen.getByRole('button', { name: /保\s*存/ }).hasAttribute('disabled')).toBe(true);
     expect(await screen.findByText('共享模板库功能未启用，请检查服务器配置')).toBeTruthy();
   });
@@ -72,7 +103,11 @@ describe('TemplateEditorDrawer', () => {
     const failure = new Error('保存失败');
     mocks.updateAction.mockRejectedValue(failure);
     const user = userEvent.setup();
-    render(<AntApp><TemplateEditorDrawer /></AntApp>);
+    render(
+      <AntApp>
+        <TemplateEditorDrawer />
+      </AntApp>,
+    );
     const name = await screen.findByDisplayValue('登录');
     await user.clear(name);
     await user.type(name, '新登录');

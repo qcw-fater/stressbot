@@ -13,7 +13,13 @@ const idb = new Map<string, { name: string; content: string }>();
 vi.mock('../resourcesStore', () => ({
   getScript: vi.fn(async (name: string) => idb.get(name)),
   addScriptFromBaseline: vi.fn(async (name: string, content: string) => {
-    const file = { name, content, size: content.length, uploadedAt: '2026-01-01T00:00:00Z', baseHash: 'sha256:test' };
+    const file = {
+      name,
+      content,
+      size: content.length,
+      uploadedAt: '2026-01-01T00:00:00Z',
+      baseHash: 'sha256:test',
+    };
     idb.set(name, file);
     return file;
   }),
@@ -96,7 +102,9 @@ describe('syncFlowScriptsToIdb', () => {
     const r = await syncFlowScriptsToIdb(flow);
 
     expect(r).toEqual({ added: ['baseline.lua'], skipped: [], missing: [] });
-    expect(fetchMock).toHaveBeenCalledWith('/sbot/baseline/scripts/baseline.lua', { cache: 'no-cache' });
+    expect(fetchMock).toHaveBeenCalledWith('/sbot/baseline/scripts/baseline.lua', {
+      cache: 'no-cache',
+    });
     expect(idb.get('baseline.lua')?.content).toBe('-- baseline content');
   });
 

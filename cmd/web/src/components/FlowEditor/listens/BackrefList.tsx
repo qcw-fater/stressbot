@@ -36,7 +36,11 @@ export function BackrefList({ listenName }: BackrefListProps) {
   const updateNode = useFlowStore((s) => s.updateNode);
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
-  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const {
+    connections,
+    loading: connectionsLoading,
+    error: connectionsError,
+  } = useCodecConnections();
   const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
   const [routeEditorTarget, setRouteEditorTarget] = useState<{
     nodeId: string;
@@ -76,9 +80,7 @@ export function BackrefList({ listenName }: BackrefListProps) {
     setRouteEditorTarget((target) => {
       if (!target || target.nodeId !== nodeId) return target;
       if (target.refIndex === refIndex) return null;
-      return target.refIndex > refIndex
-        ? { ...target, refIndex: target.refIndex - 1 }
-        : target;
+      return target.refIndex > refIndex ? { ...target, refIndex: target.refIndex - 1 } : target;
     });
     const list = (node.listenRefs ?? []).filter((_, i) => i !== refIndex);
     updateNode(nodeId, { listenRefs: list });
@@ -86,9 +88,7 @@ export function BackrefList({ listenName }: BackrefListProps) {
 
   return (
     <div>
-      <Typography.Text strong>
-        监听注册（{refs.length} 处引用）
-      </Typography.Text>
+      <Typography.Text strong>监听注册（{refs.length} 处引用）</Typography.Text>
       <Table
         size="small"
         style={{ marginTop: 8 }}
@@ -119,89 +119,97 @@ export function BackrefList({ listenName }: BackrefListProps) {
               </Space>
             ),
           },
-        {
-          title: '目标连接',
-          dataIndex: ['ref', 'server'],
-          width: 120,
-          render: (_, r) => (
-            <TargetConnectionSelect
-              inline
-              size="small"
-              server={r.ref.server}
-              onChangeServer={(server) => updateRefField(r.nodeId, r.refIndex, { server: server ?? '' })}
-              connections={connections}
-              loading={connectionsLoading}
-              error={connectionsError}
-            />
-          ),
-        },
-        {
-          title: 'route',
-          dataIndex: ['ref', 'route'],
-          width: 150,
-          render: (_, r) => (
-            <RouteFieldTrack
-              server={r.ref.server}
-              value={r.ref.route}
-              routeKeyTemplate={r.ref.server ? specs.get(r.ref.server)?.routeKeyTemplate : undefined}
-              loading={routeSpecsLoading}
-              error={routeSpecsError}
-              onChange={(route) => updateRefField(r.nodeId, r.refIndex, { route })}
-              onOpenFloating={() => setRouteEditorTarget({
-                nodeId: r.nodeId,
-                refIndex: r.refIndex,
-              })}
-            />
-          ),
-        },
-        {
-          title: '队列容量',
-          dataIndex: ['ref', 'queueSize'],
-          width: 90,
-          render: (_, r) => (
-            <Tooltip title="监听缓存队列容量，缺省 1；<=0 会在校验报错">
-              <InputNumber
-                aria-label="队列容量"
+          {
+            title: '目标连接',
+            dataIndex: ['ref', 'server'],
+            width: 120,
+            render: (_, r) => (
+              <TargetConnectionSelect
+                inline
                 size="small"
-                min={1}
-                placeholder="缺省 1"
-                value={r.ref.queueSize}
-                onChange={(value) => updateRefField(r.nodeId, r.refIndex, {
-                  queueSize: (value as number) ?? undefined,
-                })}
-                style={{ width: 78 }}
+                server={r.ref.server}
+                onChangeServer={(server) =>
+                  updateRefField(r.nodeId, r.refIndex, { server: server ?? '' })
+                }
+                connections={connections}
+                loading={connectionsLoading}
+                error={connectionsError}
               />
-            </Tooltip>
-          ),
-        },
-        {
-          title: '操作',
-          width: 90,
-          render: (_, r) => (
-            <Space size={4}>
-              <Tooltip title="打开动作节点">
-                <Button
+            ),
+          },
+          {
+            title: 'route',
+            dataIndex: ['ref', 'route'],
+            width: 150,
+            render: (_, r) => (
+              <RouteFieldTrack
+                server={r.ref.server}
+                value={r.ref.route}
+                routeKeyTemplate={
+                  r.ref.server ? specs.get(r.ref.server)?.routeKeyTemplate : undefined
+                }
+                loading={routeSpecsLoading}
+                error={routeSpecsError}
+                onChange={(route) => updateRefField(r.nodeId, r.refIndex, { route })}
+                onOpenFloating={() =>
+                  setRouteEditorTarget({
+                    nodeId: r.nodeId,
+                    refIndex: r.refIndex,
+                  })
+                }
+              />
+            ),
+          },
+          {
+            title: '队列容量',
+            dataIndex: ['ref', 'queueSize'],
+            width: 90,
+            render: (_, r) => (
+              <Tooltip title="监听缓存队列容量，缺省 1；<=0 会在校验报错">
+                <InputNumber
+                  aria-label="队列容量"
                   size="small"
-                  type="text"
-                  icon={<EditOutlined />}
-                  onClick={() => {
-                    setSelectedNode(r.nodeId);
-                    setActivePanel({ kind: 'nodeEdit', nodeId: r.nodeId });
-                  }}
+                  min={1}
+                  placeholder="缺省 1"
+                  value={r.ref.queueSize}
+                  onChange={(value) =>
+                    updateRefField(r.nodeId, r.refIndex, {
+                      queueSize: (value as number) ?? undefined,
+                    })
+                  }
+                  style={{ width: 78 }}
                 />
               </Tooltip>
-              <Tooltip title="删除监听注册">
-                <Button
-                  size="small"
-                  danger
-                  type="text"
-                  icon={<DeleteOutlined />}
-                  onClick={() => removeRef(r.nodeId, r.refIndex)}
-                />
-              </Tooltip>
-            </Space>
-          ),
-        },
+            ),
+          },
+          {
+            title: '操作',
+            width: 90,
+            render: (_, r) => (
+              <Space size={4}>
+                <Tooltip title="打开动作节点">
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<EditOutlined />}
+                    onClick={() => {
+                      setSelectedNode(r.nodeId);
+                      setActivePanel({ kind: 'nodeEdit', nodeId: r.nodeId });
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="删除监听注册">
+                  <Button
+                    size="small"
+                    danger
+                    type="text"
+                    icon={<DeleteOutlined />}
+                    onClick={() => removeRef(r.nodeId, r.refIndex)}
+                  />
+                </Tooltip>
+              </Space>
+            ),
+          },
         ]}
       />
       <RouteFloatingEditor
@@ -209,7 +217,9 @@ export function BackrefList({ listenName }: BackrefListProps) {
         open={Boolean(routeEditorRef)}
         server={routeEditorRef?.server}
         value={routeEditorRef?.route}
-        routeKeyTemplate={routeEditorRef?.server ? specs.get(routeEditorRef.server)?.routeKeyTemplate : undefined}
+        routeKeyTemplate={
+          routeEditorRef?.server ? specs.get(routeEditorRef.server)?.routeKeyTemplate : undefined
+        }
         loading={routeSpecsLoading}
         error={routeSpecsError}
         onChange={(route) => {

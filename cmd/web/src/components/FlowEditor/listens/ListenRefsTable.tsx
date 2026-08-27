@@ -4,8 +4,25 @@
  * 设计文档 §8.6：route + server + listen 三列 + 形态徽章 + 排序删除 + 批量入口。
  */
 
-import { App as AntApp, Button, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  App as AntApp,
+  Button,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+} from 'antd';
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { useState } from 'react';
 import type { ListenRef } from '@/types/flow';
 import { classifyListen } from '@/types/listen';
@@ -31,7 +48,11 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const addListen = useFlowStore((s) => s.addListen);
   const rfNodePos = useFlowStore((s) => s.rfNodes.find((n) => n.id === nodeId)?.position);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
-  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const {
+    connections,
+    loading: connectionsLoading,
+    error: connectionsError,
+  } = useCodecConnections();
   const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
 
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -79,7 +100,10 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
         value: n,
         label: (
           <span>
-            <code>{n}</code> <Tag color={listenKindTagColor[classifyListen(listens[n])]}>{classifyListen(listens[n])}</Tag>
+            <code>{n}</code>{' '}
+            <Tag color={listenKindTagColor[classifyListen(listens[n])]}>
+              {classifyListen(listens[n])}
+            </Tag>
           </span>
         ) as React.ReactNode,
       })),
@@ -108,7 +132,8 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
       // 简单校验
       for (const x of arr) {
         if (typeof x !== 'object' || x == null) throw new Error('每个 item 必须是对象');
-        if (!('server' in x) || !('listen' in x)) throw new Error('每个 item 必须含 server 和 listen');
+        if (!('server' in x) || !('listen' in x))
+          throw new Error('每个 item 必须含 server 和 listen');
       }
       set([...refs, ...(arr as ListenRef[])]);
       message.success(`已追加 ${arr.length} 条监听`);
@@ -121,7 +146,14 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
         <Space>
           <Button
             size="small"
@@ -289,7 +321,9 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
         open={Boolean(routeEditorRef)}
         server={routeEditorRef?.server}
         value={routeEditorRef?.route}
-        routeKeyTemplate={routeEditorRef?.server ? specs.get(routeEditorRef.server)?.routeKeyTemplate : undefined}
+        routeKeyTemplate={
+          routeEditorRef?.server ? specs.get(routeEditorRef.server)?.routeKeyTemplate : undefined
+        }
         loading={routeSpecsLoading}
         error={routeSpecsError}
         onChange={(route) => {
@@ -307,8 +341,8 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
         styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       >
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-          粘贴 <code>ListenRef[]</code> JSON 数组。每个对象需包含 <code>route</code>、<code>server</code>、
-          <code>listen</code>。
+          粘贴 <code>ListenRef[]</code> JSON 数组。每个对象需包含 <code>route</code>、
+          <code>server</code>、<code>listen</code>。
         </p>
         <Input.TextArea
           rows={12}

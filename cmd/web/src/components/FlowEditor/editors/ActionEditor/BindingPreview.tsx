@@ -25,13 +25,22 @@ export function simulateBinding(fb: FieldBind): PreviewResult {
     case 'stateFirst':
       return { kind: 'placeholder', display: `${fmtState(fb.source, fb.path)}[0]` };
     case 'stateRandom':
-      return { kind: 'placeholder', display: `从 ${fmtState(fb.source, fb.path)} 随机取一个` + fmtFilters(fb.filters) };
+      return {
+        kind: 'placeholder',
+        display: `从 ${fmtState(fb.source, fb.path)} 随机取一个` + fmtFilters(fb.filters),
+      };
     case 'stateRandomN':
-      return { kind: 'placeholder', display: `从 ${fmtState(fb.source, fb.path)} 随机取 ${fb.count ?? 'N'} 个` };
+      return {
+        kind: 'placeholder',
+        display: `从 ${fmtState(fb.source, fb.path)} 随机取 ${fb.count ?? 'N'} 个`,
+      };
     case 'stateMapKey':
       return { kind: 'placeholder', display: `从 state["${fb.source}"] map 中随机取一个 key` };
     case 'stateMapValue':
-      return { kind: 'placeholder', display: `从 state["${fb.source}"] map 中随机取一个 value` + fmtFilters(fb.filters) };
+      return {
+        kind: 'placeholder',
+        display: `从 state["${fb.source}"] map 中随机取一个 value` + fmtFilters(fb.filters),
+      };
     case 'listSize':
       return { kind: 'placeholder', display: `len(state["${fb.source}"])` };
 
@@ -39,7 +48,10 @@ export function simulateBinding(fb: FieldBind): PreviewResult {
       const vals = fb.values ?? [];
       if (!vals.length) return { kind: 'error', message: 'values 为空' };
       const sample = vals[Math.floor(Math.random() * vals.length)];
-      return { kind: 'concrete', display: `${JSON.stringify(sample)}  ← 从 ${JSON.stringify(vals)} 随机` };
+      return {
+        kind: 'concrete',
+        display: `${JSON.stringify(sample)}  ← 从 ${JSON.stringify(vals)} 随机`,
+      };
     }
     case 'randomPickN': {
       const vals = fb.values ?? [];
@@ -70,10 +82,16 @@ export function simulateBinding(fb: FieldBind): PreviewResult {
       const len = fb.length ?? 8;
       const charset = resolveRandomStringCharset(fb.charset);
       const sample = genSampleString(len, charset);
-      return { kind: 'concrete', display: `"${sample}"  ← length=${len}, charset=${randomStringCharsetLabel(fb.charset)}` };
+      return {
+        kind: 'concrete',
+        display: `"${sample}"  ← length=${len}, charset=${randomStringCharsetLabel(fb.charset)}`,
+      };
     }
     case 'randomExclude':
-      return { kind: 'placeholder', display: `从 ${JSON.stringify(fb.values ?? [])} 排除 state["${fb.excludeSource}"] 后随机` };
+      return {
+        kind: 'placeholder',
+        display: `从 ${JSON.stringify(fb.values ?? [])} 排除 state["${fb.excludeSource}"] 后随机`,
+      };
 
     case 'map':
       return { kind: 'placeholder', display: `map[${fb.entries?.length ?? 0} entries]` };

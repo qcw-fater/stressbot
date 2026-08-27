@@ -18,9 +18,7 @@ function snapshotApi(kind: 'action' | 'listen') {
       revision: `${kind}-${templateServer[revisionKey]}`,
       items: structuredClone(templateServer[itemsKey]),
     })),
-    replaceSnapshot: vi.fn(async (request: {
-      items: Array<Record<string, unknown>>;
-    }) => {
+    replaceSnapshot: vi.fn(async (request: { items: Array<Record<string, unknown>> }) => {
       templateServer[itemsKey] = structuredClone(request.items).map((item) => ({
         ...item,
         createdAt: item.createdAt ?? '2026-01-01T00:00:00.000Z',

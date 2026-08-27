@@ -16,21 +16,36 @@ describe('state action editor model', () => {
 
   it('摘要显示固定值和状态来源', () => {
     expect(bindingValueSummary({ type: 'fixed', value: true })).toBe('true');
-    expect(bindingValueSummary({ type: 'state', source: 'matchInfo', path: 'id' })).toBe('matchInfo.id');
+    expect(bindingValueSummary({ type: 'state', source: 'matchInfo', path: 'id' })).toBe(
+      'matchInfo.id',
+    );
   });
 
   it('切换类型删除旧类型参数但保留目标和通用高级配置', () => {
     const before: FieldBind = {
-      field: 'battleId', type: 'stateRandomN', source: 'matches', path: 'id', count: 2,
-      required: true, condition: 'state:ready', storeAs: 'picked',
+      field: 'battleId',
+      type: 'stateRandomN',
+      source: 'matches',
+      path: 'id',
+      count: 2,
+      required: true,
+      condition: 'state:ready',
+      storeAs: 'picked',
     };
     expect(changeBindingType(before, 'fixed')).toEqual({
-      field: 'battleId', type: 'fixed', required: true, condition: 'state:ready', storeAs: 'picked',
+      field: 'battleId',
+      type: 'fixed',
+      required: true,
+      condition: 'state:ready',
+      storeAs: 'picked',
     });
   });
 
   it('移动条目保持不可变并守住边界', () => {
-    const list: FieldBind[] = [{ type: 'fixed', field: 'a' }, { type: 'fixed', field: 'b' }];
+    const list: FieldBind[] = [
+      { type: 'fixed', field: 'a' },
+      { type: 'fixed', field: 'b' },
+    ];
     expect(moveBinding(list, 0, 1).map((b) => b.field)).toEqual(['b', 'a']);
     expect(moveBinding(list, 0, -1)).toBe(list);
   });

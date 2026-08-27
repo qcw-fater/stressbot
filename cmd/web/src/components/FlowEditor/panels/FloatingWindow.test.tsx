@@ -30,13 +30,25 @@ describe('FloatingWindow lifecycle', () => {
       return <div>content</div>;
     }
     const view = render(
-      <FloatingWindow windowId="test" title="test" defaultSize={{ width: 400, height: 300 }} open onClose={vi.fn()}>
+      <FloatingWindow
+        windowId="test"
+        title="test"
+        defaultSize={{ width: 400, height: 300 }}
+        open
+        onClose={vi.fn()}
+      >
         <Child />
       </FloatingWindow>,
     );
 
     view.rerender(
-      <FloatingWindow windowId="test" title="test" defaultSize={{ width: 400, height: 300 }} open={false} onClose={vi.fn()}>
+      <FloatingWindow
+        windowId="test"
+        title="test"
+        defaultSize={{ width: 400, height: 300 }}
+        open={false}
+        onClose={vi.fn()}
+      >
         <Child />
       </FloatingWindow>,
     );
@@ -51,13 +63,27 @@ describe('FloatingWindow lifecycle', () => {
       return <div>draft</div>;
     }
     const view = render(
-      <FloatingWindow keepMounted windowId="test" title="test" defaultSize={{ width: 400, height: 300 }} open onClose={vi.fn()}>
+      <FloatingWindow
+        keepMounted
+        windowId="test"
+        title="test"
+        defaultSize={{ width: 400, height: 300 }}
+        open
+        onClose={vi.fn()}
+      >
         <Child />
       </FloatingWindow>,
     );
 
     view.rerender(
-      <FloatingWindow keepMounted windowId="test" title="test" defaultSize={{ width: 400, height: 300 }} open={false} onClose={vi.fn()}>
+      <FloatingWindow
+        keepMounted
+        windowId="test"
+        title="test"
+        defaultSize={{ width: 400, height: 300 }}
+        open={false}
+        onClose={vi.fn()}
+      >
         <Child />
       </FloatingWindow>,
     );

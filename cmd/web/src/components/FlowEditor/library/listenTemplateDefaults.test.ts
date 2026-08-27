@@ -79,9 +79,7 @@ describe('listenTemplateDefaults', () => {
       A: {
         type: 'action',
         action: 'A',
-        listenRefs: [
-          { server: 'tcp:logic', route: { cmd: 1 }, listen: 'listenA', queueSize: 128 },
-        ],
+        listenRefs: [{ server: 'tcp:logic', route: { cmd: 1 }, listen: 'listenA', queueSize: 128 }],
       },
     };
 
@@ -106,9 +104,7 @@ describe('listenTemplateDefaults', () => {
       B: {
         type: 'action',
         action: 'B',
-        listenRefs: [
-          { server: 'tcp:logic', route: {}, listen: 'listenA', queueSize: 1 },
-        ],
+        listenRefs: [{ server: 'tcp:logic', route: {}, listen: 'listenA', queueSize: 1 }],
       },
     };
 

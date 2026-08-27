@@ -51,7 +51,10 @@ export function collectFlowCodecConnections(flow: FlowJson): string[] {
  *
  * 纯函数，供单测；taskActions.startTask 内部调用。
  */
-export function findMissingCodecConnections(referenced: string[], codecFileNames: string[]): string[] {
+export function findMissingCodecConnections(
+  referenced: string[],
+  codecFileNames: string[],
+): string[] {
   const have = new Set(codecFileNames);
   return referenced.filter((conn) => !have.has(connNameToCodecFileName(conn)));
 }
@@ -71,7 +74,9 @@ export async function collectTaskResourceNames(flow: FlowJson): Promise<TaskReso
   return { scripts, protos, adapters };
 }
 
-export async function checkTaskResourcesAgainstBaseline(flow: FlowJson): Promise<BaselineSyncResult> {
+export async function checkTaskResourcesAgainstBaseline(
+  flow: FlowJson,
+): Promise<BaselineSyncResult> {
   const result: BaselineSyncResult = { added: [], unchanged: [], conflicts: [], removed: [] };
   const scope = await collectTaskResourceNames(flow);
   const protoMap = new Map((await listProto()).map((f) => [f.name, f]));
@@ -107,10 +112,16 @@ export function hasTaskResourceDiff(result: BaselineSyncResult): boolean {
   return hasSyncDiff(result);
 }
 
-function sortEntry(a: { type: ResourceType; name: string }, b: { type: ResourceType; name: string }): number {
+function sortEntry(
+  a: { type: ResourceType; name: string },
+  b: { type: ResourceType; name: string },
+): number {
   return `${a.type}:${a.name}`.localeCompare(`${b.type}:${b.name}`);
 }
 
-function sortDiff(a: { type: ResourceType; name: string }, b: { type: ResourceType; name: string }): number {
+function sortDiff(
+  a: { type: ResourceType; name: string },
+  b: { type: ResourceType; name: string },
+): number {
   return sortEntry(a, b);
 }

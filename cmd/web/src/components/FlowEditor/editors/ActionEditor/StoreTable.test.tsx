@@ -24,7 +24,10 @@ describe('StoreTable', () => {
         <StoreTable
           s2cProto="X.S2C"
           value={val}
-          onChange={(next) => { setVal(next); calls.push(next); }}
+          onChange={(next) => {
+            setVal(next);
+            calls.push(next);
+          }}
         />
       );
     }
@@ -36,8 +39,8 @@ describe('StoreTable', () => {
     const setterInput = await screen.findByDisplayValue('loginResp');
     await userEvent.type(setterInput, '.token');
     expect(calls.length).toBeGreaterThan(0);
-    expect(calls[calls.length - 1]).toEqual(
-      [expect.objectContaining({ field: 'token', setter: 'loginResp.token' })],
-    );
+    expect(calls[calls.length - 1]).toEqual([
+      expect.objectContaining({ field: 'token', setter: 'loginResp.token' }),
+    ]);
   });
 });

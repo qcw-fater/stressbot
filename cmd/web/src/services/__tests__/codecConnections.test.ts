@@ -26,7 +26,9 @@ describe('codec connection naming', () => {
 
   it('严格拒绝非法 codec 文件名', () => {
     expect(() => codecFileNameToConnNameStrict('tcp-logic_codec.json')).toThrow(/非法/);
-    expect(() => codecFileNameToConnNameStrict('http_logic_codec.json')).toThrow(/protocol|tcp|udp/);
+    expect(() => codecFileNameToConnNameStrict('http_logic_codec.json')).toThrow(
+      /protocol|tcp|udp/,
+    );
     expect(() => codecFileNameToConnNameStrict('tcp__codec.json')).toThrow(/service/);
     expect(() => codecFileNameToConnNameStrict('tcp_logic.json')).toThrow(/_codec\.json/);
   });

@@ -11,9 +11,9 @@ const nativeGetComputedStyle = window.getComputedStyle.bind(window);
 let getComputedStyleSpy: ReturnType<typeof vi.spyOn>;
 
 beforeAll(() => {
-  getComputedStyleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => (
-    nativeGetComputedStyle(element)
-  ));
+  getComputedStyleSpy = vi
+    .spyOn(window, 'getComputedStyle')
+    .mockImplementation((element) => nativeGetComputedStyle(element));
 });
 
 afterAll(() => getComputedStyleSpy.mockRestore());
@@ -27,12 +27,14 @@ const empty: BaselineSyncResult = {
 
 const conflicted: BaselineSyncResult = {
   ...empty,
-  conflicts: [{
-    type: 'script',
-    name: 'demo.lua',
-    localContent: 'return 1',
-    baselineContent: 'return 2',
-  }],
+  conflicts: [
+    {
+      type: 'script',
+      name: 'demo.lua',
+      localContent: 'return 1',
+      baselineContent: 'return 2',
+    },
+  ],
 };
 
 describe('BaselineSyncModal', () => {

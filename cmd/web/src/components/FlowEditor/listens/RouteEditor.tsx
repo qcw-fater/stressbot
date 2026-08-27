@@ -32,8 +32,14 @@ export function RouteEditor({
   layout = 'stacked',
 }: RouteEditorProps) {
   const [draftErrors, setDraftErrors] = useState<Record<string, string>>({});
-  const placeholders = useMemo(() => extractRouteTemplatePlaceholders(routeKeyTemplate ?? ''), [routeKeyTemplate]);
-  const fields = useMemo(() => buildRouteTemplateFields(routeKeyTemplate ?? '', value), [routeKeyTemplate, value]);
+  const placeholders = useMemo(
+    () => extractRouteTemplatePlaceholders(routeKeyTemplate ?? ''),
+    [routeKeyTemplate],
+  );
+  const fields = useMemo(
+    () => buildRouteTemplateFields(routeKeyTemplate ?? '', value),
+    [routeKeyTemplate, value],
+  );
   const inline = layout === 'inline';
 
   if (!server) {
@@ -47,7 +53,9 @@ export function RouteEditor({
     if (inline) {
       return (
         <Tooltip title={`协议配置加载失败：${error}`} mouseEnterDelay={0.4}>
-          <Typography.Text type="danger"><WarningOutlined /> 配置加载失败</Typography.Text>
+          <Typography.Text type="danger">
+            <WarningOutlined /> 配置加载失败
+          </Typography.Text>
         </Tooltip>
       );
     }
@@ -60,15 +68,25 @@ export function RouteEditor({
           title={`未找到 ${server} 对应的 routeKeyTemplate，请先在协议配置中创建或修正`}
           mouseEnterDelay={0.4}
         >
-          <Typography.Text type="danger"><WarningOutlined /> 缺少 route 模板</Typography.Text>
+          <Typography.Text type="danger">
+            <WarningOutlined /> 缺少 route 模板
+          </Typography.Text>
         </Tooltip>
       );
     }
-    return <Alert type="error" showIcon message={`未找到 ${server} 对应的 routeKeyTemplate，请先在协议配置中创建或修正`} />;
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message={`未找到 ${server} 对应的 routeKeyTemplate，请先在协议配置中创建或修正`}
+      />
+    );
   }
   if (placeholders.length === 0) {
     if (inline) return <Typography.Text type="secondary">无需填写</Typography.Text>;
-    return <Alert type="info" showIcon message="当前 routeKeyTemplate 不包含占位字段，无需填写 route" />;
+    return (
+      <Alert type="info" showIcon message="当前 routeKeyTemplate 不包含占位字段，无需填写 route" />
+    );
   }
 
   const updateField = (name: string, draft: string) => {
@@ -96,7 +114,9 @@ export function RouteEditor({
         {fields.map((f) => {
           const input = (
             <Space.Compact className="route-editor-inline__field">
-              <span className="route-editor-inline__prefix"><code>{f.name}</code></span>
+              <span className="route-editor-inline__prefix">
+                <code>{f.name}</code>
+              </span>
               <Input
                 aria-label={`route ${f.name}`}
                 size={size}
@@ -106,9 +126,13 @@ export function RouteEditor({
               />
             </Space.Compact>
           );
-          return draftErrors[f.name]
-            ? <Tooltip key={f.name} title={draftErrors[f.name]} mouseEnterDelay={0.4}>{input}</Tooltip>
-            : <span key={f.name}>{input}</span>;
+          return draftErrors[f.name] ? (
+            <Tooltip key={f.name} title={draftErrors[f.name]} mouseEnterDelay={0.4}>
+              {input}
+            </Tooltip>
+          ) : (
+            <span key={f.name}>{input}</span>
+          );
         })}
       </div>
     );
@@ -128,7 +152,8 @@ export function RouteEditor({
         {fields.map((f) => (
           <div key={f.name} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Typography.Text style={{ fontSize: 11 }}>
-              <code>{f.name}</code>{f.missing ? <Typography.Text type="danger"> *</Typography.Text> : null}
+              <code>{f.name}</code>
+              {f.missing ? <Typography.Text type="danger"> *</Typography.Text> : null}
             </Typography.Text>
             <Input
               size={size}
@@ -138,7 +163,9 @@ export function RouteEditor({
               style={{ width: size === 'small' ? 96 : 140 }}
             />
             {draftErrors[f.name] && (
-              <Typography.Text type="danger" style={{ fontSize: 11 }}>{draftErrors[f.name]}</Typography.Text>
+              <Typography.Text type="danger" style={{ fontSize: 11 }}>
+                {draftErrors[f.name]}
+              </Typography.Text>
             )}
           </div>
         ))}

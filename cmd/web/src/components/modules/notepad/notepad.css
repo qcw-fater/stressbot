@@ -163,6 +163,12 @@
 }
 
 @keyframes notepadFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 0.3; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
 }

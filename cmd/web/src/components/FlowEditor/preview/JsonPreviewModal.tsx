@@ -56,9 +56,7 @@ export function JsonPreviewModal() {
           <Button type="primary" onClick={onDownload}>
             下载 flow.json
           </Button>
-          <Button onClick={() => closePanel('jsonPreview')}>
-            关闭
-          </Button>
+          <Button onClick={() => closePanel('jsonPreview')}>关闭</Button>
         </>
       }
     >

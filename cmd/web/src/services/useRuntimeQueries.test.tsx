@@ -192,11 +192,13 @@ describe('useRuntimeQueries', () => {
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await act(async () => {
-        await client.fetchQuery({
-          queryKey: queryKeys.agents.all,
-          queryFn: () => Promise.reject(new Error(`共享查询失败 ${attempt + 1}`)),
-          retry: false,
-        }).catch(() => undefined);
+        await client
+          .fetchQuery({
+            queryKey: queryKeys.agents.all,
+            queryFn: () => Promise.reject(new Error(`共享查询失败 ${attempt + 1}`)),
+            retry: false,
+          })
+          .catch(() => undefined);
       });
       await advance();
     }

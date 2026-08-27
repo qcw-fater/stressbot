@@ -82,12 +82,17 @@ export function addHeaderField(raw: Record<string, unknown>, field: Field): stri
 }
 
 /** 局部更新某 header 字段（patch 合并，保留该字段其他键）。 */
-export function updateHeaderField(raw: Record<string, unknown>, index: number, patch: Partial<Field>): string {
+export function updateHeaderField(
+  raw: Record<string, unknown>,
+  index: number,
+  patch: Partial<Field>,
+): string {
   const base = cloneWithHeader(raw);
   if (base.header === null) return commitHeader(base, raw);
   if (index < 0 || index >= base.header.length) return commitHeader(base, raw);
   const cur = base.header[index];
-  base.header[index] = typeof cur === 'object' && cur !== null ? { ...cur, ...patch } : { ...patch };
+  base.header[index] =
+    typeof cur === 'object' && cur !== null ? { ...cur, ...patch } : { ...patch };
   return commitHeader(base, raw);
 }
 
@@ -185,8 +190,7 @@ export function updatePipelineStep(
     return serializeCodec(next);
   }
   const cur = pipeline[index];
-  pipeline[index] =
-    typeof cur === 'object' && cur !== null ? { ...cur, ...patch } : { ...patch };
+  pipeline[index] = typeof cur === 'object' && cur !== null ? { ...cur, ...patch } : { ...patch };
   next['pipeline'] = pipeline;
   return serializeCodec(next);
 }
@@ -221,7 +225,10 @@ export function setRouteKeyTemplate(raw: Record<string, unknown>, template: stri
 }
 
 /** 设置或删除连接级 heartbeat。heartbeat=null 表示删除配置（不启用心跳）。 */
-export function setHeartbeat(raw: Record<string, unknown>, heartbeat: CodecHeartbeat | null): string {
+export function setHeartbeat(
+  raw: Record<string, unknown>,
+  heartbeat: CodecHeartbeat | null,
+): string {
   const next: Record<string, unknown> = JSON.parse(JSON.stringify(raw));
   if (heartbeat === null) {
     delete next['heartbeat'];
@@ -232,10 +239,16 @@ export function setHeartbeat(raw: Record<string, unknown>, heartbeat: CodecHeart
 }
 
 /** 局部更新连接级 heartbeat；若原来没有 heartbeat，则从 patch 创建。 */
-export function updateHeartbeat(raw: Record<string, unknown>, patch: Partial<CodecHeartbeat>): string {
+export function updateHeartbeat(
+  raw: Record<string, unknown>,
+  patch: Partial<CodecHeartbeat>,
+): string {
   const next: Record<string, unknown> = JSON.parse(JSON.stringify(raw));
   const cur = next['heartbeat'];
-  const base = cur !== null && typeof cur === 'object' && !Array.isArray(cur) ? cur as Record<string, unknown> : {};
+  const base =
+    cur !== null && typeof cur === 'object' && !Array.isArray(cur)
+      ? (cur as Record<string, unknown>)
+      : {};
   next['heartbeat'] = { ...base, ...patch };
   return serializeCodec(next);
 }

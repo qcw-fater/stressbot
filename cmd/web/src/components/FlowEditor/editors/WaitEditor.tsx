@@ -38,7 +38,13 @@ export function WaitEditor({ nodeId }: WaitEditorProps) {
   return (
     <Form layout="vertical">
       <Form.Item label="等待模式">
-        <Radio.Group value={mode} onChange={(e) => switchMode(e.target.value)} optionType="button" buttonStyle="solid" size="small">
+        <Radio.Group
+          value={mode}
+          onChange={(e) => switchMode(e.target.value)}
+          optionType="button"
+          buttonStyle="solid"
+          size="small"
+        >
           <Radio.Button value="fixed">固定</Radio.Button>
           <Radio.Button value="random">随机</Radio.Button>
         </Radio.Group>

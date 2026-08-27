@@ -44,22 +44,34 @@ export function FileSidebar() {
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
 
   // notepadStore: data fields (change on user interaction)
-  const { files, activeFileId, searchQuery } = useNotepadStore(useShallow((s) => ({
-    files: s.files,
-    activeFileId: s.activeFileId,
-    searchQuery: s.searchQuery,
-  })));
+  const { files, activeFileId, searchQuery } = useNotepadStore(
+    useShallow((s) => ({
+      files: s.files,
+      activeFileId: s.activeFileId,
+      searchQuery: s.searchQuery,
+    })),
+  );
 
   // notepadStore: action functions (stable refs)
-  const { selectFile, createFile, importFiles, renameFile, deleteFile, setSearchQuery, flushPendingSave } = useNotepadStore(useShallow((s) => ({
-    selectFile: s.selectFile,
-    createFile: s.createFile,
-    importFiles: s.importFiles,
-    renameFile: s.renameFile,
-    deleteFile: s.deleteFile,
-    setSearchQuery: s.setSearchQuery,
-    flushPendingSave: s.flushPendingSave,
-  })));
+  const {
+    selectFile,
+    createFile,
+    importFiles,
+    renameFile,
+    deleteFile,
+    setSearchQuery,
+    flushPendingSave,
+  } = useNotepadStore(
+    useShallow((s) => ({
+      selectFile: s.selectFile,
+      createFile: s.createFile,
+      importFiles: s.importFiles,
+      renameFile: s.renameFile,
+      deleteFile: s.deleteFile,
+      setSearchQuery: s.setSearchQuery,
+      flushPendingSave: s.flushPendingSave,
+    })),
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -170,7 +182,14 @@ export function FileSidebar() {
 
       <div className="notepad-file-list">
         {filtered.length === 0 && (
-          <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: 12, color: 'var(--text-tertiary)' }}>
+          <div
+            style={{
+              padding: '16px 8px',
+              textAlign: 'center',
+              fontSize: 12,
+              color: 'var(--text-tertiary)',
+            }}
+          >
             {files.length === 0 ? '暂无文件' : '无匹配文件'}
           </div>
         )}
@@ -186,10 +205,7 @@ export function FileSidebar() {
               onClick={() => !isRenaming && handleSelect(f.id)}
             >
               <Tooltip title={f.language} mouseEnterDelay={0.4}>
-                <span
-                  className="notepad-file-icon"
-                  style={{ color: icon.color }}
-                >
+                <span className="notepad-file-icon" style={{ color: icon.color }}>
                   {icon.char}
                 </span>
               </Tooltip>

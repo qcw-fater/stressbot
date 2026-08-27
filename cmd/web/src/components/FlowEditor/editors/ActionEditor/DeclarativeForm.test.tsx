@@ -29,10 +29,14 @@ vi.mock('../../store/flowStore', () => ({
 
 vi.mock('../../codec/useCodecConnections', () => ({
   useCodecConnections: vi.fn(() => ({
-    connections: [], loading: false, error: null,
+    connections: [],
+    loading: false,
+    error: null,
   })),
   useCodecRouteSpecs: vi.fn(() => ({
-    specs: [], loading: false, error: null,
+    specs: [],
+    loading: false,
+    error: null,
   })),
 }));
 

@@ -11,7 +11,12 @@
 import { Button, Modal, Radio, Space, Tag, Typography } from 'antd';
 import { DiffEditor } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
-import type { BaselineSyncResult, ConflictDecision, ResourceType, SyncDiff } from '@/services/resourcesStore';
+import type {
+  BaselineSyncResult,
+  ConflictDecision,
+  ResourceType,
+  SyncDiff,
+} from '@/services/resourcesStore';
 import { applyConflictResolution } from '@/services/resourcesStore';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -101,7 +106,9 @@ export function BaselineSyncModal({
       try {
         editorRef.current.getModifiedEditor()?.setModel(null);
         editorRef.current.getOriginalEditor()?.setModel(null);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       editorRef.current = null;
     }
     setCurrentIdx(newIdx);
@@ -131,7 +138,9 @@ export function BaselineSyncModal({
   const keepLocal = getDecision(item);
   const label = TYPE_LABEL[item.type];
   const localChoiceText = localLabel.replace(/^使用/, '').replace(/版本$/, '') || localLabel;
-  const serverChoiceText = isRemoved ? '删除本地' : (serverLabel.replace(/^使用/, '').replace(/版本$/, '') || serverLabel);
+  const serverChoiceText = isRemoved
+    ? '删除本地'
+    : serverLabel.replace(/^使用/, '').replace(/版本$/, '') || serverLabel;
 
   return (
     <Modal
@@ -141,9 +150,18 @@ export function BaselineSyncModal({
       width={860}
       styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
           <Space size={6} wrap>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>批量：</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              批量：
+            </Typography.Text>
             <Button size="small" type="text" onClick={() => setAll(true)}>
               保留本地
             </Button>
@@ -166,7 +184,14 @@ export function BaselineSyncModal({
       </Typography.Paragraph>
 
       {/* 导航栏：当前项信息 + 上一个/下一个 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+        }}
+      >
         <Space size={8}>
           <Tag color={label.color}>{label.text}</Tag>
           <Typography.Text strong>{item.name}</Typography.Text>
@@ -177,18 +202,10 @@ export function BaselineSyncModal({
             {idx + 1} / {total}
             {decidedCount > 0 && `（已选 ${decidedCount} 项）`}
           </Typography.Text>
-          <Button
-            size="small"
-            disabled={idx === 0}
-            onClick={() => navigateTo(idx - 1)}
-          >
+          <Button size="small" disabled={idx === 0} onClick={() => navigateTo(idx - 1)}>
             上一个
           </Button>
-          <Button
-            size="small"
-            disabled={idx === total - 1}
-            onClick={() => navigateTo(idx + 1)}
-          >
+          <Button size="small" disabled={idx === total - 1} onClick={() => navigateTo(idx + 1)}>
             下一个
           </Button>
         </Space>
@@ -209,8 +226,13 @@ export function BaselineSyncModal({
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <Typography.Text strong style={{ fontSize: 13 }}>本项使用</Typography.Text>
-          <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+          <Typography.Text strong style={{ fontSize: 13 }}>
+            本项使用
+          </Typography.Text>
+          <Typography.Text
+            type="secondary"
+            style={{ display: 'block', fontSize: 12, marginTop: 2 }}
+          >
             {keepLocal ? localChoiceText : serverChoiceText}
           </Typography.Text>
         </div>
@@ -228,7 +250,9 @@ export function BaselineSyncModal({
 
       {/* DiffEditor：只渲染当前项 */}
       {!isRemoved ? (
-        <div style={{ border: '1px solid var(--border-color)', borderRadius: 6, overflow: 'hidden' }}>
+        <div
+          style={{ border: '1px solid var(--border-color)', borderRadius: 6, overflow: 'hidden' }}
+        >
           <DiffEditor
             key={decisionKey(item)}
             height={360}
@@ -250,20 +274,30 @@ export function BaselineSyncModal({
           />
         </div>
       ) : (
-        <div style={{
-          border: '1px solid var(--border-color)',
-          borderRadius: 6,
-          padding: 24,
-          textAlign: 'center',
-          background: 'var(--bg-elevated)',
-        }}>
+        <div
+          style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: 6,
+            padding: 24,
+            textAlign: 'center',
+            background: 'var(--bg-elevated)',
+          }}
+        >
           <Typography.Text type="secondary">服务器中未找到该文件</Typography.Text>
         </div>
       )}
 
       {/* 底部快捷导航：已跳转的项用小圆点标记选择状态 */}
       {total > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 6,
+            marginTop: 12,
+            flexWrap: 'wrap',
+          }}
+        >
           {allItems.map((it, i) => {
             const d = decisions[decisionKey(it)];
             return (
@@ -274,12 +308,14 @@ export function BaselineSyncModal({
                   width: 10,
                   height: 10,
                   borderRadius: '50%',
-                  border: i === idx ? '2px solid var(--color-blue)' : '1px solid var(--border-color)',
-                  background: d === undefined
-                    ? 'transparent'
-                    : d
-                      ? 'var(--color-blue)'
-                      : 'var(--color-orange)',
+                  border:
+                    i === idx ? '2px solid var(--color-blue)' : '1px solid var(--border-color)',
+                  background:
+                    d === undefined
+                      ? 'transparent'
+                      : d
+                        ? 'var(--color-blue)'
+                        : 'var(--color-orange)',
                   cursor: 'pointer',
                   padding: 0,
                   transition: 'all 0.2s',

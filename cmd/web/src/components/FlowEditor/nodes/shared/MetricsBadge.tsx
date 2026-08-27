@@ -103,9 +103,13 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
         : { label: '耗时', hist: m.totalDuration, count: m.totalDurationSampleCount };
   const primaryP99 = primary.hist.p99Ms;
   const showP99 =
-    primary.count > 0 && primary.hist.count > 0 &&
-    primary.hist.avgMs != null && primary.hist.p95Ms != null &&
-    primaryP99 != null && primary.hist.maxMs != null && m.totalDuration.p99Ms != null;
+    primary.count > 0 &&
+    primary.hist.count > 0 &&
+    primary.hist.avgMs != null &&
+    primary.hist.p95Ms != null &&
+    primaryP99 != null &&
+    primary.hist.maxMs != null &&
+    m.totalDuration.p99Ms != null;
 
   // Apdex 只对往返类打分；其余类别的徽章位置改用成功计数（样式统一，文本诚实）。
   const isNetworked = m.kind === 'networked' && m.rttApdexSampleCount > 0;

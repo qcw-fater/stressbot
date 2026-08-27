@@ -52,8 +52,14 @@ export function TargetConnectionSelect({
     .filter((c) => !protocol || c.protocol === protocol)
     .map((c) => ({ value: c.conn, label: c.conn }));
   const missing = Boolean(value) && !options.some((o) => o.value === value);
-  const mergedOptions = missing ? [{ value: value as string, label: value as string }, ...options] : options;
-  const issue = error ? `协议配置加载失败：${error}` : missing ? '当前目标连接未在协议配置中创建' : undefined;
+  const mergedOptions = missing
+    ? [{ value: value as string, label: value as string }, ...options]
+    : options;
+  const issue = error
+    ? `协议配置加载失败：${error}`
+    : missing
+      ? '当前目标连接未在协议配置中创建'
+      : undefined;
 
   const onTargetChange = (next: string | undefined) => {
     if (protocol) {
@@ -64,7 +70,9 @@ export function TargetConnectionSelect({
   };
 
   return (
-    <div className={`target-connection-select target-connection-select--${inline ? 'inline' : 'stacked'}`}>
+    <div
+      className={`target-connection-select target-connection-select--${inline ? 'inline' : 'stacked'}`}
+    >
       <Select
         aria-label="目标连接"
         size={size}
@@ -87,11 +95,7 @@ export function TargetConnectionSelect({
           <WarningOutlined className="target-connection-select__warning" />
         </Tooltip>
       )}
-      {issue && !inline && (
-        <div className="target-connection-select__error">
-          {issue}
-        </div>
-      )}
+      {issue && !inline && <div className="target-connection-select__error">{issue}</div>}
     </div>
   );
 }
@@ -118,7 +122,9 @@ export function TargetConnectionRouteEditor({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div>
-        <Typography.Text style={{ fontSize: 12, color: 'var(--text-secondary)' }}>目标连接</Typography.Text>
+        <Typography.Text style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          目标连接
+        </Typography.Text>
         <div style={{ marginTop: 4 }}>
           <TargetConnectionSelect
             protocol={protocol}
@@ -135,7 +141,9 @@ export function TargetConnectionRouteEditor({
       </div>
       {onChangeRoute && (
         <div>
-          <Typography.Text style={{ fontSize: 12, color: 'var(--text-secondary)' }}>route 模板字段</Typography.Text>
+          <Typography.Text style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            route 模板字段
+          </Typography.Text>
           <div style={{ marginTop: 4 }}>
             <RouteEditor
               size={size}

@@ -4,7 +4,11 @@ import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
 import { useStateKeyOptions } from '../editors/ActionEditor/useStateKeyOptions';
-import { createValidationScheduler, validateAndPublish, type ValidationScheduler } from './validationStore';
+import {
+  createValidationScheduler,
+  validateAndPublish,
+  type ValidationScheduler,
+} from './validationStore';
 
 /** 统一流程校验入口：连续编辑时只在停止输入 150ms 后校验一次。 */
 export function FlowValidationCoordinator() {

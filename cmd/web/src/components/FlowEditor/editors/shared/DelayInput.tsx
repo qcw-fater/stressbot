@@ -29,7 +29,12 @@ export function DelayInput({ value, onChange }: DelayInputProps) {
 
   return (
     <Space>
-      <Radio.Group value={mode} onChange={(e) => set(e.target.value)} buttonStyle="solid" size="small">
+      <Radio.Group
+        value={mode}
+        onChange={(e) => set(e.target.value)}
+        buttonStyle="solid"
+        size="small"
+      >
         <Radio.Button value="default">使用默认</Radio.Button>
         <Radio.Button value="custom">自定义</Radio.Button>
         <Radio.Button value="disabled">禁用</Radio.Button>
@@ -44,11 +49,29 @@ export function DelayInput({ value, onChange }: DelayInputProps) {
             onChange={(v) => onChange?.((v as number) ?? 1000)}
             style={{ width: 120 }}
           />
-          <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '0 6px 6px 0', fontSize: 13 }}>ms</span>
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 8px',
+              background: 'var(--container-bg)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '0 6px 6px 0',
+              fontSize: 13,
+            }}
+          >
+            ms
+          </span>
         </Space.Compact>
       )}
-      {mode === 'default' && <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>= TaskFlow.defaultDelayMs</span>}
-      {mode === 'disabled' && <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>立即执行下一节点</span>}
+      {mode === 'default' && (
+        <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
+          = TaskFlow.defaultDelayMs
+        </span>
+      )}
+      {mode === 'disabled' && (
+        <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>立即执行下一节点</span>
+      )}
     </Space>
   );
 }

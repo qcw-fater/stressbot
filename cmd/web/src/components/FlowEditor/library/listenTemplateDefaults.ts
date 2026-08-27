@@ -7,7 +7,9 @@ export interface InferListenDefaultRefResult {
   ambiguous: boolean;
 }
 
-export function cloneListenDefaultRef(ref?: ListenTemplateDefaultRef): ListenTemplateDefaultRef | undefined {
+export function cloneListenDefaultRef(
+  ref?: ListenTemplateDefaultRef,
+): ListenTemplateDefaultRef | undefined {
   if (!ref) return undefined;
   const cloned: ListenTemplateDefaultRef = {
     server: ref.server,

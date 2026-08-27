@@ -237,27 +237,47 @@ describe('template collection identity hooks', () => {
   it('只按区分大小写的精确名称判重，不按 ID 判重', () => {
     const current = [template('target', 'Login', 'old')];
 
-    expect(findDuplicate(current, template('other', 'Login', 'new'), templateIdentity)).toMatchObject({
+    expect(
+      findDuplicate(current, template('other', 'Login', 'new'), templateIdentity),
+    ).toMatchObject({
       kind: 'one',
       matches: [current[0]],
     });
-    expect(findDuplicate(current, template('target', 'Renamed', 'new'), templateIdentity)).toMatchObject({ kind: 'none' });
-    expect(findDuplicate(current, template('other', 'login', 'new'), templateIdentity)).toMatchObject({ kind: 'none' });
+    expect(
+      findDuplicate(current, template('target', 'Renamed', 'new'), templateIdentity),
+    ).toMatchObject({ kind: 'none' });
+    expect(
+      findDuplicate(current, template('other', 'login', 'new'), templateIdentity),
+    ).toMatchObject({ kind: 'none' });
   });
 
   it('覆盖保留目标身份，跳过保持目标不变，新增清空服务器身份字段', () => {
     const current = [template('target', 'Login', 'old', 100)];
     const incoming = [template('imported', 'Login', 'new', 200)];
 
-    const overwritten = planCollectionMerge(current, incoming, templateIdentity, 'overwrite', 'actionTemplates');
-    expect(overwritten.finalItems).toEqual([{
-      ...incoming[0],
-      id: 'target',
-      createdAt: 100,
-      updatedAt: 0,
-    }]);
+    const overwritten = planCollectionMerge(
+      current,
+      incoming,
+      templateIdentity,
+      'overwrite',
+      'actionTemplates',
+    );
+    expect(overwritten.finalItems).toEqual([
+      {
+        ...incoming[0],
+        id: 'target',
+        createdAt: 100,
+        updatedAt: 0,
+      },
+    ]);
 
-    const skipped = planCollectionMerge(current, incoming, templateIdentity, 'skip', 'actionTemplates');
+    const skipped = planCollectionMerge(
+      current,
+      incoming,
+      templateIdentity,
+      'skip',
+      'actionTemplates',
+    );
     expect(skipped.finalItems).toEqual(current);
 
     const added = planCollectionMerge(
@@ -267,7 +287,12 @@ describe('template collection identity hooks', () => {
       'overwrite',
       'actionTemplates',
     );
-    expect(added.finalItems[1]).toMatchObject({ id: '', name: 'Renamed', createdAt: 0, updatedAt: 0 });
+    expect(added.finalItems[1]).toMatchObject({
+      id: '',
+      name: 'Renamed',
+      createdAt: 0,
+      updatedAt: 0,
+    });
   });
 
   it('逐项保留副本时清空身份元数据并生成唯一名称', () => {

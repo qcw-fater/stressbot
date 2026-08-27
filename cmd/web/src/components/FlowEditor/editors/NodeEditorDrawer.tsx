@@ -70,7 +70,7 @@ export function NodeEditorDrawer() {
       snapshot.current = null;
       return;
     }
-    const actionName = n.type === 'action' ? n.action ?? null : null;
+    const actionName = n.type === 'action' ? (n.action ?? null) : null;
     const actionDef = actionName ? flow.actions[actionName] : null;
     snapshot.current = {
       nodeId,
@@ -169,12 +169,11 @@ export function NodeEditorDrawer() {
             onConfirm={onRevert}
             disabled={!dirty}
           >
-            <Tooltip title={dirty ? '还原本次打开后的所有修改' : '尚未修改任何内容'} mouseEnterDelay={0.4}>
-              <Button
-                icon={<UndoOutlined />}
-                size="small"
-                disabled={!dirty}
-              >
+            <Tooltip
+              title={dirty ? '还原本次打开后的所有修改' : '尚未修改任何内容'}
+              mouseEnterDelay={0.4}
+            >
+              <Button icon={<UndoOutlined />} size="small" disabled={!dirty}>
                 还原
               </Button>
             </Tooltip>

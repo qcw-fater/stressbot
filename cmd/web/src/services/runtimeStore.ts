@@ -184,8 +184,7 @@ export const useRuntimeStore = create<RuntimeState>()(
       setTotalBots: (v) => set({ totalBots: v }),
       setRampUpEnabled: (v) => set({ rampUpEnabled: v }),
       setRampUpStages: (v) => set({ rampUpStages: v }),
-      setRobotConfig: (v) =>
-        set((s) => ({ robotConfig: { ...s.robotConfig, ...v } })),
+      setRobotConfig: (v) => set((s) => ({ robotConfig: { ...s.robotConfig, ...v } })),
       setDeadline: (v) => set({ deadline: v }),
 
       // pushStress 双重守门：
@@ -204,8 +203,9 @@ export const useRuntimeStore = create<RuntimeState>()(
       pushStress: (snap) =>
         set((s) => {
           if (s.mode !== 'running' && s.mode !== 'viewActive') return {};
-          const isEmpty = (!snap.actions || snap.actions.length === 0)
-            && (!snap.uptimeSeconds || snap.uptimeSeconds <= 0);
+          const isEmpty =
+            (!snap.actions || snap.actions.length === 0) &&
+            (!snap.uptimeSeconds || snap.uptimeSeconds <= 0);
           if (isEmpty) return {};
           return {
             latestStress: snap,
@@ -225,13 +225,20 @@ export const useRuntimeStore = create<RuntimeState>()(
       setAgents: (items) => set({ agents: items, agentsLoaded: true }),
       setConnectionLost: (lost) => set({ connectionLost: lost }),
       setAgentHealth: (reporting, total, offline, assigned) =>
-        set({ reportingAgents: reporting, totalAgents: total, offlineAgents: offline, assignedAgents: assigned }),
+        set({
+          reportingAgents: reporting,
+          totalAgents: total,
+          offlineAgents: offline,
+          assignedAgents: assigned,
+        }),
       setAgentEvents: (events) => set({ agentEvents: events }),
       appendAgentEvents: (events) =>
         set((s) => {
           if (!events.length) return {};
           // 按 timestamp 去重，避免 polling 重复推入
-          const existing = new Set(s.agentEvents.map((e) => `${e.agentId}:${e.type}:${e.timestamp}`));
+          const existing = new Set(
+            s.agentEvents.map((e) => `${e.agentId}:${e.type}:${e.timestamp}`),
+          );
           const newEvents = events.filter(
             (e) => !existing.has(`${e.agentId}:${e.type}:${e.timestamp}`),
           );
@@ -283,8 +290,7 @@ export const useRuntimeStore = create<RuntimeState>()(
           // 保留 latestStress / latestSystem / history：用于终态返回后短暂参考末次快照。
         }),
 
-      reset: () =>
-        set({ ...initialState, robotConfig: { ...DEFAULT_ROBOT_CONFIG } }),
+      reset: () => set({ ...initialState, robotConfig: { ...DEFAULT_ROBOT_CONFIG } }),
 
       backfillHistory: (stress, system) =>
         set((s) => {
@@ -345,9 +351,7 @@ export const useRuntimeStore = create<RuntimeState>()(
 );
 
 /** 便捷：按当前 mode 派生 TanStack Query 轮询参数（HomeShell 使用） */
-export function pollingPolicy(
-  mode: RuntimeMode,
-): {
+export function pollingPolicy(mode: RuntimeMode): {
   pollStress: boolean;
   pollSystem: boolean;
   pollAgents: boolean;

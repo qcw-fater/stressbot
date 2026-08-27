@@ -39,7 +39,9 @@ export function parseCodecFileNameStrict(name: string): CodecConnection {
   const stripped = name.slice(0, -CODEC_FILE_SUFFIX.length);
   const idx = stripped.indexOf('_');
   if (idx <= 0 || idx === stripped.length - 1) {
-    throw new Error(`非法 codec 文件名：${name}，格式应为 <protocol>_<service>${CODEC_FILE_SUFFIX}`);
+    throw new Error(
+      `非法 codec 文件名：${name}，格式应为 <protocol>_<service>${CODEC_FILE_SUFFIX}`,
+    );
   }
   const protocol = stripped.slice(0, idx);
   const service = stripped.slice(idx + 1);
@@ -47,7 +49,9 @@ export function parseCodecFileNameStrict(name: string): CodecConnection {
     throw new Error(`非法 codec protocol：${protocol}，只能是 tcp 或 udp`);
   }
   if (!service || service.includes(':') || service.includes('_')) {
-    throw new Error(`非法 codec service：${service || '(空)'}，service 不能为空且不能包含 ":" 或 "_"`);
+    throw new Error(
+      `非法 codec service：${service || '(空)'}，service 不能为空且不能包含 ":" 或 "_"`,
+    );
   }
   const conn = buildCodecConnectionName(protocol, service);
   return { protocol, service, conn, fileName: name };
@@ -81,7 +85,9 @@ export async function listCodecConnections(): Promise<CodecConnection[]> {
   return collectCodecConnectionsFromFiles(await listCodecFiles());
 }
 
-export async function loadCodecRouteSpecs(options: { strict?: boolean } = {}): Promise<Map<string, CodecRouteSpec>> {
+export async function loadCodecRouteSpecs(
+  options: { strict?: boolean } = {},
+): Promise<Map<string, CodecRouteSpec>> {
   const strict = options.strict ?? true;
   const files = await listCodecFiles();
   const map = new Map<string, CodecRouteSpec>();

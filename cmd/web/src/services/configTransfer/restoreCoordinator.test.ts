@@ -90,21 +90,26 @@ function fakeEnvironment(calls: string[], options: EnvironmentOptions = {}): Tes
   const journal = options.journal ?? memoryJournal();
   let flowRevision = 'flow-before';
   let flowItems: unknown[] = [];
-  const getFlowSnapshot = vi.fn(async () => ({ revision: flowRevision, items: structuredClone(flowItems) }));
-  const replaceFlowSnapshot = vi.fn(async (request: { expectedRevision: string; items: unknown[] }) => {
-    if (request.expectedRevision === 'flow-before') {
-      calls.push('apply:flows');
-      if (options.flowApplyError) throw options.flowApplyError;
-      flowRevision = 'flow-applied';
+  const getFlowSnapshot = vi.fn(async () => ({
+    revision: flowRevision,
+    items: structuredClone(flowItems),
+  }));
+  const replaceFlowSnapshot = vi.fn(
+    async (request: { expectedRevision: string; items: unknown[] }) => {
+      if (request.expectedRevision === 'flow-before') {
+        calls.push('apply:flows');
+        if (options.flowApplyError) throw options.flowApplyError;
+        flowRevision = 'flow-applied';
+        flowItems = structuredClone(request.items);
+        return { revision: 'flow-applied', count: request.items.length };
+      }
+      calls.push('rollback:flows');
+      if (options.flowRollbackError) throw options.flowRollbackError;
+      flowRevision = 'flow-before';
       flowItems = structuredClone(request.items);
-      return { revision: 'flow-applied', count: request.items.length };
-    }
-    calls.push('rollback:flows');
-    if (options.flowRollbackError) throw options.flowRollbackError;
-    flowRevision = 'flow-before';
-    flowItems = structuredClone(request.items);
-    return { revision: 'flow-before', count: request.items.length };
-  });
+      return { revision: 'flow-before', count: request.items.length };
+    },
+  );
   const flowAdapter: RestoreAdapter = {
     key: 'flows',
     kind: 'collection',
@@ -135,7 +140,8 @@ function fakeEnvironment(calls: string[], options: EnvironmentOptions = {}): Tes
   const registry = Object.fromEntries(
     BACKUP_SECTIONS.map((section) => [
       section,
-      options.adapters?.[section] ?? (section === 'flows' ? flowAdapter : fakeAdapter(section, calls)),
+      options.adapters?.[section] ??
+        (section === 'flows' ? flowAdapter : fakeAdapter(section, calls)),
     ]),
   ) as Record<BackupSection, RestoreAdapter>;
 
@@ -520,7 +526,9 @@ describe('generic versioned sections', () => {
           return { revision, value: structuredClone(value) };
         }),
       },
-      setRevision: (next) => { revision = next; },
+      setRevision: (next) => {
+        revision = next;
+      },
     } as RestoreAdapter & { setRevision: (revision: string) => void };
   }
 
@@ -590,7 +598,11 @@ describe('generic versioned sections', () => {
       adapters: { actionTemplates: action, listenTemplates: listen, draft },
     });
     const plan = await preflightRestore(
-      bundleFor({ draft: 'draft-after', actionTemplates: 'action-after', listenTemplates: 'listen-after' }),
+      bundleFor({
+        draft: 'draft-after',
+        actionTemplates: 'action-after',
+        listenTemplates: 'listen-after',
+      }),
       ['draft', 'actionTemplates', 'listenTemplates'],
       'replace',
       'overwrite',
@@ -616,9 +628,8 @@ describe('generic versioned sections', () => {
     let revision = 'action-r1';
     let value = structuredClone(before);
     let firstApply = true;
-    const semantic = (items: unknown) => JSON.stringify(
-      (items as Array<{ name: string }>).map((item) => ({ name: item.name })),
-    );
+    const semantic = (items: unknown) =>
+      JSON.stringify((items as Array<{ name: string }>).map((item) => ({ name: item.name })));
     const adapter: RestoreAdapter = {
       key: 'actionTemplates',
       kind: 'collection',
@@ -640,7 +651,14 @@ describe('generic versioned sections', () => {
           if (expectedRevision !== revision) throw new Error('stale');
           if (firstApply) {
             firstApply = false;
-            value = [{ ...(next as Array<Record<string, unknown>>)[0], id: 'server-id', createdAt: 100, updatedAt: 101 }] as typeof before;
+            value = [
+              {
+                ...(next as Array<Record<string, unknown>>)[0],
+                id: 'server-id',
+                createdAt: 100,
+                updatedAt: 101,
+              },
+            ] as typeof before;
             revision = 'action-r2';
             throw new Error('响应前连接中断');
           }

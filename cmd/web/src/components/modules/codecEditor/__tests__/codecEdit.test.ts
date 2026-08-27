@@ -160,7 +160,9 @@ describe('header 字段增删改 — 不 mutate 入参，只动预期部分', ()
   it('header 不是数组时 add/remove/update 安全降级（返回原 content，不抛错）', () => {
     const content = '{"version":1,"header":"oops"}';
     const { raw } = parseCodecForEdit(content);
-    expect(() => addHeaderField(raw!, { name: 'x', offset: 0, size: 1, type: 'u8', role: 'reserved' })).not.toThrow();
+    expect(() =>
+      addHeaderField(raw!, { name: 'x', offset: 0, size: 1, type: 'u8', role: 'reserved' }),
+    ).not.toThrow();
     expect(() => updateHeaderField(raw!, 0, { size: 2 })).not.toThrow();
     expect(() => removeHeaderField(raw!, 0)).not.toThrow();
     expect(() => moveHeaderField(raw!, 0, 1)).not.toThrow();
@@ -291,18 +293,34 @@ describe('pipeline 步骤增删改/移动 — raw 无损 + 不 mutate', () => {
   it('movePipelineStep：上移/下移交换，越界保持原序', () => {
     const { raw } = parseCodecForEdit(baseContent);
     let content = addPipelineStep(raw!, { op: 'encrypt', name: 'enc', algo: 'xxtea' });
-    content = addPipelineStep(JSON.parse(content), { op: 'checksum', name: 'cksum', algo: 'crc32' });
+    content = addPipelineStep(JSON.parse(content), {
+      op: 'checksum',
+      name: 'cksum',
+      algo: 'crc32',
+    });
     // 顺序：zip, enc, cksum
     // 下移 index 0 → enc, zip, cksum
     const down = movePipelineStep(JSON.parse(content), 0, 1);
     const downParsed = JSON.parse(down);
-    expect(downParsed.pipeline.map((s: { name: string }) => s.name)).toEqual(['enc', 'zip', 'cksum']);
+    expect(downParsed.pipeline.map((s: { name: string }) => s.name)).toEqual([
+      'enc',
+      'zip',
+      'cksum',
+    ]);
     // 上移 index 2 → enc, cksum, zip
     const up = movePipelineStep(downParsed, 2, -1);
-    expect(JSON.parse(up).pipeline.map((s: { name: string }) => s.name)).toEqual(['enc', 'cksum', 'zip']);
+    expect(JSON.parse(up).pipeline.map((s: { name: string }) => s.name)).toEqual([
+      'enc',
+      'cksum',
+      'zip',
+    ]);
     // 越界：index 0 上移保持原序
     const oob = movePipelineStep(JSON.parse(content), 0, -1);
-    expect(JSON.parse(oob).pipeline.map((s: { name: string }) => s.name)).toEqual(['zip', 'enc', 'cksum']);
+    expect(JSON.parse(oob).pipeline.map((s: { name: string }) => s.name)).toEqual([
+      'zip',
+      'enc',
+      'cksum',
+    ]);
   });
 
   it('pipeline 不是数组时 add 安全降级（创建数组）', () => {
@@ -361,9 +379,15 @@ describe('heartbeat 编辑 — raw 无损 + 不 mutate', () => {
   });
 
   it('updateHeartbeat：局部 patch 合并', () => {
-    const raw = JSON.parse(setHeartbeat(JSON.parse(baseContent), { intervalMs: 3000, route: { cmd: 1 } }));
+    const raw = JSON.parse(
+      setHeartbeat(JSON.parse(baseContent), { intervalMs: 3000, route: { cmd: 1 } }),
+    );
     const next = updateHeartbeat(raw, { skipWhenMissing: true });
-    expect(JSON.parse(next).heartbeat).toEqual({ intervalMs: 3000, route: { cmd: 1 }, skipWhenMissing: true });
+    expect(JSON.parse(next).heartbeat).toEqual({
+      intervalMs: 3000,
+      route: { cmd: 1 },
+      skipWhenMissing: true,
+    });
   });
 });
 

@@ -15,9 +15,12 @@ export function updateFailedSources(
 export function useConnectionHealth(setConnectionLost: (lost: boolean) => void) {
   const failedSourcesRef = useRef<Set<string>>(new Set());
 
-  return useCallback((source: string, failed: boolean) => {
-    const next = updateFailedSources(failedSourcesRef.current, source, failed);
-    failedSourcesRef.current = next;
-    setConnectionLost(next.size > 0);
-  }, [setConnectionLost]);
+  return useCallback(
+    (source: string, failed: boolean) => {
+      const next = updateFailedSources(failedSourcesRef.current, source, failed);
+      failedSourcesRef.current = next;
+      setConnectionLost(next.size > 0);
+    },
+    [setConnectionLost],
+  );
 }

@@ -59,7 +59,10 @@
 
 .monitor-dock__top--runtime {
   display: grid;
-  grid-template-columns: minmax(245px, 0.9fr) minmax(360px, 1.25fr) minmax(360px, 1.25fr) minmax(360px, 1.28fr);
+  grid-template-columns: minmax(245px, 0.9fr) minmax(360px, 1.25fr) minmax(360px, 1.25fr) minmax(
+      360px,
+      1.28fr
+    );
   gap: 6px;
   height: 124px;
 }
@@ -109,8 +112,11 @@
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--glass-border) 86%, transparent);
   border-radius: 9px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--glass-bg) 88%, var(--bg-panel) 12%), var(--glass-bg));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--glass-bg) 88%, var(--bg-panel) 12%),
+    var(--glass-bg)
+  );
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.11);
   position: relative;
 }
@@ -248,7 +254,11 @@
   border: 1px solid color-mix(in srgb, var(--color-blue) 22%, var(--border-color));
   border-radius: 9px;
   background:
-    radial-gradient(circle at 0 0, color-mix(in srgb, var(--color-blue) 18%, transparent), transparent 48%),
+    radial-gradient(
+      circle at 0 0,
+      color-mix(in srgb, var(--color-blue) 18%, transparent),
+      transparent 48%
+    ),
     color-mix(in srgb, var(--bg-panel) 68%, transparent);
 }
 
@@ -451,7 +461,10 @@
 
 @media (max-width: 1500px) {
   .monitor-dock__top--runtime {
-    grid-template-columns: minmax(240px, 0.85fr) minmax(320px, 1fr) minmax(320px, 1fr) minmax(320px, 1fr);
+    grid-template-columns: minmax(240px, 0.85fr) minmax(320px, 1fr) minmax(320px, 1fr) minmax(
+        320px,
+        1fr
+      );
   }
 
   .md-kpi-cell {

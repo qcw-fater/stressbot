@@ -6,17 +6,17 @@
  * 修改经 codecEdit helper → onEdit 回灌 content。
  */
 
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { Button, InputNumber, Select, Space, Table, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { CodecSchema, Field } from '@/types/codec';
 import { FIELD_ROLES, FIELD_TYPES, FIELD_TYPE_WIDTH } from '@/types/codec';
-import {
-  addHeaderField,
-  moveHeaderField,
-  removeHeaderField,
-  updateHeaderField,
-} from './codecEdit';
+import { addHeaderField, moveHeaderField, removeHeaderField, updateHeaderField } from './codecEdit';
 import { computeByteRanges } from './byteLayout';
 import { RoleLinkedForm } from './RoleLinkedForm';
 
@@ -28,7 +28,13 @@ export interface HeaderFieldTableProps {
   onEdit: (nextContent: string) => void;
 }
 
-export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit }: HeaderFieldTableProps) {
+export function HeaderFieldTable({
+  raw,
+  schema,
+  selectedIndex,
+  onSelect,
+  onEdit,
+}: HeaderFieldTableProps) {
   const fields: Field[] = schema.header ?? [];
   const headerSize: number = schema.frame?.headerSize ?? 0;
   const ranges = computeByteRanges(fields, headerSize);
@@ -71,7 +77,9 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
           min={0}
           value={record.offset}
           style={{ width: 64 }}
-          onChange={(v) => onEdit(updateHeaderField(raw, idx, { offset: typeof v === 'number' ? v : 0 }))}
+          onChange={(v) =>
+            onEdit(updateHeaderField(raw, idx, { offset: typeof v === 'number' ? v : 0 }))
+          }
         />
       ),
     },
@@ -96,7 +104,11 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
       render: (_, record, idx) => {
         const fixedWidth = record.type ? FIELD_TYPE_WIDTH[record.type] : undefined;
         if (fixedWidth && fixedWidth > 0) {
-          return <Typography.Text code style={{ fontSize: 12 }}>{fixedWidth}</Typography.Text>;
+          return (
+            <Typography.Text code style={{ fontSize: 12 }}>
+              {fixedWidth}
+            </Typography.Text>
+          );
         }
         return (
           <InputNumber
@@ -104,7 +116,9 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
             min={0}
             value={record.size}
             style={{ width: 64 }}
-            onChange={(v) => onEdit(updateHeaderField(raw, idx, { size: typeof v === 'number' ? v : 0 }))}
+            onChange={(v) =>
+              onEdit(updateHeaderField(raw, idx, { size: typeof v === 'number' ? v : 0 }))
+            }
           />
         );
       },
@@ -188,7 +202,9 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
       <div className="pce-bench-header header-fields-header">
         <div>
           <Typography.Text className="pce-bench-title">字段表</Typography.Text>
-          <Typography.Text className="pce-bench-meta">{fields.length} 字段 · offset / type / size / role</Typography.Text>
+          <Typography.Text className="pce-bench-meta">
+            {fields.length} 字段 · offset / type / size / role
+          </Typography.Text>
         </div>
         <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addField}>
           添加字段

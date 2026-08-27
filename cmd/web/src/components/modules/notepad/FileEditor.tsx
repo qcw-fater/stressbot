@@ -52,7 +52,8 @@ export function FileEditor() {
       let skipped = 0;
       let failCount = 0;
       for (const f of droppedFiles) {
-        if (f.size > 5 * 1024 * 1024) { // 超过 5 MB 跳过，避免拖入大文件卡顿
+        if (f.size > 5 * 1024 * 1024) {
+          // 超过 5 MB 跳过，避免拖入大文件卡顿
           skipped++;
           continue;
         }

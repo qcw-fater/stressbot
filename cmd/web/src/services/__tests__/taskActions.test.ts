@@ -60,7 +60,8 @@ vi.mock('../resourcesStore', () => ({
   listScript: (...args: unknown[]) => mocks.listScript(...args),
   listCodecFiles: (...args: unknown[]) => mocks.listCodecFiles(...args),
   getErrorMap: (...args: unknown[]) => mocks.getErrorMap(...args),
-  markResourcesAsBaselineSynced: (...args: unknown[]) => mocks.markResourcesAsBaselineSynced(...args),
+  markResourcesAsBaselineSynced: (...args: unknown[]) =>
+    mocks.markResourcesAsBaselineSynced(...args),
 }));
 vi.mock('../taskResourceDiff', () => ({
   collectFlowCodecConnections: (...args: unknown[]) => mocks.collectFlowCodecConnections(...args),

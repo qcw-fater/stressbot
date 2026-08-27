@@ -17,11 +17,23 @@ export function SeqEdge({
   markerEnd,
   selected,
 }: EdgeProps) {
-  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
   const d = data as { order?: number; sourceNodeType?: string } | undefined;
   const order = d?.order;
   const sourceColor = colorOfNodeType(d?.sourceNodeType);
-  const style = buildEdgeStyle({ sourceNodeType: d?.sourceNodeType, width: 1.5, dash: '5 4', selected });
+  const style = buildEdgeStyle({
+    sourceNodeType: d?.sourceNodeType,
+    width: 1.5,
+    dash: '5 4',
+    selected,
+  });
   return (
     <>
       <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />

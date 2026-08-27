@@ -17,13 +17,25 @@ export function WeightEdge({
   markerEnd,
   selected,
 }: EdgeProps) {
-  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
   const d = data as { weight?: number; ratio?: number; sourceNodeType?: string } | undefined;
   const weight = d?.weight ?? 0;
   const ratio = d?.ratio ?? 0;
   const sourceType = d?.sourceNodeType ?? 'weighted';
   const baseWidth = 1.5 + ratio * 2.5;
-  const style = buildEdgeStyle({ sourceNodeType: sourceType, width: baseWidth, dash: '4 2', selected });
+  const style = buildEdgeStyle({
+    sourceNodeType: sourceType,
+    width: baseWidth,
+    dash: '4 2',
+    selected,
+  });
   return (
     <>
       <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />

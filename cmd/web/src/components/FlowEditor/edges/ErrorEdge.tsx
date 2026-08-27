@@ -17,7 +17,14 @@ export function ErrorEdge({
   markerEnd,
   selected,
 }: EdgeProps) {
-  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
   const style = buildEdgeStyle({
     sourceNodeType: 'action',
     width: 1.4,
@@ -27,7 +34,12 @@ export function ErrorEdge({
   });
   return (
     <>
-      <BaseEdge id={id} path={path} style={selected ? style : { ...style, opacity: 0.82 }} markerEnd={markerEnd} />
+      <BaseEdge
+        id={id}
+        path={path}
+        style={selected ? style : { ...style, opacity: 0.82 }}
+        markerEnd={markerEnd}
+      />
       <EdgeLabelRenderer>
         <Tooltip title="onError.handler 调用边" mouseEnterDelay={0.4}>
           <div

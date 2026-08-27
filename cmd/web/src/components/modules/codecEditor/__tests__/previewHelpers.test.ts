@@ -6,7 +6,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildRouteMap, collectRouteFields, deriveTransport, pruneRouteForm } from '../previewHelpers';
+import {
+  buildRouteMap,
+  collectRouteFields,
+  deriveTransport,
+  pruneRouteForm,
+} from '../previewHelpers';
 import type { CodecSchema, Field } from '@/types/codec';
 
 describe('deriveTransport', () => {
@@ -41,7 +46,12 @@ describe('collectRouteFields', () => {
   const base: CodecSchema = {
     version: 1,
     endianDefault: 'le',
-    frame: { headerSize: 8, trailerSize: 0, lengthIncludesHeader: false, lengthIncludesTrailer: false },
+    frame: {
+      headerSize: 8,
+      trailerSize: 0,
+      lengthIncludesHeader: false,
+      lengthIncludesTrailer: false,
+    },
     header: [],
     routeKeyTemplate: '',
     pipeline: [],
@@ -136,10 +146,13 @@ describe('buildRouteMap', () => {
 });
 
 describe('pruneRouteForm', () => {
-  const fields = (names: string[]): Field[] => names.map((name) => ({ name } as Field));
+  const fields = (names: string[]): Field[] => names.map((name) => ({ name }) as Field);
 
   it('保留仍存在的 route 字段键', () => {
-    expect(pruneRouteForm({ cmd: '1', act: '2' }, fields(['cmd', 'act']))).toEqual({ cmd: '1', act: '2' });
+    expect(pruneRouteForm({ cmd: '1', act: '2' }, fields(['cmd', 'act']))).toEqual({
+      cmd: '1',
+      act: '2',
+    });
   });
 
   it('剔除切连接后残留的旧字段键', () => {

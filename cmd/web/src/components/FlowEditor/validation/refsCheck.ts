@@ -34,21 +34,65 @@ export interface ValidationReport {
 
 // ── pattern 必填字段映射 ──────────────────────────────────────
 
-const PATTERNS_REQUIRE_SERVICE = ['tcpSend', 'tcpRequest', 'tcpConnect', 'tcpClose', 'tcpListen', 'udpSend', 'udpRequest', 'udpConnect', 'udpClose', 'udpListen'];
-const PATTERNS_REQUIRE_ROUTE = ['tcpSend', 'tcpRequest', 'tcpListen', 'udpSend', 'udpRequest', 'udpListen'];
+const PATTERNS_REQUIRE_SERVICE = [
+  'tcpSend',
+  'tcpRequest',
+  'tcpConnect',
+  'tcpClose',
+  'tcpListen',
+  'udpSend',
+  'udpRequest',
+  'udpConnect',
+  'udpClose',
+  'udpListen',
+];
+const PATTERNS_REQUIRE_ROUTE = [
+  'tcpSend',
+  'tcpRequest',
+  'tcpListen',
+  'udpSend',
+  'udpRequest',
+  'udpListen',
+];
 const PATTERNS_REQUIRE_ADDRESS = ['tcpConnect', 'udpConnect'];
 const PATTERNS_REQUIRE_C2S = ['tcpSend', 'udpSend'];
 const PATTERNS_REQUIRE_S2C = ['tcpRequest', 'udpRequest'];
 
 const REMOVED_HEARTBEAT_PATTERNS = new Set(['tcpHeartbeat', 'udpHeartbeat']);
 
-const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'switch', 'weighted', 'wait', 'break', 'continue']);
+const VALID_NODE_TYPES = new Set([
+  'sequence',
+  'action',
+  'loop',
+  'boolean',
+  'switch',
+  'weighted',
+  'wait',
+  'break',
+  'continue',
+]);
 const VALID_ON_ERROR_STRATEGIES = new Set<OnErrorStrategy>(['resume', 'skip', 'abort']);
 
 const VALID_FILTER_OPS = new Set([
-  '', '==', '!=', '>', '>=', '<', '<=',
-  'eq', 'neq', 'gt', 'gte', 'lt', 'lte',
-  'contains', 'notContains', 'in', 'notIn', 'notNil', 'isNil',
+  '',
+  '==',
+  '!=',
+  '>',
+  '>=',
+  '<',
+  '<=',
+  'eq',
+  'neq',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'contains',
+  'notContains',
+  'in',
+  'notIn',
+  'notNil',
+  'isNil',
 ]);
 
 const VALID_FILTER_MODES = new Set(['any', 'all', 'none']);
@@ -67,15 +111,20 @@ export interface FlowValidationContext {
   stateKeysReady?: boolean;
 }
 
-export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}): ValidationReport {
+export function validateFlow(
+  flow: TaskFlow,
+  context: FlowValidationContext = {},
+): ValidationReport {
   const issues: ValidationIssue[] = [];
   const structuralIssues = validateFlowStructure(flow);
   if (structuralIssues.length > 0) {
-    issues.push(...structuralIssues.map((issue) => ({
-      severity: 'error' as const,
-      code: 'FLOW_SCHEMA_INVALID',
-      message: `${issue.path}：${issue.message}`,
-    })));
+    issues.push(
+      ...structuralIssues.map((issue) => ({
+        severity: 'error' as const,
+        code: 'FLOW_SCHEMA_INVALID',
+        message: `${issue.path}：${issue.message}`,
+      })),
+    );
   }
   const nodes = flow.nodes ?? {};
   const actions = flow.actions ?? {};
@@ -91,7 +140,12 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
   if (!nodes.main) {
     issues.push({ severity: 'error', code: 'NO_MAIN', message: '缺少入口节点 "main"' });
   } else if (nodes.main.type !== 'sequence') {
-    issues.push({ severity: 'warning', code: 'MAIN_NOT_SEQUENCE', message: `main 节点类型应为 sequence（当前为 ${nodes.main.type}）`, location: { kind: 'node', id: 'main' } });
+    issues.push({
+      severity: 'warning',
+      code: 'MAIN_NOT_SEQUENCE',
+      message: `main 节点类型应为 sequence（当前为 ${nodes.main.type}）`,
+      location: { kind: 'node', id: 'main' },
+    });
   }
 
   // 预计算 loop body 子图（break/continue 位置检测用）
@@ -103,7 +157,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       if (!target) return;
       if (target === id) {
         issues.push({
-          severity: 'error', code: 'NODE_SELF_REF',
+          severity: 'error',
+          code: 'NODE_SELF_REF',
           message: `节点 "${id}" 的 ${field} 指向自身（会导致无限循环）`,
           location: { kind: 'node', id },
         });
@@ -111,7 +166,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       }
       if (!nodes[target]) {
         issues.push({
-          severity: 'error', code: 'NODE_REF_NOT_FOUND',
+          severity: 'error',
+          code: 'NODE_REF_NOT_FOUND',
           message: `节点 "${id}" 的 ${field} 指向不存在的 "${target}"`,
           location: { kind: 'node', id },
         });
@@ -121,7 +177,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
     // 节点类型校验
     if (!VALID_NODE_TYPES.has(node.type)) {
       issues.push({
-        severity: 'error', code: 'NODE_UNKNOWN_TYPE',
+        severity: 'error',
+        code: 'NODE_UNKNOWN_TYPE',
         message: `节点 "${id}" 的类型 "${node.type}" 不合法`,
         location: { kind: 'node', id },
       });
@@ -146,7 +203,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       }
       if (!node.next || node.next.length === 0) {
         issues.push({
-          severity: 'warning', code: 'EMPTY_SEQUENCE',
+          severity: 'warning',
+          code: 'EMPTY_SEQUENCE',
           message: `sequence 节点 "${id}" 的 next 为空`,
           location: { kind: 'node', id },
         });
@@ -155,14 +213,16 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       ref(node.body, 'body');
       if (!node.body) {
         issues.push({
-          severity: 'error', code: 'LOOP_BODY_MISSING',
+          severity: 'error',
+          code: 'LOOP_BODY_MISSING',
           message: `loop 节点 "${id}" 缺少 body`,
           location: { kind: 'node', id },
         });
       }
       if (node.loopCount === 0) {
         issues.push({
-          severity: 'warning', code: 'LOOP_COUNT_ZERO',
+          severity: 'warning',
+          code: 'LOOP_COUNT_ZERO',
           message: `loop 节点 "${id}" loopCount=0 无意义（不会执行循环体）`,
           location: { kind: 'node', id },
         });
@@ -172,7 +232,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       const hasBreak = !!node.breakCondition?.trim();
       if (!hasCount && !hasCond && !hasBreak && node.loopCount !== 0) {
         issues.push({
-          severity: 'warning', code: 'LOOP_NO_TERMINATION',
+          severity: 'warning',
+          code: 'LOOP_NO_TERMINATION',
           message: `loop 节点 "${id}" 既无 loopCount 也无 condition / breakCondition，将无限循环`,
           location: { kind: 'node', id },
         });
@@ -180,14 +241,16 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
     } else if (node.type === 'boolean') {
       if (!node.condition?.trim()) {
         issues.push({
-          severity: 'error', code: 'BOOLEAN_NO_CONDITION',
+          severity: 'error',
+          code: 'BOOLEAN_NO_CONDITION',
           message: `boolean 节点 "${id}" 缺少 condition`,
           location: { kind: 'node', id },
         });
       }
       if (!node.trueNext && !node.falseNext) {
         issues.push({
-          severity: 'error', code: 'BOOLEAN_NO_BRANCH',
+          severity: 'error',
+          code: 'BOOLEAN_NO_BRANCH',
           message: `boolean 节点 "${id}" 必须至少配置 trueNext 或 falseNext`,
           location: { kind: 'node', id },
         });
@@ -198,7 +261,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       const cases = node.cases ?? [];
       if (cases.length === 0) {
         issues.push({
-          severity: 'error', code: 'SWITCH_NO_CASES',
+          severity: 'error',
+          code: 'SWITCH_NO_CASES',
           message: `switch 节点 "${id}" 缺少 cases`,
           location: { kind: 'node', id },
         });
@@ -206,14 +270,16 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       cases.forEach((c, i) => {
         if (!c.condition?.trim()) {
           issues.push({
-            severity: 'error', code: 'SWITCH_CASE_NO_CONDITION',
+            severity: 'error',
+            code: 'SWITCH_CASE_NO_CONDITION',
             message: `switch 节点 "${id}" cases[${i}] 缺少 condition`,
             location: { kind: 'node', id },
           });
         }
         if (!c.next?.trim()) {
           issues.push({
-            severity: 'error', code: 'SWITCH_CASE_NO_NEXT',
+            severity: 'error',
+            code: 'SWITCH_CASE_NO_NEXT',
             message: `switch 节点 "${id}" cases[${i}] 缺少 next`,
             location: { kind: 'node', id },
           });
@@ -223,7 +289,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       ref(node.defaultNext?.trim(), 'defaultNext');
       if (!node.defaultNext?.trim()) {
         issues.push({
-          severity: 'warning', code: 'SWITCH_NO_DEFAULT',
+          severity: 'warning',
+          code: 'SWITCH_NO_DEFAULT',
           message: `switch 节点 "${id}" 未配置 defaultNext，所有条件未命中时将直接结束`,
           location: { kind: 'node', id },
         });
@@ -234,21 +301,24 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       if (hasRandom) {
         if (typeof node.waitMin !== 'number' || typeof node.waitMax !== 'number') {
           issues.push({
-            severity: 'error', code: 'WAIT_RANDOM_INCOMPLETE',
+            severity: 'error',
+            code: 'WAIT_RANDOM_INCOMPLETE',
             message: `wait 节点 "${id}" 随机模式需要同时设置 waitMin 和 waitMax`,
             location: { kind: 'node', id },
           });
         } else {
           if (node.waitMin <= 0 || node.waitMax <= 0) {
             issues.push({
-              severity: 'error', code: 'WAIT_RANDOM_NON_POSITIVE',
+              severity: 'error',
+              code: 'WAIT_RANDOM_NON_POSITIVE',
               message: `wait 节点 "${id}" waitMin/waitMax 必须 > 0`,
               location: { kind: 'node', id },
             });
           }
           if (node.waitMin >= node.waitMax) {
             issues.push({
-              severity: 'error', code: 'WAIT_RANDOM_MIN_GE_MAX',
+              severity: 'error',
+              code: 'WAIT_RANDOM_MIN_GE_MAX',
               message: `wait 节点 "${id}" waitMin 必须 < waitMax`,
               location: { kind: 'node', id },
             });
@@ -256,13 +326,15 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
         }
       } else if (typeof node.waitMs !== 'number' || node.waitMs === 0) {
         issues.push({
-          severity: 'warning', code: 'WAIT_NO_MS',
+          severity: 'warning',
+          code: 'WAIT_NO_MS',
           message: `wait 节点 "${id}" 缺少有效的等待时长（将直接跳过）`,
           location: { kind: 'node', id },
         });
       } else if (node.waitMs < 0) {
         issues.push({
-          severity: 'error', code: 'WAIT_NEGATIVE_MS',
+          severity: 'error',
+          code: 'WAIT_NEGATIVE_MS',
           message: `wait 节点 "${id}" waitMs 不能为负数`,
           location: { kind: 'node', id },
         });
@@ -271,7 +343,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       const opts = node.options ?? [];
       if (opts.length === 0) {
         issues.push({
-          severity: 'error', code: 'WEIGHTED_NO_OPTIONS',
+          severity: 'error',
+          code: 'WEIGHTED_NO_OPTIONS',
           message: `weighted 节点 "${id}" 缺少 options`,
           location: { kind: 'node', id },
         });
@@ -280,13 +353,15 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       opts.forEach((o, i) => {
         if (o.weight < 0) {
           issues.push({
-            severity: 'error', code: 'WEIGHTED_NEGATIVE_WEIGHT',
+            severity: 'error',
+            code: 'WEIGHTED_NEGATIVE_WEIGHT',
             message: `weighted 节点 "${id}" options[${i}] 权重不能为负数`,
             location: { kind: 'node', id },
           });
         } else if (o.weight === 0) {
           issues.push({
-            severity: 'warning', code: 'WEIGHTED_ZERO_WEIGHT',
+            severity: 'warning',
+            code: 'WEIGHTED_ZERO_WEIGHT',
             message: `weighted 节点 "${id}" options[${i}] 权重为 0（不会被选中）`,
             location: { kind: 'node', id },
           });
@@ -294,7 +369,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       });
       if (total <= 0 && opts.length > 0) {
         issues.push({
-          severity: 'error', code: 'WEIGHTED_ALL_ZERO',
+          severity: 'error',
+          code: 'WEIGHTED_ALL_ZERO',
           message: `weighted 节点 "${id}" 所有权重和为 0`,
           location: { kind: 'node', id },
         });
@@ -303,7 +379,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
     } else if (node.type === 'break' || node.type === 'continue') {
       if (!loopBodyNodes.has(id)) {
         issues.push({
-          severity: 'error', code: 'BREAK_CONTINUE_OUTSIDE_LOOP',
+          severity: 'error',
+          code: 'BREAK_CONTINUE_OUTSIDE_LOOP',
           message: `${node.type} 节点 "${id}" 不在任何 loop 内，运行时将导致错误`,
           location: { kind: 'node', id },
         });
@@ -312,13 +389,15 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       issues.push(...checkNodeOnError(id, node, nodes));
       if (!node.action) {
         issues.push({
-          severity: 'error', code: 'ACTION_REF_EMPTY',
+          severity: 'error',
+          code: 'ACTION_REF_EMPTY',
           message: `action 节点 "${id}" 未指定 action 名`,
           location: { kind: 'node', id },
         });
       } else if (!actions[node.action]) {
         issues.push({
-          severity: 'error', code: 'ACTION_REF_NOT_FOUND',
+          severity: 'error',
+          code: 'ACTION_REF_NOT_FOUND',
           message: `action 节点 "${id}" 引用了不存在的 action "${node.action}"`,
           location: { kind: 'node', id },
         });
@@ -333,7 +412,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
           const ln = r.listen as string;
           if (!(ln in listens)) {
             issues.push({
-              severity: 'error', code: 'LISTEN_REF_NOT_FOUND',
+              severity: 'error',
+              code: 'LISTEN_REF_NOT_FOUND',
               message: `action 节点 "${id}" listenRefs[${i}] 引用了不存在的 listen "${ln}"`,
               location: { kind: 'node', id },
             });
@@ -341,7 +421,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
         }
         if (!r.server?.trim()) {
           issues.push({
-            severity: 'error', code: 'LISTEN_NO_SERVER',
+            severity: 'error',
+            code: 'LISTEN_NO_SERVER',
             message: `action 节点 "${id}" listenRefs[${i}] 缺少 server`,
             location: { kind: 'node', id },
           });
@@ -350,7 +431,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
           const hasPrefix = s.startsWith('tcp:') || s.startsWith('udp:');
           if (!hasPrefix) {
             issues.push({
-              severity: 'error', code: 'LISTEN_SERVER_FORMAT',
+              severity: 'error',
+              code: 'LISTEN_SERVER_FORMAT',
               message: `action 节点 "${id}" listenRefs[${i}] server 格式错误（应为 tcp:<name> 或 udp:<name>）`,
               location: { kind: 'node', id },
             });
@@ -358,7 +440,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
             const parts = s.split(':');
             if (parts.length < 2 || !parts[1]) {
               issues.push({
-                severity: 'error', code: 'LISTEN_SERVER_FORMAT',
+                severity: 'error',
+                code: 'LISTEN_SERVER_FORMAT',
                 message: `action 节点 "${id}" listenRefs[${i}] server 缺少服务名`,
                 location: { kind: 'node', id },
               });
@@ -368,7 +451,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
         // queueSize：未写合法（缺省 1）；显式 <=0 报错（不静默 clamp，与后端 fail-loud 一致）
         if (r.queueSize !== undefined && r.queueSize !== null && r.queueSize <= 0) {
           issues.push({
-            severity: 'error', code: 'LISTEN_QUEUE_INVALID',
+            severity: 'error',
+            code: 'LISTEN_QUEUE_INVALID',
             message: `action 节点 "${id}" listenRefs[${i}] queueSize 必须 > 0（当前 ${r.queueSize}，缺省 1）`,
             location: { kind: 'node', id },
           });
@@ -392,7 +476,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
       issues.push(...checkAction(name, def, knownStateKeys));
     } else {
       issues.push({
-        severity: 'warning', code: 'ACTION_ORPHAN',
+        severity: 'warning',
+        code: 'ACTION_ORPHAN',
         message: `action "${name}" 未被任何节点引用`,
         location: { kind: 'action', id: name },
       });
@@ -404,14 +489,20 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
   for (const [name, listenDef] of Object.entries(listens)) {
     if (listenDef.script !== undefined && !listenDef.script?.trim()) {
       issues.push({
-        severity: 'error', code: 'LISTEN_LUA_NO_SCRIPT',
+        severity: 'error',
+        code: 'LISTEN_LUA_NO_SCRIPT',
         message: `listen "${name}" 是 lua 模式但缺少 script`,
         location: { kind: 'listen', id: name },
       });
     }
-    if (listenDef.s2cProto && protoRegistry.isLoaded() && !protoRegistry.lookupMessage(listenDef.s2cProto)) {
+    if (
+      listenDef.s2cProto &&
+      protoRegistry.isLoaded() &&
+      !protoRegistry.lookupMessage(listenDef.s2cProto)
+    ) {
       issues.push({
-        severity: 'error', code: 'LISTEN_S2C_NOT_FOUND',
+        severity: 'error',
+        code: 'LISTEN_S2C_NOT_FOUND',
         message: `listen "${name}" 的 s2cProto "${listenDef.s2cProto}" 在 proto 中不存在`,
         location: { kind: 'listen', id: name },
       });
@@ -419,7 +510,8 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
     const refCount = graph.refCount.get(name) ?? 0;
     if (refCount === 0) {
       issues.push({
-        severity: 'warning', code: 'LISTEN_ORPHAN',
+        severity: 'warning',
+        code: 'LISTEN_ORPHAN',
         message: `listen "${name}" 未被任何 action 引用（孤儿）`,
         location: { kind: 'listen', id: name },
       });
@@ -427,14 +519,16 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
   }
   for (const dr of graph.danglingRefs) {
     issues.push({
-      severity: 'error', code: 'LISTEN_CB_NOT_FOUND',
+      severity: 'error',
+      code: 'LISTEN_CB_NOT_FOUND',
       message: `节点 "${dr.nodeId}" listenRefs[${dr.refIndex}] 引用了不存在的 listen "${dr.ref.listen}"`,
       location: { kind: 'node', id: dr.nodeId },
     });
   }
   for (const dup of graph.duplicateRegisters) {
     issues.push({
-      severity: 'warning', code: 'DUPLICATE_REGISTER',
+      severity: 'warning',
+      code: 'DUPLICATE_REGISTER',
       message: `${dup.server} ${dup.routeKey} 被多次注册：${dup.refs.map((r) => `${r.nodeId}→${r.cb ?? 'null'}`).join(', ')}`,
     });
   }
@@ -483,12 +577,21 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
 
 // ── Action 校验 ─────────────────────────────────────────────
 
-function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> | undefined): ValidationIssue[] {
+function checkAction(
+  name: string,
+  def: ActionDef,
+  knownStateKeys: Set<string> | undefined,
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const loc = { kind: 'action' as const, id: name };
 
   if (!def.pattern) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_PATTERN', message: `action "${name}" 缺少 pattern`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_PATTERN',
+      message: `action "${name}" 缺少 pattern`,
+      location: loc,
+    });
     return issues;
   }
 
@@ -497,7 +600,12 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
     const removedHint = REMOVED_HEARTBEAT_PATTERNS.has(def.pattern)
       ? '。心跳已迁移到协议连接配置的 heartbeat 中，请在对应连接里配置'
       : '';
-    issues.push({ severity: 'error', code: 'ACTION_UNKNOWN_PATTERN', message: `action "${name}" 的 pattern "${def.pattern}" 不合法${removedHint}`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_UNKNOWN_PATTERN',
+      message: `action "${name}" 的 pattern "${def.pattern}" 不合法${removedHint}`,
+      location: loc,
+    });
     return issues;
   }
 
@@ -505,64 +613,134 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
 
   // service
   if (PATTERNS_REQUIRE_SERVICE.includes(p) && !def.service) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_SERVICE', message: `action "${name}" (pattern=${p}) 缺少 service`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_SERVICE',
+      message: `action "${name}" (pattern=${p}) 缺少 service`,
+      location: loc,
+    });
   }
   // route
   if (PATTERNS_REQUIRE_ROUTE.includes(p) && def.route == null) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_ROUTE', message: `action "${name}" (pattern=${p}) 缺少 route`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_ROUTE',
+      message: `action "${name}" (pattern=${p}) 缺少 route`,
+      location: loc,
+    });
   }
   // address
   if (PATTERNS_REQUIRE_ADDRESS.includes(p) && !def.address) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_ADDRESS', message: `action "${name}" (pattern=${p}) 缺少 address`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_ADDRESS',
+      message: `action "${name}" (pattern=${p}) 缺少 address`,
+      location: loc,
+    });
   }
   // c2s/s2c proto
   if (PATTERNS_REQUIRE_C2S.includes(p) && !def.c2sProto) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_C2S', message: `action "${name}" (pattern=${p}) 缺少 c2sProto`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_C2S',
+      message: `action "${name}" (pattern=${p}) 缺少 c2sProto`,
+      location: loc,
+    });
   }
   if (PATTERNS_REQUIRE_S2C.includes(p) && !def.s2cProto) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_S2C', message: `action "${name}" (pattern=${p}) 缺少 s2cProto`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_S2C',
+      message: `action "${name}" (pattern=${p}) 缺少 s2cProto`,
+      location: loc,
+    });
   }
   // lua script
   if (p === 'lua' && !def.script) {
-    issues.push({ severity: 'error', code: 'LUA_NO_SCRIPT', message: `action "${name}" pattern=lua 缺少 script`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'LUA_NO_SCRIPT',
+      message: `action "${name}" pattern=lua 缺少 script`,
+      location: loc,
+    });
   }
   // clearState keys
   if (p === 'clearState' && (!def.keys || def.keys.length === 0)) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_KEYS', message: `action "${name}" pattern=clearState 缺少 keys`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_KEYS',
+      message: `action "${name}" pattern=clearState 缺少 keys`,
+      location: loc,
+    });
   }
   // httpRequest url
   if (p === 'httpRequest' && !def.url) {
-    issues.push({ severity: 'error', code: 'ACTION_NO_URL', message: `action "${name}" pattern=httpRequest 缺少 url`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_NO_URL',
+      message: `action "${name}" pattern=httpRequest 缺少 url`,
+      location: loc,
+    });
   }
   // httpRequest method / contentType 白名单：导入路径只做 JSON.parse cast，这里兜住非法值，
   // 否则 method 被原样透传、未知 contentType 让请求体为空，到运行期才失败。
   if (p === 'httpRequest') {
     const method = typeof def.method === 'string' && def.method ? def.method.toUpperCase() : 'GET';
     if (!['GET', 'POST'].includes(method)) {
-      issues.push({ severity: 'error', code: 'HTTP_METHOD_INVALID', message: `action "${name}" pattern=httpRequest 的 method "${def.method}" 不合法（仅支持 GET / POST）`, location: loc });
+      issues.push({
+        severity: 'error',
+        code: 'HTTP_METHOD_INVALID',
+        message: `action "${name}" pattern=httpRequest 的 method "${def.method}" 不合法（仅支持 GET / POST）`,
+        location: loc,
+      });
     }
     // 导入的 JSON 经 cast 后类型是 'json'|'form'，但运行时可能是任意字符串；这里兜住非法值。
     const ct = def.contentType as string | undefined;
     if (ct !== undefined && ct !== null && ct !== '' && !['json', 'form'].includes(ct)) {
-      issues.push({ severity: 'error', code: 'HTTP_CONTENT_TYPE_INVALID', message: `action "${name}" pattern=httpRequest 的 contentType "${ct}" 不合法（仅支持 json / form）`, location: loc });
+      issues.push({
+        severity: 'error',
+        code: 'HTTP_CONTENT_TYPE_INVALID',
+        message: `action "${name}" pattern=httpRequest 的 contentType "${ct}" 不合法（仅支持 json / form）`,
+        location: loc,
+      });
     }
   }
   // setState with no bindings is a no-op
   if (p === 'setState' && (!def.bindings || def.bindings.length === 0)) {
-    issues.push({ severity: 'warning', code: 'SETSTATE_NO_BINDINGS', message: `action "${name}" pattern=setState 缺少 bindings（无实际效果）`, location: loc });
+    issues.push({
+      severity: 'warning',
+      code: 'SETSTATE_NO_BINDINGS',
+      message: `action "${name}" pattern=setState 缺少 bindings（无实际效果）`,
+      location: loc,
+    });
   }
   // timeout 整数契约（Go 端为 int）：小数会让后端 json.Unmarshal 失败。
   if (typeof def.timeout === 'number' && !Number.isInteger(def.timeout)) {
-    issues.push({ severity: 'error', code: 'ACTION_TIMEOUT_NON_INTEGER', message: `action "${name}" 的 timeout 必须是整数（当前 ${def.timeout}）`, location: loc });
+    issues.push({
+      severity: 'error',
+      code: 'ACTION_TIMEOUT_NON_INTEGER',
+      message: `action "${name}" 的 timeout 必须是整数（当前 ${def.timeout}）`,
+      location: loc,
+    });
   }
 
   // proto 真实存在校验
   if (protoRegistry.isLoaded()) {
     if (def.c2sProto && !protoRegistry.lookupMessage(def.c2sProto)) {
-      issues.push({ severity: 'error', code: 'C2S_PROTO_NOT_FOUND', message: `action "${name}" 的 c2sProto "${def.c2sProto}" 在 proto 中不存在`, location: loc });
+      issues.push({
+        severity: 'error',
+        code: 'C2S_PROTO_NOT_FOUND',
+        message: `action "${name}" 的 c2sProto "${def.c2sProto}" 在 proto 中不存在`,
+        location: loc,
+      });
     }
     if (def.s2cProto && !protoRegistry.lookupMessage(def.s2cProto)) {
-      issues.push({ severity: 'error', code: 'S2C_PROTO_NOT_FOUND', message: `action "${name}" 的 s2cProto "${def.s2cProto}" 在 proto 中不存在`, location: loc });
+      issues.push({
+        severity: 'error',
+        code: 'S2C_PROTO_NOT_FOUND',
+        message: `action "${name}" 的 s2cProto "${def.s2cProto}" 在 proto 中不存在`,
+        location: loc,
+      });
     }
     if (def.c2sProto && def.bindings) {
       const msg = protoRegistry.lookupMessage(def.c2sProto);
@@ -593,7 +771,12 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
             // Normalize the field path for checking (replace [1], [2] etc with [0])
             const normalizedField = b.field.replace(/\[\d+\]/g, '[0]');
             if (!validPaths.has(normalizedField)) {
-              issues.push({ severity: 'warning', code: 'BINDING_FIELD_NOT_FOUND', message: `action "${name}" bindings 中字段 "${b.field}" 不存在于 ${def.c2sProto} 或其嵌套结构中`, location: loc });
+              issues.push({
+                severity: 'warning',
+                code: 'BINDING_FIELD_NOT_FOUND',
+                message: `action "${name}" bindings 中字段 "${b.field}" 不存在于 ${def.c2sProto} 或其嵌套结构中`,
+                location: loc,
+              });
             }
           }
         }
@@ -610,12 +793,22 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
     def.bindings.forEach((binding, index) => {
       const target = binding.field?.trim();
       if (!target) {
-        issues.push({ severity: 'error', code: 'SETSTATE_TARGET_MISSING', message: `action "${name}" 的第 ${index + 1} 条状态写入缺少目标状态`, location: loc });
+        issues.push({
+          severity: 'error',
+          code: 'SETSTATE_TARGET_MISSING',
+          message: `action "${name}" 的第 ${index + 1} 条状态写入缺少目标状态`,
+          location: loc,
+        });
         return;
       }
       const previous = firstByTarget.get(target);
       if (previous !== undefined) {
-        issues.push({ severity: 'warning', code: 'SETSTATE_TARGET_DUPLICATE', message: `action "${name}" 的第 ${index + 1} 条写入会覆盖第 ${previous + 1} 条对状态 "${target}" 的写入`, location: loc });
+        issues.push({
+          severity: 'warning',
+          code: 'SETSTATE_TARGET_DUPLICATE',
+          message: `action "${name}" 的第 ${index + 1} 条写入会覆盖第 ${previous + 1} 条对状态 "${target}" 的写入`,
+          location: loc,
+        });
       } else {
         firstByTarget.set(target, index);
       }
@@ -628,14 +821,29 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
     const seen = new Set<string>();
     for (const key of def.keys) {
       if (isBuiltinStateKey(key)) {
-        issues.push({ severity: 'error', code: 'CLEARSTATE_PROTECTED_KEY', message: `action "${name}" 不允许清除内置状态 "${key}"`, location: loc });
+        issues.push({
+          severity: 'error',
+          code: 'CLEARSTATE_PROTECTED_KEY',
+          message: `action "${name}" 不允许清除内置状态 "${key}"`,
+          location: loc,
+        });
       }
       if (seen.has(key)) {
-        issues.push({ severity: 'warning', code: 'CLEARSTATE_DUPLICATE_KEY', message: `action "${name}" 重复清除状态 "${key}"`, location: loc });
+        issues.push({
+          severity: 'warning',
+          code: 'CLEARSTATE_DUPLICATE_KEY',
+          message: `action "${name}" 重复清除状态 "${key}"`,
+          location: loc,
+        });
       }
       seen.add(key);
       if (knownStateKeys && !knownStateKeys.has(key) && !isBuiltinStateKey(key)) {
-        issues.push({ severity: 'warning', code: 'CLEARSTATE_UNKNOWN_KEY', message: `action "${name}" 要清除的状态 "${key}" 当前流程未识别`, location: loc });
+        issues.push({
+          severity: 'warning',
+          code: 'CLEARSTATE_UNKNOWN_KEY',
+          message: `action "${name}" 要清除的状态 "${key}" 当前流程未识别`,
+          location: loc,
+        });
       }
     }
   }
@@ -644,7 +852,11 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
   // 这里通过 requireTargetField=false 抑制通用 BINDING_NO_FIELD warning，避免重复告警；
   // 其余 pattern 保持默认（requireTargetField=true），缺 field 且无 storeAs 仍告警。
   if (def.bindings) {
-    issues.push(...checkBindings(`action "${name}"`, def.bindings, loc, false, { requireTargetField: p !== 'setState' }));
+    issues.push(
+      ...checkBindings(`action "${name}"`, def.bindings, loc, false, {
+        requireTargetField: p !== 'setState',
+      }),
+    );
   }
 
   return issues;
@@ -652,14 +864,19 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
 
 // ── action 节点 onError 校验 ───────────────────────────────
 
-function checkNodeOnError(id: string, node: TaskFlow['nodes'][string], nodes: TaskFlow['nodes']): ValidationIssue[] {
+function checkNodeOnError(
+  id: string,
+  node: TaskFlow['nodes'][string],
+  nodes: TaskFlow['nodes'],
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const onError = node.onError;
   if (!onError) return issues;
 
   if (onError.strategy && !VALID_ON_ERROR_STRATEGIES.has(onError.strategy)) {
     issues.push({
-      severity: 'error', code: 'ON_ERROR_STRATEGY_INVALID',
+      severity: 'error',
+      code: 'ON_ERROR_STRATEGY_INVALID',
       message: `action 节点 "${id}" 的 onError.strategy "${onError.strategy}" 不合法（应为 resume、skip 或 abort）`,
       location: { kind: 'node', id },
     });
@@ -668,7 +885,8 @@ function checkNodeOnError(id: string, node: TaskFlow['nodes'][string], nodes: Ta
   (onError.ignoreCodes ?? []).forEach((code, i) => {
     if (!Number.isInteger(code) || code <= 0) {
       issues.push({
-        severity: 'error', code: 'ON_ERROR_IGNORE_CODE_INVALID',
+        severity: 'error',
+        code: 'ON_ERROR_IGNORE_CODE_INVALID',
         message: `action 节点 "${id}" 的 onError.ignoreCodes[${i}] 必须是正整数（当前 ${code}）`,
         location: { kind: 'node', id },
       });
@@ -678,13 +896,15 @@ function checkNodeOnError(id: string, node: TaskFlow['nodes'][string], nodes: Ta
   if (onError.handler) {
     if (onError.handler === id) {
       issues.push({
-        severity: 'error', code: 'ON_ERROR_HANDLER_SELF',
+        severity: 'error',
+        code: 'ON_ERROR_HANDLER_SELF',
         message: `action 节点 "${id}" 的 onError.handler 不能指向自身`,
         location: { kind: 'node', id },
       });
     } else if (!nodes[onError.handler]) {
       issues.push({
-        severity: 'error', code: 'ON_ERROR_HANDLER_NOT_FOUND',
+        severity: 'error',
+        code: 'ON_ERROR_HANDLER_NOT_FOUND',
         message: `action 节点 "${id}" 的 onError.handler 指向不存在的 "${onError.handler}"`,
         location: { kind: 'node', id },
       });
@@ -694,14 +914,16 @@ function checkNodeOnError(id: string, node: TaskFlow['nodes'][string], nodes: Ta
   if (onError.retry) {
     if (onError.retry.maxRetries !== undefined && onError.retry.maxRetries < 0) {
       issues.push({
-        severity: 'error', code: 'ON_ERROR_RETRY_MAX_INVALID',
+        severity: 'error',
+        code: 'ON_ERROR_RETRY_MAX_INVALID',
         message: `action 节点 "${id}" 的 onError.retry.maxRetries 必须 >= 0`,
         location: { kind: 'node', id },
       });
     }
     if (onError.retry.retryDelayMs !== undefined && onError.retry.retryDelayMs < 0) {
       issues.push({
-        severity: 'error', code: 'ON_ERROR_RETRY_DELAY_INVALID',
+        severity: 'error',
+        code: 'ON_ERROR_RETRY_DELAY_INVALID',
         message: `action 节点 "${id}" 的 onError.retry.retryDelayMs 必须 >= 0`,
         location: { kind: 'node', id },
       });
@@ -730,27 +952,51 @@ function checkBindings(
     // field + storeAs 都空（map entry 内的 value binding 是纯值生成器，不需要 field/storeAs；
     // setState 由 SETSTATE_TARGET_MISSING 专门检查，requireTargetField=false 时跳过）。
     if (!isMapEntryValue && options.requireTargetField !== false && !b.field && !b.storeAs) {
-      issues.push({ severity: 'warning', code: 'BINDING_NO_FIELD', message: `${label} 缺少 field 和 storeAs`, location: loc });
+      issues.push({
+        severity: 'warning',
+        code: 'BINDING_NO_FIELD',
+        message: `${label} 缺少 field 和 storeAs`,
+        location: loc,
+      });
     }
 
     // binding type 合法性
     if (t && !VALID_BINDING_TYPE_SET.has(t)) {
-      issues.push({ severity: 'error', code: 'BINDING_UNKNOWN_TYPE', message: `${label} 未知的 binding type "${t}"`, location: loc });
+      issues.push({
+        severity: 'error',
+        code: 'BINDING_UNKNOWN_TYPE',
+        message: `${label} 未知的 binding type "${t}"`,
+        location: loc,
+      });
       continue;
     }
 
     // 整数契约：min/max/length/count/precision 在 Go 端为 int，前端不得存小数。
     // 小数会导致后端 json.Unmarshal 到 int 失败、任务无法加载。
     for (const [fname, fval] of [
-      ['min', b.min], ['max', b.max], ['length', b.length], ['count', b.count], ['precision', b.precision],
+      ['min', b.min],
+      ['max', b.max],
+      ['length', b.length],
+      ['count', b.count],
+      ['precision', b.precision],
     ] as const) {
       if (typeof fval === 'number' && !Number.isInteger(fval)) {
-        issues.push({ severity: 'error', code: 'BINDING_NON_INTEGER', message: `${label} 的 ${fname} 必须是整数（当前 ${fval}）`, location: loc });
+        issues.push({
+          severity: 'error',
+          code: 'BINDING_NON_INTEGER',
+          message: `${label} 的 ${fname} 必须是整数（当前 ${fval}）`,
+          location: loc,
+        });
       }
     }
     // required 与 optional 互斥：Go 在缺值时 optional 优先（静默跳过），二者同开会让 UI 的 required 承诺失效。
     if (b.required && b.optional) {
-      issues.push({ severity: 'warning', code: 'BINDING_REQUIRED_OPTIONAL_CONFLICT', message: `${label} 的 required 与 optional 互斥，运行时按 optional 处理（缺失时跳过）`, location: loc });
+      issues.push({
+        severity: 'warning',
+        code: 'BINDING_REQUIRED_OPTIONAL_CONFLICT',
+        message: `${label} 的 required 与 optional 互斥，运行时按 optional 处理（缺失时跳过）`,
+        location: loc,
+      });
     }
 
     // 按 type 检查必填字段
@@ -765,75 +1011,160 @@ function checkBindings(
       case 'stateMapValue':
       case 'listSize':
         if (!b.source) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_SOURCE', message: `${label} type=${t} 缺少 source`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_SOURCE',
+            message: `${label} type=${t} 缺少 source`,
+            location: loc,
+          });
         }
         break;
       case 'stateRandomN':
         if (!b.source) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_SOURCE', message: `${label} type=stateRandomN 缺少 source`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_SOURCE',
+            message: `${label} type=stateRandomN 缺少 source`,
+            location: loc,
+          });
         }
         if (!b.count || b.count <= 0) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_COUNT', message: `${label} type=stateRandomN count 必须 > 0`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_COUNT',
+            message: `${label} type=stateRandomN count 必须 > 0`,
+            location: loc,
+          });
         }
         break;
       case 'randomPick':
       case 'randomPickN':
         if (!b.values || b.values.length === 0) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_VALUES', message: `${label} type=${t} 缺少 values`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_VALUES',
+            message: `${label} type=${t} 缺少 values`,
+            location: loc,
+          });
         }
         if (t === 'randomPickN' && (!b.count || b.count <= 0)) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_COUNT', message: `${label} type=randomPickN count 必须 > 0`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_COUNT',
+            message: `${label} type=randomPickN count 必须 > 0`,
+            location: loc,
+          });
         }
         break;
       case 'randomPickMap':
         if (!b.values || b.values.length === 0) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_VALUES', message: `${label} type=randomPickMap 缺少 values`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_VALUES',
+            message: `${label} type=randomPickMap 缺少 values`,
+            location: loc,
+          });
         }
         if (!b.keySource) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_KEY_SOURCE', message: `${label} type=randomPickMap 缺少 keySource`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_KEY_SOURCE',
+            message: `${label} type=randomPickMap 缺少 keySource`,
+            location: loc,
+          });
         }
         break;
       case 'randomExclude':
         if ((!b.values || b.values.length === 0) && !b.source) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_EXCLUDE_SOURCE', message: `${label} type=randomExclude 缺少 values 和 source`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_NO_EXCLUDE_SOURCE',
+            message: `${label} type=randomExclude 缺少 values 和 source`,
+            location: loc,
+          });
         }
         break;
       case 'randomInt':
         if (b.min != null && b.max != null && b.min >= b.max) {
-          issues.push({ severity: 'warning', code: 'BINDING_INVALID_RANGE', message: `${label} type=randomInt min >= max`, location: loc });
+          issues.push({
+            severity: 'warning',
+            code: 'BINDING_INVALID_RANGE',
+            message: `${label} type=randomInt min >= max`,
+            location: loc,
+          });
         }
         break;
       case 'randomFloat':
         if (b.min != null && b.max != null && b.min >= b.max) {
-          issues.push({ severity: 'warning', code: 'BINDING_INVALID_RANGE', message: `${label} type=randomFloat min >= max`, location: loc });
+          issues.push({
+            severity: 'warning',
+            code: 'BINDING_INVALID_RANGE',
+            message: `${label} type=randomFloat min >= max`,
+            location: loc,
+          });
         }
         break;
       case 'randomBool':
         break;
       case 'randomString':
         if (!b.length || b.length <= 0) {
-          issues.push({ severity: 'error', code: 'BINDING_INVALID_LENGTH', message: `${label} type=randomString length 必须 > 0`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_INVALID_LENGTH',
+            message: `${label} type=randomString length 必须 > 0`,
+            location: loc,
+          });
         }
         if (b.charset != null && b.charset.trim().length === 0) {
-          issues.push({ severity: 'error', code: 'BINDING_INVALID_CHARSET', message: `${label} type=randomString charset 不能为空`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_INVALID_CHARSET',
+            message: `${label} type=randomString charset 不能为空`,
+            location: loc,
+          });
         } else if (b.charset != null && resolveRandomStringCharset(b.charset).length === 0) {
-          issues.push({ severity: 'error', code: 'BINDING_INVALID_CHARSET', message: `${label} type=randomString charset 不能为空`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_INVALID_CHARSET',
+            message: `${label} type=randomString charset 不能为空`,
+            location: loc,
+          });
         }
         break;
       case 'map':
         if (!b.entries || b.entries.length === 0) {
-          issues.push({ severity: 'error', code: 'BINDING_MAP_NO_ENTRIES', message: `${label} type=map 缺少 entries`, location: loc });
+          issues.push({
+            severity: 'error',
+            code: 'BINDING_MAP_NO_ENTRIES',
+            message: `${label} type=map 缺少 entries`,
+            location: loc,
+          });
         } else {
           for (let ei = 0; ei < b.entries.length; ei++) {
             const entry = b.entries[ei];
             const entryLabel = `${label}.entries[${ei}]`;
             if (entry.key === undefined || entry.key === null || entry.key === '') {
-              issues.push({ severity: 'error', code: 'BINDING_MAP_ENTRY_NO_KEY', message: `${entryLabel} 缺少 key`, location: loc });
+              issues.push({
+                severity: 'error',
+                code: 'BINDING_MAP_ENTRY_NO_KEY',
+                message: `${entryLabel} 缺少 key`,
+                location: loc,
+              });
             }
             if (!entry.value) {
-              issues.push({ severity: 'error', code: 'BINDING_MAP_ENTRY_NO_VALUE', message: `${entryLabel} 缺少 value`, location: loc });
+              issues.push({
+                severity: 'error',
+                code: 'BINDING_MAP_ENTRY_NO_VALUE',
+                message: `${entryLabel} 缺少 value`,
+                location: loc,
+              });
             } else if (entry.value.type === 'map') {
-              issues.push({ severity: 'error', code: 'BINDING_MAP_ENTRY_VALUE_MAP', message: `${entryLabel} value 不允许嵌套 map 类型`, location: loc });
+              issues.push({
+                severity: 'error',
+                code: 'BINDING_MAP_ENTRY_VALUE_MAP',
+                message: `${entryLabel} value 不允许嵌套 map 类型`,
+                location: loc,
+              });
             } else {
               issues.push(...checkBindings(entryLabel, [entry.value], loc, true));
             }
@@ -853,18 +1184,37 @@ function checkBindings(
 
 // ── Filter op 校验 ──────────────────────────────────────────
 
-function checkFilters(prefix: string, filters: FilterDef[], loc: { kind: 'action'; id: string }): ValidationIssue[] {
+function checkFilters(
+  prefix: string,
+  filters: FilterDef[],
+  loc: { kind: 'action'; id: string },
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   for (let i = 0; i < filters.length; i++) {
     const f = filters[i];
     if (f.op && !VALID_FILTER_OPS.has(f.op)) {
-      issues.push({ severity: 'error', code: 'FILTER_UNKNOWN_OP', message: `${prefix}.filters[${i}] 未知的 op "${f.op}"`, location: loc });
+      issues.push({
+        severity: 'error',
+        code: 'FILTER_UNKNOWN_OP',
+        message: `${prefix}.filters[${i}] 未知的 op "${f.op}"`,
+        location: loc,
+      });
     }
     if (f.mode && !VALID_FILTER_MODES.has(f.mode)) {
-      issues.push({ severity: 'error', code: 'FILTER_UNKNOWN_MODE', message: `${prefix}.filters[${i}] 未知的 mode "${f.mode}"`, location: loc });
+      issues.push({
+        severity: 'error',
+        code: 'FILTER_UNKNOWN_MODE',
+        message: `${prefix}.filters[${i}] 未知的 mode "${f.mode}"`,
+        location: loc,
+      });
     }
     if (f.path?.includes('[]') && !f.mode) {
-      issues.push({ severity: 'warning', code: 'FILTER_ARRAY_PATH_NO_MODE', message: `${prefix}.filters[${i}] 使用数组通配路径但未配置 mode，建议选择 any / all / none`, location: loc });
+      issues.push({
+        severity: 'warning',
+        code: 'FILTER_ARRAY_PATH_NO_MODE',
+        message: `${prefix}.filters[${i}] 使用数组通配路径但未配置 mode，建议选择 any / all / none`,
+        location: loc,
+      });
     }
   }
   return issues;
@@ -899,7 +1249,8 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
   for (const id of Object.keys(nodes)) {
     if (!reachable.has(id)) {
       issues.push({
-        severity: 'warning', code: 'NODE_ORPHAN',
+        severity: 'warning',
+        code: 'NODE_ORPHAN',
         message: `节点 "${id}" 不可达（从 main 出发无法到达）`,
         location: { kind: 'node', id },
       });
@@ -910,7 +1261,18 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
 
 // ── break/continue 位置检测 ──────────────────────────────────
 
-type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }>; onError?: { handler?: string }; cases?: Array<{ next: string }>; defaultNext?: string; then?: string };
+type NodeLike = {
+  type: string;
+  next?: string[];
+  body?: string;
+  trueNext?: string;
+  falseNext?: string;
+  options?: Array<{ node: string }>;
+  onError?: { handler?: string };
+  cases?: Array<{ next: string }>;
+  defaultNext?: string;
+  then?: string;
+};
 
 /** 收集所有 loop body 子图中的节点 ID */
 function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {

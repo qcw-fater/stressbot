@@ -3,7 +3,12 @@
  */
 
 import { Button, InputNumber, Space, Table } from 'antd';
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { NodeIdSelect } from './shared/NodeIdSelect';
 import { useFlowStore } from '../store/flowStore';
 import type { WeightedOption } from '@/types/flow';
@@ -23,7 +28,14 @@ export function WeightedEditor({ nodeId }: WeightedEditorProps) {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
         <strong>选项（按权重随机选择）</strong>
         <Button
           icon={<PlusOutlined />}

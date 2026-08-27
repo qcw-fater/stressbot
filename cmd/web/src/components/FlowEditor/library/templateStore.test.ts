@@ -3,12 +3,22 @@ import type { ActionTemplateDto, ListenTemplateDto } from '@/services/templatesA
 
 const api = vi.hoisted(() => ({
   action: {
-    list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(),
-    getSnapshot: vi.fn(), replaceSnapshot: vi.fn(),
+    list: vi.fn(),
+    get: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    getSnapshot: vi.fn(),
+    replaceSnapshot: vi.fn(),
   },
   listen: {
-    list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(),
-    getSnapshot: vi.fn(), replaceSnapshot: vi.fn(),
+    list: vi.fn(),
+    get: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    getSnapshot: vi.fn(),
+    replaceSnapshot: vi.fn(),
   },
 }));
 
@@ -56,11 +66,13 @@ beforeEach(() => {
 
 describe('templateStore 服务器门面', () => {
   it('把 RFC 3339 时间转换为组件使用的毫秒数，并保留 updatedAt', async () => {
-    await expect(listActionTemplates()).resolves.toEqual([{
-      ...actionDto,
-      createdAt: Date.parse(actionDto.createdAt),
-      updatedAt: Date.parse(actionDto.updatedAt),
-    }]);
+    await expect(listActionTemplates()).resolves.toEqual([
+      {
+        ...actionDto,
+        createdAt: Date.parse(actionDto.createdAt),
+        updatedAt: Date.parse(actionDto.updatedAt),
+      },
+    ]);
   });
 
   it('按名称精确匹配，大小写不同不视为同名', async () => {
@@ -73,12 +85,14 @@ describe('templateStore 服务器门面', () => {
     const off = onTemplateChange(changed);
     api.action.create.mockResolvedValue(actionDto);
 
-    await expect(saveActionTemplate({
-      name: actionDto.name,
-      description: actionDto.description,
-      pattern: actionDto.pattern,
-      data: actionDto.data,
-    })).resolves.toMatchObject({
+    await expect(
+      saveActionTemplate({
+        name: actionDto.name,
+        description: actionDto.description,
+        pattern: actionDto.pattern,
+        data: actionDto.data,
+      }),
+    ).resolves.toMatchObject({
       id: actionDto.id,
       createdAt: Date.parse(actionDto.createdAt),
       updatedAt: Date.parse(actionDto.updatedAt),
@@ -92,11 +106,13 @@ describe('templateStore 服务器门面', () => {
     expect(changed).toHaveBeenCalledTimes(1);
 
     api.action.update.mockRejectedValueOnce(new Error('保存失败'));
-    await expect(updateActionTemplate({
-      ...actionDto,
-      createdAt: Date.parse(actionDto.createdAt),
-      updatedAt: Date.parse(actionDto.updatedAt),
-    })).rejects.toThrow('保存失败');
+    await expect(
+      updateActionTemplate({
+        ...actionDto,
+        createdAt: Date.parse(actionDto.createdAt),
+        updatedAt: Date.parse(actionDto.updatedAt),
+      }),
+    ).rejects.toThrow('保存失败');
     expect(changed).toHaveBeenCalledTimes(1);
     off();
   });
@@ -117,14 +133,16 @@ describe('templateStore 服务器门面', () => {
     const result = await replaceActionTemplateSnapshot({
       expectedRevision: 'old',
       idPolicy: 'generate-missing',
-      items: [{
-        id: '',
-        name: actionDto.name,
-        pattern: actionDto.pattern,
-        data: actionDto.data,
-        createdAt: 0,
-        updatedAt: 0,
-      }],
+      items: [
+        {
+          id: '',
+          name: actionDto.name,
+          pattern: actionDto.pattern,
+          data: actionDto.data,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
     });
 
     expect(api.action.replaceSnapshot).toHaveBeenCalledWith({
@@ -135,11 +153,13 @@ describe('templateStore 服务器门面', () => {
     expect(result).toEqual({
       revision: 'new',
       count: 1,
-      items: [{
-        ...actionDto,
-        createdAt: Date.parse(actionDto.createdAt),
-        updatedAt: Date.parse(actionDto.updatedAt),
-      }],
+      items: [
+        {
+          ...actionDto,
+          createdAt: Date.parse(actionDto.createdAt),
+          updatedAt: Date.parse(actionDto.updatedAt),
+        },
+      ],
     });
   });
 
@@ -158,14 +178,16 @@ describe('templateStore 服务器门面', () => {
     const result = await replaceListenTemplateSnapshot({
       expectedRevision: 'listen-old',
       idPolicy: 'generate-missing',
-      items: [{
-        id: '',
-        name: listenDto.name,
-        kind: listenDto.kind,
-        data: listenDto.data,
-        createdAt: 0,
-        updatedAt: 0,
-      }],
+      items: [
+        {
+          id: '',
+          name: listenDto.name,
+          kind: listenDto.kind,
+          data: listenDto.data,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
     });
 
     expect(api.listen.replaceSnapshot).toHaveBeenCalledWith({

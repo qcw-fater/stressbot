@@ -28,9 +28,10 @@ import type { ResourceFile } from '@/services/resourcesStore';
 const mockedListCodecFiles = vi.mocked(listCodecFiles);
 
 function makeCodecFile(name: string, routeKeyTemplate: string | null): ResourceFile {
-  const content = routeKeyTemplate === null
-    ? '{"version":1,"endianDefault":"le","frame":{"headerSize":12},"header":[],"pipeline":[]}'
-    : `{"version":1,"endianDefault":"le","frame":{"headerSize":12},"header":[],"routeKeyTemplate":${JSON.stringify(routeKeyTemplate)},"pipeline":[]}`;
+  const content =
+    routeKeyTemplate === null
+      ? '{"version":1,"endianDefault":"le","frame":{"headerSize":12},"header":[],"pipeline":[]}'
+      : `{"version":1,"endianDefault":"le","frame":{"headerSize":12},"header":[],"routeKeyTemplate":${JSON.stringify(routeKeyTemplate)},"pipeline":[]}`;
   return { name, content, size: content.length, uploadedAt: '2026-06-20T00:00:00.000Z' };
 }
 

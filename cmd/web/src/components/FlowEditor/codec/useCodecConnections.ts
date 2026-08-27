@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
-import { listCodecConnections, loadCodecRouteSpecs, type CodecConnection, type CodecRouteSpec } from '@/services/codecConnections';
+import {
+  listCodecConnections,
+  loadCodecRouteSpecs,
+  type CodecConnection,
+  type CodecRouteSpec,
+} from '@/services/codecConnections';
 import { subscribe } from '@/services/resourcesStore';
 
 interface CodecConnectionsState {
@@ -15,7 +20,11 @@ interface CodecRouteSpecsState {
 }
 
 export function useCodecConnections(): CodecConnectionsState {
-  const [state, setState] = useState<CodecConnectionsState>({ loading: true, error: null, connections: [] });
+  const [state, setState] = useState<CodecConnectionsState>({
+    loading: true,
+    error: null,
+    connections: [],
+  });
 
   useEffect(() => {
     let alive = true;
@@ -41,7 +50,11 @@ export function useCodecConnections(): CodecConnectionsState {
 }
 
 export function useCodecRouteSpecs(): CodecRouteSpecsState {
-  const [state, setState] = useState<CodecRouteSpecsState>({ loading: true, error: null, specs: new Map() });
+  const [state, setState] = useState<CodecRouteSpecsState>({
+    loading: true,
+    error: null,
+    specs: new Map(),
+  });
 
   useEffect(() => {
     let alive = true;

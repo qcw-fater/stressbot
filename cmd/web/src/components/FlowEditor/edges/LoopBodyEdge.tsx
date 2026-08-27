@@ -17,7 +17,14 @@ export function LoopBodyEdge({
   markerEnd,
   selected,
 }: EdgeProps) {
-  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
   const sourceType = (data as { sourceNodeType?: string } | undefined)?.sourceNodeType ?? 'loop';
   const style = buildEdgeStyle({ sourceNodeType: sourceType, width: 1.8, dash: '5 4', selected });
   return (

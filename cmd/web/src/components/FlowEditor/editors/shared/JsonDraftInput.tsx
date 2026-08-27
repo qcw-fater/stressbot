@@ -3,9 +3,7 @@ import { useEffect, useState } from 'react';
 
 export type JsonDraftInputMode = 'json' | 'jsonArray' | 'jsonOrString';
 
-export type JsonDraftParseResult =
-  | { ok: true; value: unknown }
-  | { ok: false };
+export type JsonDraftParseResult = { ok: true; value: unknown } | { ok: false };
 
 export interface JsonDraftInputProps {
   value: unknown;

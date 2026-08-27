@@ -44,7 +44,8 @@ describe('flowStore incremental derivation', () => {
     expect(after.rfNodes.find((node) => node.id === 'main')).toBe(mainNode);
     expect(after.rfNodes.find((node) => node.id === 'send')).not.toBe(actionNode);
     expect(
-      (after.rfNodes.find((node) => node.id === 'send')?.data as { action?: { timeout?: number } }).action?.timeout,
+      (after.rfNodes.find((node) => node.id === 'send')?.data as { action?: { timeout?: number } })
+        .action?.timeout,
     ).toBe(2500);
   });
 
@@ -58,7 +59,11 @@ describe('flowStore incremental derivation', () => {
     expect(after.rfEdges).toBe(before.rfEdges);
     expect(after.rfNodes.find((node) => node.id === 'main')).toBe(mainNode);
     expect(
-      (after.rfNodes.find((node) => node.id === 'send')?.data as { node?: { description?: string } }).node?.description,
+      (
+        after.rfNodes.find((node) => node.id === 'send')?.data as {
+          node?: { description?: string };
+        }
+      ).node?.description,
     ).toBe('updated');
   });
 
@@ -88,15 +93,20 @@ describe('flowStore incremental derivation', () => {
   it('keeps drag-time positions out of persisted layout until commit', () => {
     const beforeLayout = useFlowStore.getState().layout;
 
-    useFlowStore.getState().onNodesChange([{
-      id: 'send',
-      type: 'position',
-      position: { x: 180, y: 90 },
-      dragging: true,
-    }]);
+    useFlowStore.getState().onNodesChange([
+      {
+        id: 'send',
+        type: 'position',
+        position: { x: 180, y: 90 },
+        dragging: true,
+      },
+    ]);
 
     expect(useFlowStore.getState().layout).toBe(beforeLayout);
-    expect(useFlowStore.getState().rfNodes.find((node) => node.id === 'send')?.position).toEqual({ x: 180, y: 90 });
+    expect(useFlowStore.getState().rfNodes.find((node) => node.id === 'send')?.position).toEqual({
+      x: 180,
+      y: 90,
+    });
   });
 
   it('commits final positions without mutating the previous layout', () => {
@@ -137,12 +147,14 @@ describe('flowStore wait then references', () => {
 
     const after = useFlowStore.getState();
     expect(after.rfEdges).not.toBe(beforeEdges);
-    expect(after.rfEdges).toContainEqual(expect.objectContaining({
-      source: 'wait',
-      target: 'after',
-      sourceHandle: 'out',
-      type: 'waitThen',
-    }));
+    expect(after.rfEdges).toContainEqual(
+      expect.objectContaining({
+        source: 'wait',
+        target: 'after',
+        sourceHandle: 'out',
+        type: 'waitThen',
+      }),
+    );
   });
 
   it('clears wait.then when the target node is removed', () => {

@@ -36,24 +36,21 @@ export function ListenCard({ data, selected }: NodeProps) {
       onMouseEnter={() => setHoveredListen(listenName)}
       onMouseLeave={() => setHoveredListen(null)}
     >
-      <Handle type="target" position={Position.Left} id="in" style={{ background: 'var(--edge-listen)' }} />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="in"
+        style={{ background: 'var(--edge-listen)' }}
+      />
       <div className="listen-card-title-row">
         <Tooltip title={listenName} mouseEnterDelay={0.4}>
-          <span className="card-title">
-            {listenName}
-          </span>
+          <span className="card-title">{listenName}</span>
         </Tooltip>
       </div>
-      {listen.description && (
-        <div className="card-description">
-          {listen.description}
-        </div>
-      )}
+      {listen.description && <div className="card-description">{listen.description}</div>}
       <div className="listen-card-meta-row">
         <Tooltip title={LISTEN_KIND_DESC[kind]}>
-          <span className={`card-kind kind-tag-${kind}`}>
-            {listenKindShortLabel[kind]}
-          </span>
+          <span className={`card-kind kind-tag-${kind}`}>{listenKindShortLabel[kind]}</span>
         </Tooltip>
         {refCount > 0 ? (
           <Tooltip title={`被 ${refCount} 个 action 引用`}>

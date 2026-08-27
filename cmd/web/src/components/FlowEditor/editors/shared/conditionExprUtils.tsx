@@ -32,16 +32,14 @@ const tagStyle: CSSProperties = {
  * 词元正则：依次匹配 带引号字符串 | 数字 | state 路径。
  * 字符串分支在最前，保证引号内内容不会被 path 分支抢先匹配。
  */
-const TOKEN_RE = /"(?:[^"]*)"?|\d+(?:\.\d+)?|[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*/g;
+const TOKEN_RE =
+  /"(?:[^"]*)"?|\d+(?:\.\d+)?|[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*/g;
 
 /**
  * 将条件表达式渲染为混合 ReactNode：
  * 已知 state key（含子字段路径）→ 彩色 Tag；字符串/数字字面量 → 值 Tag；其余字符 → 纯文本。
  */
-export function renderExprWithHighlights(
-  expr: string,
-  knownKeys: StateKeyInfo[],
-): ReactNode[] {
+export function renderExprWithHighlights(expr: string, knownKeys: StateKeyInfo[]): ReactNode[] {
   if (!expr) return [];
 
   const keyMap = new Map(knownKeys.map((k) => [k.key, k]));
@@ -85,11 +83,7 @@ export function renderExprWithHighlights(
     const info = keyMap.get(text);
     if (info) {
       nodes.push(
-        <Tag
-          key={start}
-          color={SOURCE_TYPE_COLOR[info.sourceType] ?? 'default'}
-          style={tagStyle}
-        >
+        <Tag key={start} color={SOURCE_TYPE_COLOR[info.sourceType] ?? 'default'} style={tagStyle}>
           {text}
         </Tag>,
       );

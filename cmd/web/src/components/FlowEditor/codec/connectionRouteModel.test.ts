@@ -7,8 +7,14 @@ import {
 
 describe('connectionRouteModel', () => {
   it('action pattern 和 service 组合成目标连接', () => {
-    expect(actionTargetConnection('tcpRequest', 'logic')).toEqual({ protocol: 'tcp', server: 'tcp:logic' });
-    expect(actionTargetConnection('udpListen', 'battle')).toEqual({ protocol: 'udp', server: 'udp:battle' });
+    expect(actionTargetConnection('tcpRequest', 'logic')).toEqual({
+      protocol: 'tcp',
+      server: 'tcp:logic',
+    });
+    expect(actionTargetConnection('udpListen', 'battle')).toEqual({
+      protocol: 'udp',
+      server: 'udp:battle',
+    });
   });
 
   it('非 tcp/udp action 没有目标连接', () => {

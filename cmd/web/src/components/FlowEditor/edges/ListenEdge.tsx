@@ -22,7 +22,14 @@ export function ListenEdge({
 }: EdgeProps) {
   const show = useEditorStore((s) => s.showListenEdges);
   if (!show) return null;
-  const [path] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [path] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
   const style = buildEdgeStyle({
     sourceNodeType: 'action',
     width: 1.2,
@@ -30,5 +37,12 @@ export function ListenEdge({
     selected,
     colorOverride: 'var(--edge-listen)',
   });
-  return <BaseEdge id={id} path={path} style={selected ? style : { ...style, opacity: 0.7 }} markerEnd={markerEnd} />;
+  return (
+    <BaseEdge
+      id={id}
+      path={path}
+      style={selected ? style : { ...style, opacity: 0.7 }}
+      markerEnd={markerEnd}
+    />
+  );
 }

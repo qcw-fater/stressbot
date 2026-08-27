@@ -5,7 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodePalette } from './NodePalette';
 
 const mocks = vi.hoisted(() => ({
-  capability: { templateLibrary: true as boolean | undefined, loading: false, error: undefined as Error | undefined, refresh: vi.fn(async () => undefined) },
+  capability: {
+    templateLibrary: true as boolean | undefined,
+    loading: false,
+    error: undefined as Error | undefined,
+    refresh: vi.fn(async () => undefined),
+  },
   listActions: vi.fn(),
   listListens: vi.fn(),
   changeListener: undefined as (() => void) | undefined,
@@ -34,18 +39,28 @@ vi.mock('../library/templateStore', () => ({
   removeListenTemplate: vi.fn(),
 }));
 vi.mock('../store/editorStore', () => ({
-  useEditorStore: (selector: (state: unknown) => unknown) => selector({
-    setActivePanel: vi.fn(),
-    setClipboard: vi.fn(),
-  }),
+  useEditorStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      setActivePanel: vi.fn(),
+      setClipboard: vi.fn(),
+    }),
 }));
 
 const action = {
-  id: 'a1', name: '登录模板', pattern: 'setState', data: { pattern: 'setState' as const },
-  createdAt: 1, updatedAt: 1,
+  id: 'a1',
+  name: '登录模板',
+  pattern: 'setState',
+  data: { pattern: 'setState' as const },
+  createdAt: 1,
+  updatedAt: 1,
 };
 const listen = {
-  id: 'l1', name: '推送模板', kind: 'silent', data: {}, createdAt: 1, updatedAt: 1,
+  id: 'l1',
+  name: '推送模板',
+  kind: 'silent',
+  data: {},
+  createdAt: 1,
+  updatedAt: 1,
 };
 
 beforeEach(() => {
@@ -65,7 +80,11 @@ beforeEach(() => {
 describe('NodePalette 共享模板库', () => {
   it('不可用时不请求模板，也不提供业务侧重试入口', async () => {
     mocks.capability.templateLibrary = false;
-    render(<AntApp><NodePalette /></AntApp>);
+    render(
+      <AntApp>
+        <NodePalette />
+      </AntApp>,
+    );
 
     expect(await screen.findByText('共享模板库功能未启用，请检查服务器配置')).toBeTruthy();
     expect(mocks.listActions).not.toHaveBeenCalled();
@@ -75,7 +94,11 @@ describe('NodePalette 共享模板库', () => {
 
   it('进入、手动刷新和窗口聚焦都会重载；失败时保留旧列表', async () => {
     const user = userEvent.setup();
-    render(<AntApp><NodePalette /></AntApp>);
+    render(
+      <AntApp>
+        <NodePalette />
+      </AntApp>,
+    );
     expect(await screen.findByText('登录模板')).toBeTruthy();
 
     mocks.listActions.mockRejectedValueOnce(new Error('网络抖动'));
@@ -89,13 +112,17 @@ describe('NodePalette 共享模板库', () => {
   });
 
   it('keeps the newest template list when overlapping refreshes finish out of order', async () => {
-    render(<AntApp><NodePalette /></AntApp>);
+    render(
+      <AntApp>
+        <NodePalette />
+      </AntApp>,
+    );
     expect(await screen.findByText(action.name)).toBeTruthy();
 
-    const staleActions = deferred<typeof action[]>();
-    const staleListens = deferred<typeof listen[]>();
-    const freshActions = deferred<typeof action[]>();
-    const freshListens = deferred<typeof listen[]>();
+    const staleActions = deferred<(typeof action)[]>();
+    const staleListens = deferred<(typeof listen)[]>();
+    const freshActions = deferred<(typeof action)[]>();
+    const freshListens = deferred<(typeof listen)[]>();
     mocks.listActions
       .mockImplementationOnce(() => staleActions.promise)
       .mockImplementationOnce(() => freshActions.promise);

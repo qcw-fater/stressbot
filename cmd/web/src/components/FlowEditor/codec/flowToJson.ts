@@ -6,7 +6,14 @@
 
 import type { ActionDef, FieldBind, FilterDef, StoreMapping } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
-import type { FlowNode, ListenRef, OnErrorDef, RetryDef, SwitchCase, WeightedOption } from '@/types/flow';
+import type {
+  FlowNode,
+  ListenRef,
+  OnErrorDef,
+  RetryDef,
+  SwitchCase,
+  WeightedOption,
+} from '@/types/flow';
 import { pruneActionByPattern } from '../editors/ActionEditor/actionPrune';
 
 export interface ExportInput {
@@ -67,16 +74,21 @@ function cleanNode(n: FlowNode): FlowNode {
       // 不再过滤空 condition/next 的 case：旧实现会静默删掉无效 case，
       // 导致启动时 validateFlow（对 toTaskFlow 结果）看不到原始错误而放行，
       // 同时保存/导出也永久丢项。保留原样，让 validateFlow 的 SWITCH_CASE_INVALID 拦截。
-      const cases = (n.cases ?? []).map((c): SwitchCase => ({
-        condition: typeof c.condition === 'string' ? c.condition.trim() : '',
-        next: typeof c.next === 'string' ? c.next.trim() : '',
-      }));
+      const cases = (n.cases ?? []).map(
+        (c): SwitchCase => ({
+          condition: typeof c.condition === 'string' ? c.condition.trim() : '',
+          next: typeof c.next === 'string' ? c.next.trim() : '',
+        }),
+      );
       if (cases.length) out.cases = cases;
       if (n.defaultNext?.trim()) out.defaultNext = n.defaultNext.trim();
       break;
     }
     case 'weighted':
-      if (n.options?.length) out.options = n.options.map((o): WeightedOption => ({ node: o.node, weight: Math.trunc(o.weight) }));
+      if (n.options?.length)
+        out.options = n.options.map(
+          (o): WeightedOption => ({ node: o.node, weight: Math.trunc(o.weight) }),
+        );
       break;
     case 'wait':
       if (typeof n.waitMs === 'number' && n.waitMs !== 0) out.waitMs = Math.trunc(n.waitMs);
@@ -95,7 +107,9 @@ function cleanOnError(onError: OnErrorDef | undefined): OnErrorDef | undefined {
   if (!onError) return undefined;
   const out: OnErrorDef = {};
 
-  const ignoreCodes = (onError.ignoreCodes ?? []).filter((code) => Number.isInteger(code) && code > 0);
+  const ignoreCodes = (onError.ignoreCodes ?? []).filter(
+    (code) => Number.isInteger(code) && code > 0,
+  );
   if (ignoreCodes.length > 0) out.ignoreCodes = ignoreCodes;
 
   const handler = onError.handler?.trim();
@@ -112,8 +126,10 @@ function cleanOnError(onError: OnErrorDef | undefined): OnErrorDef | undefined {
 function cleanRetry(retry: RetryDef | undefined): RetryDef | undefined {
   if (!retry) return undefined;
   const out: RetryDef = {};
-  if (typeof retry.maxRetries === 'number' && retry.maxRetries > 0) out.maxRetries = retry.maxRetries;
-  if (typeof retry.retryDelayMs === 'number' && retry.retryDelayMs > 0) out.retryDelayMs = retry.retryDelayMs;
+  if (typeof retry.maxRetries === 'number' && retry.maxRetries > 0)
+    out.maxRetries = retry.maxRetries;
+  if (typeof retry.retryDelayMs === 'number' && retry.retryDelayMs > 0)
+    out.retryDelayMs = retry.retryDelayMs;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -138,7 +154,8 @@ function cleanAction(a: ActionDef): ActionDef {
   if (pruned.s2cProto) out.s2cProto = pruned.s2cProto;
   if (pruned.bindings?.length) out.bindings = pruned.bindings.map(cleanFieldBind);
   if (pruned.store?.length) out.store = pruned.store.map(cleanStoreMapping);
-  if (typeof pruned.timeout === 'number' && pruned.timeout > 0) out.timeout = Math.trunc(pruned.timeout);
+  if (typeof pruned.timeout === 'number' && pruned.timeout > 0)
+    out.timeout = Math.trunc(pruned.timeout);
   if (pruned.url) out.url = pruned.url;
   if (pruned.method) out.method = pruned.method;
   if (pruned.contentType) out.contentType = pruned.contentType;

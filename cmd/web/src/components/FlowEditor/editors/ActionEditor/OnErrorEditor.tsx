@@ -29,7 +29,10 @@ export function OnErrorEditor({ nodeId, node }: OnErrorEditorProps) {
 
   return (
     <>
-      <Form.Item label="最终策略 strategy" tooltip="错误链路和重试结束后的收束方式；不配置等同 resume">
+      <Form.Item
+        label="最终策略 strategy"
+        tooltip="错误链路和重试结束后的收束方式；不配置等同 resume"
+      >
         <Select
           value={onError.strategy ?? 'resume'}
           onChange={(strategy: OnErrorStrategy) => updateOnError({ strategy })}
@@ -40,12 +43,19 @@ export function OnErrorEditor({ nodeId, node }: OnErrorEditorProps) {
         <Select
           mode="tags"
           value={(onError.ignoreCodes ?? []).map(String)}
-          onChange={(values) => updateOnError({ ignoreCodes: values.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0) })}
+          onChange={(values) =>
+            updateOnError({
+              ignoreCodes: values.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0),
+            })
+          }
           tokenSeparators={[',', '，', ' ']}
           placeholder="输入正整数错误码，例如 1001"
         />
       </Form.Item>
-      <Form.Item label="错误处理节点 handler" tooltip="也可以从 action 节点的错误出口拖线设置；这是调用边，不写入 next">
+      <Form.Item
+        label="错误处理节点 handler"
+        tooltip="也可以从 action 节点的错误出口拖线设置；这是调用边，不写入 next"
+      >
         <Select
           allowClear
           showSearch
@@ -60,7 +70,9 @@ export function OnErrorEditor({ nodeId, node }: OnErrorEditorProps) {
           min={0}
           precision={0}
           value={onError.retry?.maxRetries ?? 0}
-          onChange={(v) => updateOnError({ retry: { ...(onError.retry ?? {}), maxRetries: Number(v ?? 0) } })}
+          onChange={(v) =>
+            updateOnError({ retry: { ...(onError.retry ?? {}), maxRetries: Number(v ?? 0) } })
+          }
           style={{ width: '100%' }}
         />
       </Form.Item>
@@ -69,7 +81,9 @@ export function OnErrorEditor({ nodeId, node }: OnErrorEditorProps) {
           min={0}
           precision={0}
           value={onError.retry?.retryDelayMs ?? 0}
-          onChange={(v) => updateOnError({ retry: { ...(onError.retry ?? {}), retryDelayMs: Number(v ?? 0) } })}
+          onChange={(v) =>
+            updateOnError({ retry: { ...(onError.retry ?? {}), retryDelayMs: Number(v ?? 0) } })
+          }
           style={{ width: '100%' }}
         />
       </Form.Item>

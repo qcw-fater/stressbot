@@ -28,13 +28,31 @@ export const BASELINE_PREFIX: string = import.meta.env.VITE_BASELINE_PREFIX || '
  *   VITE_ROBOT_LOG_LEVEL=info
  */
 export const ENV_ROBOT_DEFAULTS: Partial<RobotConfig> = {
-  ...(import.meta.env.VITE_ROBOT_ACCOUNT_PREFIX && { accountPrefix: import.meta.env.VITE_ROBOT_ACCOUNT_PREFIX }),
-  ...(import.meta.env.VITE_ROBOT_MAIN_SERVICE && { mainService: import.meta.env.VITE_ROBOT_MAIN_SERVICE }),
-  ...(import.meta.env.VITE_ROBOT_CONCURRENCY && { concurrency: Number(import.meta.env.VITE_ROBOT_CONCURRENCY) || undefined }),
-  ...(import.meta.env.VITE_ROBOT_TIMEOUT_SEC && { timeoutSec: Number(import.meta.env.VITE_ROBOT_TIMEOUT_SEC) || undefined }),
-  ...(import.meta.env.VITE_ROBOT_HEARTBEAT_SEC && { heartbeatSec: Number(import.meta.env.VITE_ROBOT_HEARTBEAT_SEC) || undefined }),
-  ...(import.meta.env.VITE_ROBOT_HTTP_TIMEOUT_SEC && { httpTimeoutSec: Number(import.meta.env.VITE_ROBOT_HTTP_TIMEOUT_SEC) || undefined }),
-  ...(import.meta.env.VITE_ROBOT_APDEX_T && { apdexT: Number(import.meta.env.VITE_ROBOT_APDEX_T) || undefined }),
-  ...(import.meta.env.VITE_ROBOT_START_NUMBER && { startNumber: Number(import.meta.env.VITE_ROBOT_START_NUMBER) || undefined }),
-  ...(import.meta.env.VITE_ROBOT_LOG_LEVEL && { logLevel: import.meta.env.VITE_ROBOT_LOG_LEVEL as LogLevel }),
+  ...(import.meta.env.VITE_ROBOT_ACCOUNT_PREFIX && {
+    accountPrefix: import.meta.env.VITE_ROBOT_ACCOUNT_PREFIX,
+  }),
+  ...(import.meta.env.VITE_ROBOT_MAIN_SERVICE && {
+    mainService: import.meta.env.VITE_ROBOT_MAIN_SERVICE,
+  }),
+  ...(import.meta.env.VITE_ROBOT_CONCURRENCY && {
+    concurrency: Number(import.meta.env.VITE_ROBOT_CONCURRENCY) || undefined,
+  }),
+  ...(import.meta.env.VITE_ROBOT_TIMEOUT_SEC && {
+    timeoutSec: Number(import.meta.env.VITE_ROBOT_TIMEOUT_SEC) || undefined,
+  }),
+  ...(import.meta.env.VITE_ROBOT_HEARTBEAT_SEC && {
+    heartbeatSec: Number(import.meta.env.VITE_ROBOT_HEARTBEAT_SEC) || undefined,
+  }),
+  ...(import.meta.env.VITE_ROBOT_HTTP_TIMEOUT_SEC && {
+    httpTimeoutSec: Number(import.meta.env.VITE_ROBOT_HTTP_TIMEOUT_SEC) || undefined,
+  }),
+  ...(import.meta.env.VITE_ROBOT_APDEX_T && {
+    apdexT: Number(import.meta.env.VITE_ROBOT_APDEX_T) || undefined,
+  }),
+  ...(import.meta.env.VITE_ROBOT_START_NUMBER && {
+    startNumber: Number(import.meta.env.VITE_ROBOT_START_NUMBER) || undefined,
+  }),
+  ...(import.meta.env.VITE_ROBOT_LOG_LEVEL && {
+    logLevel: import.meta.env.VITE_ROBOT_LOG_LEVEL as LogLevel,
+  }),
 };

@@ -29,8 +29,13 @@ export function LatencyHistogram({ hist, maxMs, width = 160 }: LatencyHistogramP
   const { minMs, maxMs: histogramMaxMs, avgMs, p50Ms, p90Ms, p95Ms, p99Ms } = hist;
   if (
     hist.count === 0 ||
-    minMs == null || histogramMaxMs == null || avgMs == null ||
-    p50Ms == null || p90Ms == null || p95Ms == null || p99Ms == null
+    minMs == null ||
+    histogramMaxMs == null ||
+    avgMs == null ||
+    p50Ms == null ||
+    p90Ms == null ||
+    p95Ms == null ||
+    p99Ms == null
   ) {
     return <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>—</span>;
   }
@@ -46,7 +51,10 @@ export function LatencyHistogram({ hist, maxMs, width = 160 }: LatencyHistogramP
     <Tooltip
       title={
         <div style={{ fontSize: 11 }}>
-          <div>min: {minMs.toFixed(1)}ms · max: {histogramMaxMs.toFixed(1)}ms · avg: {avgMs.toFixed(1)}ms</div>
+          <div>
+            min: {minMs.toFixed(1)}ms · max: {histogramMaxMs.toFixed(1)}ms · avg: {avgMs.toFixed(1)}
+            ms
+          </div>
           {points.map((p) => (
             <div key={p.label}>
               {p.label}: {p.ms.toFixed(1)}ms

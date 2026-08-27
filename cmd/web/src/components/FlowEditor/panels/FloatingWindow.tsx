@@ -73,21 +73,25 @@ export function FloatingWindow({
   }, [open, windowId, focusWindow, windowState]);
 
   // ESC 关闭最顶层窗口
-  const handleEsc = useCallback((e: KeyboardEvent) => {
-    if (e.key !== 'Escape') return;
-    if (e.target instanceof Element && e.target.closest('[data-floating-window-escape-local]')) return;
-    // 只响应自己是最顶层窗口的情况
-    const windows = useFloatingWindowStore.getState().windows;
-    const topEntry = Object.entries(windows).reduce<[string, number] | null>((acc, [id, w]) => {
-      if (!acc || w.zIndex > acc[1]) return [id, w.zIndex];
-      return acc;
-    }, null);
-    if (topEntry && topEntry[0] === windowId && open) {
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    }
-  }, [windowId, open, onClose]);
+  const handleEsc = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (e.target instanceof Element && e.target.closest('[data-floating-window-escape-local]'))
+        return;
+      // 只响应自己是最顶层窗口的情况
+      const windows = useFloatingWindowStore.getState().windows;
+      const topEntry = Object.entries(windows).reduce<[string, number] | null>((acc, [id, w]) => {
+        if (!acc || w.zIndex > acc[1]) return [id, w.zIndex];
+        return acc;
+      }, null);
+      if (topEntry && topEntry[0] === windowId && open) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    },
+    [windowId, open, onClose],
+  );
 
   useEffect(() => {
     if (!open) return;

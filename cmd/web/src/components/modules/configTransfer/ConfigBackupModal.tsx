@@ -81,13 +81,14 @@ export function ConfigBackupModal({
   const [downloadError, setDownloadError] = useState<string>();
 
   const availableSections = useMemo(
-    () => BACKUP_SECTIONS.filter((section) => {
-      if (section === 'flows') return flowLibrary === true;
-      if (section === 'actionTemplates' || section === 'listenTemplates') {
-        return templateLibrary === true;
-      }
-      return true;
-    }),
+    () =>
+      BACKUP_SECTIONS.filter((section) => {
+        if (section === 'flows') return flowLibrary === true;
+        if (section === 'actionTemplates' || section === 'listenTemplates') {
+          return templateLibrary === true;
+        }
+        return true;
+      }),
     [flowLibrary, templateLibrary],
   );
 

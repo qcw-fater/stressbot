@@ -136,15 +136,13 @@ export function ConfigRestoreModal({
   useEffect(() => {
     if (!bundle) return;
     setSelected(
-      bundle.manifest.includedSections.filter(
-        (section) => {
-          if (section === 'flows') return flowLibrary === true;
-          if (section === 'actionTemplates' || section === 'listenTemplates') {
-            return templateLibrary === true;
-          }
-          return true;
-        },
-      ),
+      bundle.manifest.includedSections.filter((section) => {
+        if (section === 'flows') return flowLibrary === true;
+        if (section === 'actionTemplates' || section === 'listenTemplates') {
+          return templateLibrary === true;
+        }
+        return true;
+      }),
     );
   }, [bundle, flowLibrary, templateLibrary]);
 
@@ -256,15 +254,13 @@ export function ConfigRestoreModal({
     selected.length === 0 ||
     (plan.conflicts.length > 0 && !choicesComplete);
   const availableIncluded =
-    bundle?.manifest.includedSections.filter(
-      (section) => {
-        if (section === 'flows') return flowLibrary === true;
-        if (section === 'actionTemplates' || section === 'listenTemplates') {
-          return templateLibrary === true;
-        }
-        return true;
-      },
-    ) ?? [];
+    bundle?.manifest.includedSections.filter((section) => {
+      if (section === 'flows') return flowLibrary === true;
+      if (section === 'actionTemplates' || section === 'listenTemplates') {
+        return templateLibrary === true;
+      }
+      return true;
+    }) ?? [];
 
   const footer = result
     ? [

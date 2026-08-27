@@ -77,9 +77,10 @@ export function findDuplicate<T>(
 ): DuplicateMatch<T> {
   const incomingID = identity.id(incoming);
   const incomingName = identity.name(incoming);
-  const byID = identity.matchBy === 'name' || incomingID === ''
-    ? undefined
-    : current.find((item) => identity.id(item) === incomingID);
+  const byID =
+    identity.matchBy === 'name' || incomingID === ''
+      ? undefined
+      : current.find((item) => identity.id(item) === incomingID);
   const byName =
     incomingName === '' ? undefined : current.find((item) => identity.name(item) === incomingName);
   const matches = [...new Set([byID, byName].filter((value): value is T => value !== undefined))];

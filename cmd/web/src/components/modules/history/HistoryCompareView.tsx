@@ -72,12 +72,10 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
   const [data, setData] = useState<HistoryCompareTask[] | null>(null);
   const [loading, setLoading] = useState(true);
   const viewportH = useViewportHeight();
-  const tableScrollY = useMemo(
-    () => Math.min(440, Math.max(200, viewportH - 320)),
-    [viewportH],
-  );
+  const tableScrollY = useMemo(() => Math.min(440, Math.max(200, viewportH - 320)), [viewportH]);
   const targetsKey = useMemo(
-    () => targets.map((t) => (typeof t === 'string' ? t : `${t.id}:${t.stageIndex ?? -1}`)).join(','),
+    () =>
+      targets.map((t) => (typeof t === 'string' ? t : `${t.id}:${t.stageIndex ?? -1}`)).join(','),
     [targets],
   );
 
@@ -170,37 +168,56 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
 
   return (
     <div className="hp-compare-root">
-      <div className="hp-compare-cards" style={{ gridTemplateColumns: `repeat(${data.length}, 1fr)` }}>
+      <div
+        className="hp-compare-cards"
+        style={{ gridTemplateColumns: `repeat(${data.length}, 1fr)` }}
+      >
         {data.map((d, i) => (
-          <div key={`${d.id}:${d.stageIndex ?? -1}`} className="hp-glass hp-compare-card" data-index={i}>
+          <div
+            key={`${d.id}:${d.stageIndex ?? -1}`}
+            className="hp-glass hp-compare-card"
+            data-index={i}
+          >
             <div className="hp-compare-card__title">
               <span style={{ marginRight: 6 }}>#{i + 1}</span>
               {d.name}
               {(d.stageIndex ?? -1) > 0 && (
-                <Tag color="warning" style={{ marginLeft: 6 }}>{formatStageLabel(d.stageLabel, d.stageIndex)}</Tag>
+                <Tag color="warning" style={{ marginLeft: 6 }}>
+                  {formatStageLabel(d.stageLabel, d.stageIndex)}
+                </Tag>
               )}
             </div>
             <div className="hp-compare-card__meta">
-              <code>{d.id.slice(0, 8)}</code> · {d.startedAt ? dayjs(d.startedAt).format('MM-DD HH:mm') : '—'}
+              <code>{d.id.slice(0, 8)}</code> ·{' '}
+              {d.startedAt ? dayjs(d.startedAt).format('MM-DD HH:mm') : '—'}
             </div>
             <div className="hp-compare-card__hero">
               <div className="hp-hero-row">
                 <div className="hp-hero-box">
-                  <div className="hp-hero-value hp-hero-value-sm" style={{ color: 'var(--color-blue)' }}>
+                  <div
+                    className="hp-hero-value hp-hero-value-sm"
+                    style={{ color: 'var(--color-blue)' }}
+                  >
                     {formatDuration(d.durationSec)}
                   </div>
                   <div className="hp-hero-title">时长</div>
                 </div>
                 <div className="hp-hero-divider" />
                 <div className="hp-hero-box">
-                  <div className="hp-hero-value hp-hero-value-sm" style={{ color: 'var(--color-success)' }}>
+                  <div
+                    className="hp-hero-value hp-hero-value-sm"
+                    style={{ color: 'var(--color-success)' }}
+                  >
                     {d.totalBots}
                   </div>
                   <div className="hp-hero-title">机器人</div>
                 </div>
                 <div className="hp-hero-divider" />
                 <div className="hp-hero-box">
-                  <div className="hp-hero-value hp-hero-value-sm" style={{ color: 'var(--color-purple)' }}>
+                  <div
+                    className="hp-hero-value hp-hero-value-sm"
+                    style={{ color: 'var(--color-purple)' }}
+                  >
                     {d.finalSnapshot.totalActions}
                   </div>
                   <div className="hp-hero-title">动作</div>

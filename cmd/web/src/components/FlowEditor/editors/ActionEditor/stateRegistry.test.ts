@@ -100,19 +100,31 @@ describe('collectStateKeys', () => {
     };
 
     const keys = collectStateKeys(actions, {}, undefined, undefined, undefined);
-    expect(findKey(keys, 'matchInfo')).toMatchObject({ sourceType: 'setState', sourceName: 'setMatch' });
-    expect(findKey(keys, 'rankedMatchStarted')).toMatchObject({ sourceType: 'setState', sourceName: 'setMatch' });
+    expect(findKey(keys, 'matchInfo')).toMatchObject({
+      sourceType: 'setState',
+      sourceName: 'setMatch',
+    });
+    expect(findKey(keys, 'rankedMatchStarted')).toMatchObject({
+      sourceType: 'setState',
+      sourceName: 'setMatch',
+    });
   });
 
   it('收集所有 action 的 storeAs，而非只收当前 bindings', () => {
     const actions: Record<string, ActionDef> = {
       login: {
-        pattern: 'tcpSend', service: 'logic', route: {}, c2sProto: 'X.Login',
+        pattern: 'tcpSend',
+        service: 'logic',
+        route: {},
+        c2sProto: 'X.Login',
         bindings: [{ field: 'uid', type: 'fixed', value: 1, storeAs: 'resolvedUid' }],
       },
     };
     const keys = collectStateKeys(actions, {}, undefined, undefined, undefined);
-    expect(findKey(keys, 'resolvedUid')).toMatchObject({ sourceType: 'storeAs', sourceName: 'login' });
+    expect(findKey(keys, 'resolvedUid')).toMatchObject({
+      sourceType: 'storeAs',
+      sourceName: 'login',
+    });
   });
 
   it('任何流程写入都不能覆盖内置 key 的来源信息', () => {

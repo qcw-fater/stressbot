@@ -10,7 +10,10 @@ export type RandomStringCharsetAlias = keyof typeof RANDOM_STRING_CHARSET_ALIASE
 
 export const DEFAULT_RANDOM_STRING_CHARSET_ALIAS: RandomStringCharsetAlias = 'alphanum';
 
-export const RANDOM_STRING_CHARSET_OPTIONS: Array<{ value: RandomStringCharsetAlias; label: string }> = [
+export const RANDOM_STRING_CHARSET_OPTIONS: Array<{
+  value: RandomStringCharsetAlias;
+  label: string;
+}> = [
   { value: 'lower', label: 'lower (a-z)' },
   { value: 'upper', label: 'upper (A-Z)' },
   { value: 'alpha', label: 'alpha (a-zA-Z)' },
@@ -18,7 +21,9 @@ export const RANDOM_STRING_CHARSET_OPTIONS: Array<{ value: RandomStringCharsetAl
   { value: 'alphanum', label: 'alphanum (a-zA-Z0-9)' },
 ];
 
-export function isKnownRandomStringCharsetAlias(charset?: string): charset is RandomStringCharsetAlias {
+export function isKnownRandomStringCharsetAlias(
+  charset?: string,
+): charset is RandomStringCharsetAlias {
   if (!charset) return false;
   return Object.prototype.hasOwnProperty.call(RANDOM_STRING_CHARSET_ALIASES, charset);
 }

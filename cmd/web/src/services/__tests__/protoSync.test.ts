@@ -14,7 +14,13 @@ const idb = new Map<string, { name: string; content: string }>();
 vi.mock('../resourcesStore', () => ({
   getProto: vi.fn(async (name: string) => idb.get(name)),
   addProtoFromBaseline: vi.fn(async (name: string, content: string) => {
-    const file = { name, content, size: content.length, uploadedAt: '2026-01-01T00:00:00Z', baseHash: 'sha256:test' };
+    const file = {
+      name,
+      content,
+      size: content.length,
+      uploadedAt: '2026-01-01T00:00:00Z',
+      baseHash: 'sha256:test',
+    };
     idb.set(name, file);
     return file;
   }),
@@ -41,7 +47,13 @@ function proto(name: string, content: string) {
 
 /** 仿真一个声明了若干 import 的 proto 文件头。 */
 function withImports(...imports: string[]): string {
-  return ['syntax = "proto3";', 'package Game;', '', ...imports.map((i) => `import "${i}";`), ''].join('\n');
+  return [
+    'syntax = "proto3";',
+    'package Game;',
+    '',
+    ...imports.map((i) => `import "${i}";`),
+    '',
+  ].join('\n');
 }
 
 // ---------------- missingProtoImports（纯函数）----------------
@@ -72,7 +84,12 @@ describe('missingProtoImports', () => {
   });
 
   it('google/* well-known types 跳过（后端 WithStandardImports 提供）', () => {
-    const protos = [proto('a.proto', withImports('google/protobuf/empty.proto', 'google/protobuf/timestamp.proto'))];
+    const protos = [
+      proto(
+        'a.proto',
+        withImports('google/protobuf/empty.proto', 'google/protobuf/timestamp.proto'),
+      ),
+    ];
     expect(missingProtoImports(protos)).toEqual([]);
   });
 
@@ -102,7 +119,10 @@ describe('missingProtoImports', () => {
 
   it('import public / import weak 也识别', () => {
     const protos = [
-      proto('a.proto', 'syntax = "proto3";\nimport public "shared.proto";\nimport weak "opt.proto";\n'),
+      proto(
+        'a.proto',
+        'syntax = "proto3";\nimport public "shared.proto";\nimport weak "opt.proto";\n',
+      ),
     ];
     expect(missingProtoImports(protos)).toEqual(['opt.proto', 'shared.proto']);
   });
@@ -151,7 +171,10 @@ describe('syncProtosToIdb', () => {
 
   it('IDB 已有 → skipped，不覆盖本地内容', async () => {
     idb.set('common.proto', proto('common.proto', '// 本地编辑稿'));
-    stubBaseline(['common.proto', 'enum.proto'], { 'common.proto': 'syntax="proto3";', 'enum.proto': 'syntax="proto3";' });
+    stubBaseline(['common.proto', 'enum.proto'], {
+      'common.proto': 'syntax="proto3";',
+      'enum.proto': 'syntax="proto3";',
+    });
     const res = await syncProtosToIdb();
     expect(res.indexAvailable).toBe(true);
     expect(res.skipped).toEqual(['common.proto']);
@@ -177,7 +200,7 @@ describe('syncProtosToIdb', () => {
 
   it('混合场景：部分已有、部分拉取、部分缺失', async () => {
     idb.set('a.proto', proto('a.proto', 'local'));
-    stubBaseline(['a.proto', 'b.proto', 'c.proto'], { 'b.proto': 'b', /* c 故意不给内容 */ });
+    stubBaseline(['a.proto', 'b.proto', 'c.proto'], { 'b.proto': 'b' /* c 故意不给内容 */ });
     const res = await syncProtosToIdb();
     expect(res.skipped).toEqual(['a.proto']);
     expect(res.added).toEqual(['b.proto']);

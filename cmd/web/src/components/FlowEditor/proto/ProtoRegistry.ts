@@ -84,8 +84,14 @@ export class ProtoRegistry {
       optional: f.optional,
       mapKey: f instanceof protobuf.MapField ? f.keyType : undefined,
       mapValue: f instanceof protobuf.MapField ? f.type : undefined,
-      enumName: f.resolvedType instanceof protobuf.Enum ? f.resolvedType.fullName.replace(/^\./, '') : undefined,
-      messageName: f.resolvedType instanceof protobuf.Type ? f.resolvedType.fullName.replace(/^\./, '') : undefined,
+      enumName:
+        f.resolvedType instanceof protobuf.Enum
+          ? f.resolvedType.fullName.replace(/^\./, '')
+          : undefined,
+      messageName:
+        f.resolvedType instanceof protobuf.Type
+          ? f.resolvedType.fullName.replace(/^\./, '')
+          : undefined,
       comment: f.comment || undefined,
     };
   }

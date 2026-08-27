@@ -7,7 +7,13 @@
 
 import type { Monaco } from '@monaco-editor/react';
 import type { editor, languages, IRange, Position } from 'monaco-editor';
-import { LUA_MODULES, getLuaFunction, getLuaModule, renderDoc, renderSignature } from './luaApiSpec';
+import {
+  LUA_MODULES,
+  getLuaFunction,
+  getLuaModule,
+  renderDoc,
+  renderSignature,
+} from './luaApiSpec';
 import { protoRegistry } from '../proto/ProtoRegistry';
 import type { ProtoField } from '@/types/proto';
 
@@ -19,7 +25,14 @@ export function registerLuaProviders(monaco: Monaco): void {
 
   // 1. 补全：模块名 / 模块成员 / Proto 消息名/字段名
   monaco.languages.registerCompletionItemProvider('lua', {
-    triggerCharacters: ['.', ':', ' ', '"', "'", ...Array.from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_')],
+    triggerCharacters: [
+      '.',
+      ':',
+      ' ',
+      '"',
+      "'",
+      ...Array.from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'),
+    ],
     provideCompletionItems: (model, position) => {
       const word = model.getWordUntilPosition(position);
       const range: IRange = {
@@ -28,9 +41,7 @@ export function registerLuaProviders(monaco: Monaco): void {
         startColumn: word.startColumn,
         endColumn: word.endColumn,
       };
-      const lineUntil = model
-        .getLineContent(position.lineNumber)
-        .slice(0, position.column - 1);
+      const lineUntil = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
 
       const protoReady = protoRegistry.isLoaded();
 
@@ -39,7 +50,7 @@ export function registerLuaProviders(monaco: Monaco): void {
         // 场景 1：消息名 — proto.create(" | network.*_request(..., "
         if (protoReady) {
           const protoNameMatch = lineUntil.match(
-            /(?:proto\.(?:create|parse)|network\.(?:tcp_request|tcp_request_route|udp_request|udp_request_route|tcp_listen|udp_listen))\s*\(.*["']([\w.]*)$/
+            /(?:proto\.(?:create|parse)|network\.(?:tcp_request|tcp_request_route|udp_request|udp_request_route|tcp_listen|udp_listen))\s*\(.*["']([\w.]*)$/,
           );
           if (protoNameMatch) {
             const prefix = protoNameMatch[1] || '';
@@ -69,7 +80,7 @@ export function registerLuaProviders(monaco: Monaco): void {
         // 场景 2：字段名 — proto.set_field(msg, " | proto.get_field(msg, "
         if (protoReady) {
           const fieldAccessMatch = lineUntil.match(
-            /proto\.(?:set_field|get_field)\s*\(\s*(\w+)\s*,\s*["'](\w*)$/
+            /proto\.(?:set_field|get_field)\s*\(\s*(\w+)\s*,\s*["'](\w*)$/,
           );
           if (fieldAccessMatch) {
             const varName = fieldAccessMatch[1];
@@ -123,7 +134,9 @@ export function registerLuaProviders(monaco: Monaco): void {
             }
           }
         }
-      } catch (e) { console.warn('[luaProviders] proto completion error:', e); }
+      } catch (e) {
+        console.warn('[luaProviders] proto completion error:', e);
+      }
 
       // 1.1 `<module>.<partial>` → 列出该模块全部/过滤后的函数
       const moduleAccess = lineUntil.match(/(\w+)[.:](\w*)$/);
@@ -183,9 +196,7 @@ export function registerLuaProviders(monaco: Monaco): void {
       const word = model.getWordAtPosition(position);
       if (!word) return null;
       // 解析 `<module>.<name>` 形式
-      const beforeWord = lineContent
-        .slice(0, word.startColumn - 1)
-        .match(/(\w+)[.:]\s*$/);
+      const beforeWord = lineContent.slice(0, word.startColumn - 1).match(/(\w+)[.:]\s*$/);
       if (beforeWord) {
         const fn = getLuaFunction(beforeWord[1], word.word);
         if (fn) {
@@ -302,7 +313,7 @@ function resolveVarProtoType(
   position: Position,
 ): string | null {
   const re = new RegExp(
-    `local\\s+${escapeRegex(varName)}\\s*=\\s*proto\\.(?:create|parse)\\s*\\(\\s*["']([\\w.]+)["']`
+    `local\\s+${escapeRegex(varName)}\\s*=\\s*proto\\.(?:create|parse)\\s*\\(\\s*["']([\\w.]+)["']`,
   );
   for (let line = position.lineNumber; line >= 1; line--) {
     const match = model.getLineContent(line).match(re);
@@ -318,9 +329,7 @@ function findContainingProtoCreateTable(
   lineUntil: string,
 ): string | null {
   // 快速路径：单行 proto.create("Msg", { ...
-  const singleLine = lineUntil.match(
-    /proto\.create\s*\(\s*["']([\w.]+)["']\s*,\s*\{[^}]*$/
-  );
+  const singleLine = lineUntil.match(/proto\.create\s*\(\s*["']([\w.]+)["']\s*,\s*\{[^}]*$/);
   if (singleLine) return singleLine[1];
 
   // 多行：从光标向上追踪 { } 深度

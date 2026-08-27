@@ -120,7 +120,13 @@ export interface BuildLivePanelModelInput {
 export function buildLivePanelModel(input: BuildLivePanelModelInput): LivePanelModel {
   const stress = input.latestStress;
   const robots = stress?.robots ?? { started: 0, running: 0, stopped: 0, errored: 0 };
-  const connections = stress?.connections ?? { established: 0, active: 0, closed: 0, failed: 0, dropped: 0 };
+  const connections = stress?.connections ?? {
+    established: 0,
+    active: 0,
+    closed: 0,
+    failed: 0,
+    dropped: 0,
+  };
   const liveSummary = stress?.window?.summary;
   const quality = deriveQuality(liveSummary);
 

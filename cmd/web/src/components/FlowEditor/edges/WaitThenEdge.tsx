@@ -17,7 +17,14 @@ export function WaitThenEdge({
   markerEnd,
   selected,
 }: EdgeProps) {
-  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
   const sourceType = (data as { sourceNodeType?: string } | undefined)?.sourceNodeType ?? 'wait';
   const sourceColor = colorOfNodeType(sourceType);
   const style = buildEdgeStyle({ sourceNodeType: sourceType, width: 1.8, dash: '5 4', selected });

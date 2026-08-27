@@ -19,9 +19,15 @@ interface AstNode {
 }
 
 function findEntry(code: string, name: string): { line: number; paramCount: number } | null {
-  const ast = luaparse.parse(code, { locations: true, luaVersion: '5.1' }) as unknown as { body?: AstNode[] };
+  const ast = luaparse.parse(code, { locations: true, luaVersion: '5.1' }) as unknown as {
+    body?: AstNode[];
+  };
   for (const stmt of ast.body ?? []) {
-    if (stmt.type === 'FunctionDeclaration' && stmt.identifier?.type === 'Identifier' && stmt.identifier.name === name) {
+    if (
+      stmt.type === 'FunctionDeclaration' &&
+      stmt.identifier?.type === 'Identifier' &&
+      stmt.identifier.name === name
+    ) {
       return { line: stmt.loc?.start.line ?? 1, paramCount: stmt.parameters?.length ?? 0 };
     }
     if (stmt.type === 'AssignmentStatement') {
@@ -65,10 +71,7 @@ describe('入口函数定位', () => {
   });
 
   it('入口函数只能在顶层声明，方法或嵌套不计', () => {
-    const r = findEntry(
-      `local m = {}\nfunction m.execute(r)\n  return 0\nend\n`,
-      'execute',
-    );
+    const r = findEntry(`local m = {}\nfunction m.execute(r)\n  return 0\nend\n`, 'execute');
     expect(r).toBeNull();
   });
 });
@@ -87,10 +90,9 @@ describe('luaparse 语法错误捕获', () => {
 
   it('合法脚本无异常', () => {
     expect(() =>
-      luaparse.parse(
-        `local network = require('network')\nfunction execute(r)\n  return 0\nend\n`,
-        { luaVersion: '5.1' },
-      ),
+      luaparse.parse(`local network = require('network')\nfunction execute(r)\n  return 0\nend\n`, {
+        luaVersion: '5.1',
+      }),
     ).not.toThrow();
   });
 });

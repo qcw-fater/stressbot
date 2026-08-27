@@ -8,7 +8,10 @@
   box-shadow: var(--shadow-node);
   font-size: 12px;
   cursor: pointer;
-  transition: box-shadow 0.15s ease, transform 0.1s ease, border-width 0.1s ease;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.1s ease,
+    border-width 0.1s ease;
 }
 
 .node-shell:hover {
@@ -18,51 +21,77 @@
 /* 选中态：粗描边 + 节点同色外发光（每种类型在下方覆盖），比 hover 显著增强 */
 .node-shell.selected {
   border-width: 2.5px;
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px rgba(0, 0, 0, 0.1),
+    var(--shadow-node-hover);
 }
 
 /* 各类型选中发光颜色：用 currentColor 不方便，直接覆盖每种 */
 .node-sequence.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-sequence) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-sequence) 45%, transparent),
+    var(--shadow-node-hover);
 }
 .node-action.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-action) 35%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-action) 35%, transparent),
+    var(--shadow-node-hover);
 }
 .node-loop.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-loop) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-loop) 45%, transparent),
+    var(--shadow-node-hover);
 }
 .node-boolean.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-boolean) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-boolean) 45%, transparent),
+    var(--shadow-node-hover);
 }
 .node-switch.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-switch) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-switch) 45%, transparent),
+    var(--shadow-node-hover);
 }
 .node-weighted.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-weighted) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-weighted) 45%, transparent),
+    var(--shadow-node-hover);
 }
 .node-wait.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-wait) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-wait) 45%, transparent),
+    var(--shadow-node-hover);
 }
 .node-break.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-break) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-break) 45%, transparent),
+    var(--shadow-node-hover);
 }
 .node-continue.selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-continue) 45%, transparent), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-continue) 45%, transparent),
+    var(--shadow-node-hover);
 }
 
 /* hover 某 listen 时，与之相关的 action 节点高亮 */
 .node-shell.highlight-by-listen {
-  box-shadow: 0 0 0 2px var(--edge-listen), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 2px var(--edge-listen),
+    var(--shadow-node-hover);
 }
 
 /* 校验问题：has-error / has-warning 在节点边框上叠加红/橙描边作为视觉提示 */
 .node-shell.has-error {
   border-color: var(--color-error) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-error) 25%, transparent), var(--shadow-node);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-error) 25%, transparent),
+    var(--shadow-node);
 }
 .node-shell.has-warning {
   border-color: var(--color-warning) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning) 25%, transparent), var(--shadow-node);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-warning) 25%, transparent),
+    var(--shadow-node);
 }
 
 /* === 运行态 Apdex 染色 ===
@@ -72,23 +101,33 @@
 */
 .node-shell.apdex-excellent:not(.has-error):not(.has-warning) {
   border-color: var(--color-success);
-  box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.18), var(--shadow-node);
+  box-shadow:
+    0 0 0 2px rgba(82, 196, 26, 0.18),
+    var(--shadow-node);
 }
 .node-shell.apdex-good:not(.has-error):not(.has-warning) {
   border-color: #a0d911;
-  box-shadow: 0 0 0 2px rgba(160, 217, 17, 0.18), var(--shadow-node);
+  box-shadow:
+    0 0 0 2px rgba(160, 217, 17, 0.18),
+    var(--shadow-node);
 }
 .node-shell.apdex-fair:not(.has-error):not(.has-warning) {
   border-color: var(--color-warning);
-  box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.22), var(--shadow-node);
+  box-shadow:
+    0 0 0 2px rgba(250, 173, 20, 0.22),
+    var(--shadow-node);
 }
 .node-shell.apdex-poor:not(.has-error):not(.has-warning) {
   border-color: var(--color-orange);
-  box-shadow: 0 0 0 2px rgba(250, 140, 22, 0.22), var(--shadow-node);
+  box-shadow:
+    0 0 0 2px rgba(250, 140, 22, 0.22),
+    var(--shadow-node);
 }
 .node-shell.apdex-danger:not(.has-error):not(.has-warning) {
   border-color: var(--color-error);
-  box-shadow: 0 0 0 2px rgba(245, 34, 45, 0.25), var(--shadow-node);
+  box-shadow:
+    0 0 0 2px rgba(245, 34, 45, 0.25),
+    var(--shadow-node);
 }
 
 /* 当前并发徽章：左下角圆形脉动；与右上 issue 徽章不冲突 */
@@ -116,11 +155,12 @@
 }
 
 @keyframes executing-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.0);
+    box-shadow: 0 0 0 4px rgba(79, 70, 229, 0);
   }
 }
 
@@ -152,7 +192,9 @@
 
 /* 选中边时相连的两端节点高亮：用边颜色（即起点节点色）发光 —— 由父级 react-flow__node 的 data-edge-color 注入 */
 .node-shell.edge-highlight {
-  box-shadow: 0 0 0 2px var(--edge-highlight-color, var(--edge-selected)), var(--shadow-node-hover);
+  box-shadow:
+    0 0 0 2px var(--edge-highlight-color, var(--edge-selected)),
+    var(--shadow-node-hover);
 }
 
 /* === 节点头部 === */

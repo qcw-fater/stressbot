@@ -472,9 +472,9 @@ function resourceIdentity(createId: () => string): CollectionIdentity<ResourceFi
   };
 }
 
-function templateIdentity<T extends { id: string; name: string; createdAt: number; updatedAt: number }>(
-  createId: () => string,
-): CollectionIdentity<T> {
+function templateIdentity<
+  T extends { id: string; name: string; createdAt: number; updatedAt: number },
+>(createId: () => string): CollectionIdentity<T> {
   return {
     ...itemIdentity<T>(createId),
     matchBy: 'name',
@@ -500,7 +500,9 @@ function canonicalize(value: unknown): unknown {
   if (value !== null && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     return Object.fromEntries(
-      Object.keys(record).sort().map((key) => [key, canonicalize(record[key])]),
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, canonicalize(record[key])]),
     );
   }
   return value;
@@ -510,7 +512,7 @@ function templateFingerprint<
   T extends { id: string; name: string; createdAt: number; updatedAt: number },
 >(items: T[], mode: RestoreMode): string {
   const stable = [...items]
-    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
     .map((item) => {
       if (mode === 'replace') return item;
       const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...semantic } = item;

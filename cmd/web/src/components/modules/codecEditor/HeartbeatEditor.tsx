@@ -34,16 +34,31 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
   const patch = (p: Partial<CodecHeartbeat>) => onEdit(updateHeartbeat(raw, p));
   const bodyMode = hb ? detectBodyMode(hb) : 'empty';
   // intervalMs 清空回退 0（保留键不丢，避免 JSON 丢键后保存被拒却无行内反馈）。
-  const intervalInvalid = hb ? (!hb.intervalMs || hb.intervalMs <= 0) : false;
+  const intervalInvalid = hb ? !hb.intervalMs || hb.intervalMs <= 0 : false;
 
   const switchMode = (mode: HeartbeatBodyMode) => {
     if (!hb || mode === bodyMode) return;
     if (mode === 'empty') {
-      onEdit(updateHeartbeat(raw, { c2sProto: undefined, bindings: undefined, heartbeatFields: undefined, skipWhenMissing: undefined }));
+      onEdit(
+        updateHeartbeat(raw, {
+          c2sProto: undefined,
+          bindings: undefined,
+          heartbeatFields: undefined,
+          skipWhenMissing: undefined,
+        }),
+      );
     } else if (mode === 'proto') {
-      onEdit(updateHeartbeat(raw, { c2sProto: '', heartbeatFields: undefined, skipWhenMissing: undefined }));
+      onEdit(
+        updateHeartbeat(raw, {
+          c2sProto: '',
+          heartbeatFields: undefined,
+          skipWhenMissing: undefined,
+        }),
+      );
     } else {
-      onEdit(updateHeartbeat(raw, { heartbeatFields: [], c2sProto: undefined, bindings: undefined }));
+      onEdit(
+        updateHeartbeat(raw, { heartbeatFields: [], c2sProto: undefined, bindings: undefined }),
+      );
     }
   };
 
@@ -51,13 +66,21 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
     <Card
       size="small"
       className="pce-bench heartbeat-bench"
-      title={(
+      title={
         <Space size={8} align="center">
           <span className="pce-bench-title">心跳</span>
-          <Typography.Text type="secondary" className="pce-bench-meta">连接级可选配置</Typography.Text>
+          <Typography.Text type="secondary" className="pce-bench-meta">
+            连接级可选配置
+          </Typography.Text>
         </Space>
-      )}
-      extra={hb ? <Button size="small" danger onClick={() => onEdit(setHeartbeat(raw, null))}>删除心跳</Button> : null}
+      }
+      extra={
+        hb ? (
+          <Button size="small" danger onClick={() => onEdit(setHeartbeat(raw, null))}>
+            删除心跳
+          </Button>
+        ) : null
+      }
       styles={{ body: { padding: 12 } }}
     >
       {!hb ? (
@@ -96,12 +119,18 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
 
           <div className="pce-inline-row">
             <Typography.Text className="pce-inline-label">requireSecretKey</Typography.Text>
-            <Switch checked={!!hb.requireSecretKey} onChange={(v) => patch({ requireSecretKey: v })} />
+            <Switch
+              checked={!!hb.requireSecretKey}
+              onChange={(v) => patch({ requireSecretKey: v })}
+            />
             <Typography.Text type="secondary">等待连接密钥设置后再启动心跳</Typography.Text>
           </div>
 
           <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+            <Typography.Text
+              type="secondary"
+              style={{ fontSize: 12, display: 'block', marginBottom: 6 }}
+            >
               route（按当前 routeKeyTemplate 生成字段）
             </Typography.Text>
             {routeFields.length === 0 ? (
@@ -112,7 +141,9 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
               <Space direction="vertical" size={6} style={{ width: '100%' }}>
                 {routeFields.map((f) => (
                   <div className="pce-route-field" key={f.name}>
-                    <Typography.Text code className="pce-route-field-name">{f.name}</Typography.Text>
+                    <Typography.Text code className="pce-route-field-name">
+                      {f.name}
+                    </Typography.Text>
                     <Input
                       size="small"
                       value={f.draft}
@@ -134,10 +165,16 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
           </div>
 
           <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+            <Typography.Text
+              type="secondary"
+              style={{ fontSize: 12, display: 'block', marginBottom: 6 }}
+            >
               body 模式
             </Typography.Text>
-            <Radio.Group value={bodyMode} onChange={(e) => switchMode(e.target.value as HeartbeatBodyMode)}>
+            <Radio.Group
+              value={bodyMode}
+              onChange={(e) => switchMode(e.target.value as HeartbeatBodyMode)}
+            >
               <Radio.Button value="empty">空 body</Radio.Button>
               <Radio.Button value="proto">protobuf</Radio.Button>
               <Radio.Button value="raw">二进制字段</Radio.Button>
@@ -149,7 +186,10 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
               <div className="pce-inline-row pce-inline-row-full">
                 <Typography.Text className="pce-inline-label">c2sProto</Typography.Text>
                 <Space.Compact style={{ flex: 1 }}>
-                  <Input value={hb.c2sProto ?? ''} onChange={(e) => patch({ c2sProto: e.target.value })} />
+                  <Input
+                    value={hb.c2sProto ?? ''}
+                    onChange={(e) => patch({ c2sProto: e.target.value })}
+                  />
                   <Button icon={<ApiOutlined />} onClick={() => setProtoPickerOpen(true)} />
                 </Space.Compact>
               </div>
@@ -170,7 +210,10 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
               />
               <div className="pce-inline-row">
                 <Typography.Text className="pce-inline-label">skipWhenMissing</Typography.Text>
-                <Switch checked={!!hb.skipWhenMissing} onChange={(v) => patch({ skipWhenMissing: v })} />
+                <Switch
+                  checked={!!hb.skipWhenMissing}
+                  onChange={(v) => patch({ skipWhenMissing: v })}
+                />
                 <Typography.Text type="secondary">state 源缺失时跳过本 tick</Typography.Text>
               </div>
             </Space>

@@ -29,10 +29,32 @@ const baseFlow: FlowJson = {
 describe('switch node codec', () => {
   it('emits case and default edges', () => {
     const { rfEdges } = jsonToFlow(baseFlow);
-    expect(rfEdges.map((e) => ({ sourceHandle: e.sourceHandle, target: e.target, type: e.type, data: e.data }))).toEqual([
-      { sourceHandle: 'case-0', target: 'advanced', type: 'branch', data: { branch: 'case', caseIndex: 0, sourceNodeType: 'switch' } },
-      { sourceHandle: 'case-1', target: 'guild', type: 'branch', data: { branch: 'case', caseIndex: 1, sourceNodeType: 'switch' } },
-      { sourceHandle: 'default', target: 'normal', type: 'branch', data: { branch: 'default', sourceNodeType: 'switch' } },
+    expect(
+      rfEdges.map((e) => ({
+        sourceHandle: e.sourceHandle,
+        target: e.target,
+        type: e.type,
+        data: e.data,
+      })),
+    ).toEqual([
+      {
+        sourceHandle: 'case-0',
+        target: 'advanced',
+        type: 'branch',
+        data: { branch: 'case', caseIndex: 0, sourceNodeType: 'switch' },
+      },
+      {
+        sourceHandle: 'case-1',
+        target: 'guild',
+        type: 'branch',
+        data: { branch: 'case', caseIndex: 1, sourceNodeType: 'switch' },
+      },
+      {
+        sourceHandle: 'default',
+        target: 'normal',
+        type: 'branch',
+        data: { branch: 'default', sourceNodeType: 'switch' },
+      },
     ]);
   });
 

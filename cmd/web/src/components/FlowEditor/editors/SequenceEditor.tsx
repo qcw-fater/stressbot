@@ -3,7 +3,12 @@
  */
 
 import { Button, List, Space } from 'antd';
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { useFlowStore } from '../store/flowStore';
 import { NodeIdSelect } from './shared/NodeIdSelect';
 
@@ -21,13 +26,16 @@ export function SequenceEditor({ nodeId }: SequenceEditorProps) {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
         <strong>子节点（按序执行）</strong>
-        <Button
-          icon={<PlusOutlined />}
-          size="small"
-          onClick={() => setNext([...next, ''])}
-        >
+        <Button icon={<PlusOutlined />} size="small" onClick={() => setNext([...next, ''])}>
           添加
         </Button>
       </div>
@@ -39,7 +47,9 @@ export function SequenceEditor({ nodeId }: SequenceEditorProps) {
         renderItem={(item) => (
           <List.Item>
             <Space style={{ width: '100%' }} align="center">
-              <span style={{ width: 24, color: 'var(--text-tertiary)', fontSize: 11 }}>{item.i + 1}.</span>
+              <span style={{ width: 24, color: 'var(--text-tertiary)', fontSize: 11 }}>
+                {item.i + 1}.
+              </span>
               <div style={{ flex: 1, minWidth: 220 }}>
                 <NodeIdSelect
                   value={item.id || undefined}

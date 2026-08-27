@@ -72,27 +72,20 @@ export interface ReplaceTemplateSnapshotResponse<T> {
   items: T[];
 }
 
-function templateApi<
-  TDto,
-  TSave,
-  TSnapshotInput,
->(path: string) {
+function templateApi<TDto, TSave, TSnapshotInput>(path: string) {
   return {
     list: (): Promise<TDto[]> => getJson<TDto[]>(path),
     get: (id: string): Promise<TDto> => getJson<TDto>(`${path}/${encodeURIComponent(id)}`),
     create: (request: TSave): Promise<TDto> => postJson<TDto>(path, request),
-    update: (id: string, request: TSave): Promise<TDto> => (
-      putJson<TDto>(`${path}/${encodeURIComponent(id)}`, request)
-    ),
+    update: (id: string, request: TSave): Promise<TDto> =>
+      putJson<TDto>(`${path}/${encodeURIComponent(id)}`, request),
     delete: (id: string): Promise<void> => del<void>(`${path}/${encodeURIComponent(id)}`),
-    getSnapshot: (): Promise<TemplateSnapshot<TDto>> => (
-      getJson<TemplateSnapshot<TDto>>(`${path}/snapshot`)
-    ),
+    getSnapshot: (): Promise<TemplateSnapshot<TDto>> =>
+      getJson<TemplateSnapshot<TDto>>(`${path}/snapshot`),
     replaceSnapshot: (
       request: ReplaceTemplateSnapshotRequest<TSnapshotInput>,
-    ): Promise<ReplaceTemplateSnapshotResponse<TDto>> => (
-      putJson<ReplaceTemplateSnapshotResponse<TDto>>(`${path}/snapshot`, request)
-    ),
+    ): Promise<ReplaceTemplateSnapshotResponse<TDto>> =>
+      putJson<ReplaceTemplateSnapshotResponse<TDto>>(`${path}/snapshot`, request),
   };
 }
 

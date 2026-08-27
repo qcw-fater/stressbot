@@ -90,11 +90,13 @@ describe('actionTemplatesApi', () => {
       .mockResolvedValueOnce(response(200, replaced));
 
     await expect(actionTemplatesApi.getSnapshot()).resolves.toEqual(snapshot);
-    await expect(actionTemplatesApi.replaceSnapshot({
-      expectedRevision: 'sha256:old',
-      idPolicy: 'preserve',
-      items: [action],
-    })).resolves.toEqual(replaced);
+    await expect(
+      actionTemplatesApi.replaceSnapshot({
+        expectedRevision: 'sha256:old',
+        idPolicy: 'preserve',
+        items: [action],
+      }),
+    ).resolves.toEqual(replaced);
 
     expect(fetchMock.mock.calls[0][0]).toBe('/sbot/action-templates/snapshot');
     expect(fetchMock.mock.calls[1][0]).toBe('/sbot/action-templates/snapshot');
@@ -107,10 +109,12 @@ describe('actionTemplatesApi', () => {
   });
 
   it('保留集中请求层抛出的结构化错误', async () => {
-    fetchMock.mockResolvedValueOnce(response(503, {
-      code: 'TEMPLATE_LIBRARY_DISABLED',
-      message: '服务器未启用模板库',
-    }));
+    fetchMock.mockResolvedValueOnce(
+      response(503, {
+        code: 'TEMPLATE_LIBRARY_DISABLED',
+        message: '服务器未启用模板库',
+      }),
+    );
 
     const error = await actionTemplatesApi.list().catch((value) => value);
     expect(error).toBeInstanceOf(ApiError);

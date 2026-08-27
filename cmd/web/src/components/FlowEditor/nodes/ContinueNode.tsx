@@ -5,13 +5,7 @@ export function ContinueNode({ id, selected }: NodeProps) {
   return (
     <>
       <Handle type="target" position={Position.Left} id="in" />
-      <NodeShell
-        nodeId={id}
-        nodeType="continue"
-        title="continue"
-        shape="tag"
-        selected={selected}
-      />
+      <NodeShell nodeId={id} nodeType="continue" title="continue" shape="tag" selected={selected} />
     </>
   );
 }

@@ -5,7 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SaveTemplateButton } from './SaveTemplateButton';
 
 const mocks = vi.hoisted(() => ({
-  capability: { templateLibrary: false as boolean | undefined, loading: false, error: undefined as Error | undefined, refresh: vi.fn() },
+  capability: {
+    templateLibrary: false as boolean | undefined,
+    loading: false,
+    error: undefined as Error | undefined,
+    refresh: vi.fn(),
+  },
   findAction: vi.fn(),
   saveAction: vi.fn(),
   showApiError: vi.fn(),

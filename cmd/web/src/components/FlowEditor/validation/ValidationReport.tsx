@@ -3,7 +3,12 @@
  */
 
 import { Alert, App as AntApp, Badge, Button, Empty, List, Space, Tabs, Tag } from 'antd';
-import { CloseCircleFilled, ExclamationCircleFilled, InfoCircleFilled, ReloadOutlined } from '@ant-design/icons';
+import {
+  CloseCircleFilled,
+  ExclamationCircleFilled,
+  InfoCircleFilled,
+  ReloadOutlined,
+} from '@ant-design/icons';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import type { ValidationIssue } from './refsCheck';
@@ -70,11 +75,23 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
           }
         >
           <List.Item.Meta
-            avatar={severity === 'error' ? <CloseCircleFilled style={{ color: 'var(--color-error)' }} /> : severity === 'warning' ? <ExclamationCircleFilled style={{ color: 'var(--color-warning)' }} /> : <InfoCircleFilled style={{ color: 'var(--color-blue)' }} />}
+            avatar={
+              severity === 'error' ? (
+                <CloseCircleFilled style={{ color: 'var(--color-error)' }} />
+              ) : severity === 'warning' ? (
+                <ExclamationCircleFilled style={{ color: 'var(--color-warning)' }} />
+              ) : (
+                <InfoCircleFilled style={{ color: 'var(--color-blue)' }} />
+              )
+            }
             title={
               <Space>
                 <Tag>{it.code}</Tag>
-                {it.location && <Tag color="default">{it.location.kind}: {it.location.id}</Tag>}
+                {it.location && (
+                  <Tag color="default">
+                    {it.location.kind}: {it.location.id}
+                  </Tag>
+                )}
               </Space>
             }
             description={it.message}
@@ -114,7 +131,9 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
         />
       ) : (
         <Tabs
-          defaultActiveKey={report.errors.length > 0 ? 'errors' : report.warnings.length > 0 ? 'warnings' : 'infos'}
+          defaultActiveKey={
+            report.errors.length > 0 ? 'errors' : report.warnings.length > 0 ? 'warnings' : 'infos'
+          }
           items={[
             {
               key: 'errors',

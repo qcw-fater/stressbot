@@ -38,7 +38,9 @@ export function validateAndPublish(
 }
 
 /** 强一致操作使用最新上下文同步校验，不依赖尚未触发的防抖结果。 */
-export function validateLatestFlow(flow: TaskFlow = useFlowStore.getState().toTaskFlow()): ValidationReport {
+export function validateLatestFlow(
+  flow: TaskFlow = useFlowStore.getState().toTaskFlow(),
+): ValidationReport {
   return validateAndPublish(flow, useValidationStore.getState().context);
 }
 

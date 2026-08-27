@@ -21,7 +21,12 @@ export interface ActiveTaskGuardModalProps {
   onAttached?: (task: TaskBrief) => void;
 }
 
-export function ActiveTaskGuardModal({ open, task, onClose, onAttached }: ActiveTaskGuardModalProps) {
+export function ActiveTaskGuardModal({
+  open,
+  task,
+  onClose,
+  onAttached,
+}: ActiveTaskGuardModalProps) {
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const handleAttach = async () => {
     if (!task) return;

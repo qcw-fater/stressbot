@@ -276,21 +276,9 @@ export const FIELD_ROLES = [
 
 export const PIPELINE_OPS = ['compress', 'encrypt', 'checksum', 'hash'] as const;
 
-export const PRODUCE_REGIONS = [
-  'ciphered',
-  'bodyPlain',
-  'bodyFinal',
-  'header',
-  'frame',
-] as const;
+export const PRODUCE_REGIONS = ['ciphered', 'bodyPlain', 'bodyFinal', 'header', 'frame'] as const;
 
-export const OVER_KINDS = [
-  'bodyPlain',
-  'bodyFinal',
-  'header',
-  'frame',
-  'range',
-] as const;
+export const OVER_KINDS = ['bodyPlain', 'bodyFinal', 'header', 'frame', 'range'] as const;
 
 export const GUARD_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] as const;
 

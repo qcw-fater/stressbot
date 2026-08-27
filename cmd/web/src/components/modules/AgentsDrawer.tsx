@@ -48,8 +48,11 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
 
   // 没有 active 任务时禁用：单任务模型下没有任务可停。
   // active 任务存在时（无论是不是本端发起）都允许停止——服务端是唯一权威，会校验。
-  const canStopAll = !!activeTask &&
-    (activeTask.state === 'starting' || activeTask.state === 'running' || activeTask.state === 'stopping');
+  const canStopAll =
+    !!activeTask &&
+    (activeTask.state === 'starting' ||
+      activeTask.state === 'running' ||
+      activeTask.state === 'stopping');
 
   const onStopAll = () => {
     if (!activeTask) return;
@@ -129,7 +132,12 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
           unhealthy: 'error',
           offline: 'default',
         };
-        const labelMap: Record<string, string> = { idle: '空闲', busy: '执行中', unhealthy: '异常', offline: '离线' };
+        const labelMap: Record<string, string> = {
+          idle: '空闲',
+          busy: '执行中',
+          unhealthy: '异常',
+          offline: '离线',
+        };
         return <Tag color={colorMap[v] ?? 'default'}>{labelMap[v] ?? v}</Tag>;
       },
     },
@@ -158,8 +166,14 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
       key: 'hostCpuPercent',
       width: 80,
       render: (v: number | null | undefined) =>
-        v == null ? '—' : (
-          <span style={{ color: v > 80 ? 'var(--color-error)' : v > 60 ? 'var(--color-warning)' : undefined }}>
+        v == null ? (
+          '—'
+        ) : (
+          <span
+            style={{
+              color: v > 80 ? 'var(--color-error)' : v > 60 ? 'var(--color-warning)' : undefined,
+            }}
+          >
             {v.toFixed(1)}%
           </span>
         ),
@@ -179,8 +193,13 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
         <Tooltip
           title={
             <div style={{ fontSize: 11 }}>
-              <div>OS: {a.staticInfo.os}/{a.staticInfo.arch}</div>
-              <div>CPU: {a.staticInfo.numCpu} cores · MEM: {(a.staticInfo.memTotalBytes / 1024 / 1024 / 1024).toFixed(1)} GB</div>
+              <div>
+                OS: {a.staticInfo.os}/{a.staticInfo.arch}
+              </div>
+              <div>
+                CPU: {a.staticInfo.numCpu} cores · MEM:{' '}
+                {(a.staticInfo.memTotalBytes / 1024 / 1024 / 1024).toFixed(1)} GB
+              </div>
               <div>运行时: {a.staticInfo.goVersion}</div>
               <div>Kernel: {a.staticInfo.kernelVer}</div>
               <div>启动: {dayjs(a.staticInfo.startedAt).format('MM-DD HH:mm')}</div>
@@ -200,7 +219,11 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
       width: 80,
       render: (v: string) => {
         const ago = (Date.now() - new Date(v).getTime()) / 1000;
-        return ago > 60 ? <Tag color="warning">{Math.floor(ago)}s 前</Tag> : <span>{Math.floor(ago)}s</span>;
+        return ago > 60 ? (
+          <Tag color="warning">{Math.floor(ago)}s 前</Tag>
+        ) : (
+          <span>{Math.floor(ago)}s</span>
+        );
       },
     },
     {

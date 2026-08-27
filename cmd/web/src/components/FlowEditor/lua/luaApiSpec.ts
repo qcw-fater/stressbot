@@ -221,12 +221,23 @@ const networkModule: LuaModule = {
         { name: 'service', type: 'string', doc: '连接名' },
         { name: 'route', type: 'table', doc: '路由 {cmd=N, act=M}' },
         { name: 'msg', type: 'proto userdata', doc: 'C2S 消息（proto.create 的返回值）' },
-        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
-        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
+        {
+          name: 's2c_proto',
+          type: 'string',
+          optional: true,
+          doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串',
+        },
+        {
+          name: 'timeout_sec',
+          type: 'number',
+          optional: true,
+          doc: '超时秒数；不传则使用任务 timeoutSec',
+        },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
       summary: 'TCP 请求-响应',
-      detail: 'err=nil 成功；err table 失败（含 code/detail，code 框架码 1-99 / 服务端码 ≥100）。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 5 位，优先于任务配置；只改 timeout 不关心 s2c_proto 时第 4 位传 nil 占位。',
+      detail:
+        'err=nil 成功；err table 失败（含 code/detail，code 框架码 1-99 / 服务端码 ≥100）。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 5 位，优先于任务配置；只改 timeout 不关心 s2c_proto 时第 4 位传 nil 占位。',
       example: `local err, resp = network.tcp_request("logic", {cmd=1, act=1}, msg, "login.LoginS2C")`,
     },
     {
@@ -237,12 +248,23 @@ const networkModule: LuaModule = {
         { name: 'request_route', type: 'table', doc: '请求路由，用于编码发送包' },
         { name: 'response_route', type: 'table', doc: '响应路由，用于计算等待响应的 routeKey' },
         { name: 'msg', type: 'proto userdata', doc: 'C2S 消息（proto.create 的返回值）' },
-        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
-        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
+        {
+          name: 's2c_proto',
+          type: 'string',
+          optional: true,
+          doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串',
+        },
+        {
+          name: 'timeout_sec',
+          type: 'number',
+          optional: true,
+          doc: '超时秒数；不传则使用任务 timeoutSec',
+        },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
       summary: 'TCP 请求-响应（请求/响应路由分离）',
-      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 由协议配置（codec）计算 route 后用于 responseMap 匹配，不会 fallback 到请求路由。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 6 位（比 tcp_request 后移一位，多了 response_route）；只改 timeout 不关心 s2c_proto 时第 5 位传 nil 占位。',
+      detail:
+        '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 由协议配置（codec）计算 route 后用于 responseMap 匹配，不会 fallback 到请求路由。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 6 位（比 tcp_request 后移一位，多了 response_route）；只改 timeout 不关心 s2c_proto 时第 5 位传 nil 占位。',
       example: `local err, resp = network.tcp_request_route("logic", {cmd=10, act=1}, {cmd=20, act=7}, msg, "Game.SpecialS2C")`,
     },
     {
@@ -276,12 +298,23 @@ const networkModule: LuaModule = {
         { name: 'service', type: 'string', doc: '连接名' },
         { name: 'route', type: 'table', doc: '路由 {cmd=N, act=M}' },
         { name: 'body', type: 'string', doc: '消息体字节' },
-        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
-        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
+        {
+          name: 's2c_proto',
+          type: 'string',
+          optional: true,
+          doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串',
+        },
+        {
+          name: 'timeout_sec',
+          type: 'number',
+          optional: true,
+          doc: '超时秒数；不传则使用任务 timeoutSec',
+        },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
       summary: 'UDP 请求-响应',
-      detail: 'err=nil 成功；err table 失败（含 code/detail，code 框架码 1-99 / 服务端码 ≥100）。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 5 位，优先于任务配置；只改 timeout 不关心 s2c_proto 时第 4 位传 nil 占位。',
+      detail:
+        'err=nil 成功；err table 失败（含 code/detail，code 框架码 1-99 / 服务端码 ≥100）。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 5 位，优先于任务配置；只改 timeout 不关心 s2c_proto 时第 4 位传 nil 占位。',
     },
     {
       name: 'udp_request_route',
@@ -291,12 +324,23 @@ const networkModule: LuaModule = {
         { name: 'request_route', type: 'table', doc: '请求路由，用于编码发送包' },
         { name: 'response_route', type: 'table', doc: '响应路由，用于计算等待响应的 routeKey' },
         { name: 'body', type: 'string', doc: '消息体字节' },
-        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
-        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
+        {
+          name: 's2c_proto',
+          type: 'string',
+          optional: true,
+          doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串',
+        },
+        {
+          name: 'timeout_sec',
+          type: 'number',
+          optional: true,
+          doc: '超时秒数；不传则使用任务 timeoutSec',
+        },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
       summary: 'UDP 请求-响应（请求/响应路由分离）',
-      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 由协议配置（codec）计算 route 后用于 responseMap 匹配，不会 fallback 到请求路由。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 6 位（比 udp_request 后移一位，多了 response_route）；只改 timeout 不关心 s2c_proto 时第 5 位传 nil 占位。',
+      detail:
+        '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 由协议配置（codec）计算 route 后用于 responseMap 匹配，不会 fallback 到请求路由。data 形态由 s2c_proto 决定：传了且解析成功 → proto 对象（用 proto.get_field 读字段）；不传或解析失败 → 字节串（string）。timeout_sec 在第 6 位（比 udp_request 后移一位，多了 response_route）；只改 timeout 不关心 s2c_proto 时第 5 位传 nil 占位。',
       example: `local err, resp = network.udp_request_route("battle", {cmd=10, act=1}, {cmd=20, act=7}, body, "Game.SpecialS2C")`,
     },
     {
@@ -305,12 +349,18 @@ const networkModule: LuaModule = {
       params: [
         { name: 'service', type: 'string', doc: '连接名' },
         { name: 'route', type: 'table', doc: '路由（用于计算响应键）' },
-        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
+        {
+          name: 's2c_proto',
+          type: 'string',
+          optional: true,
+          doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串',
+        },
         { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数（默认 60）' },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
       summary: '事件等待 UDP 服务端推送（由 ListenRefs 预缓存队列唤醒）',
-      detail: 'err=nil 成功；err table 失败（code=31 超时 / 6 取消 / 12 解析失败 / 其他=服务端 HeaderErr，含 detail）。data 形态由 s2c_proto 决定：传了 → 只读 proto 视图对象（用 proto.get_field/get_path/list_size 等窄读，零拷贝）；不传 → 字节串（string）；解析失败 → data=nil。需先调用 ensure_udp_listener() 注册监听占位。',
+      detail:
+        'err=nil 成功；err table 失败（code=31 超时 / 6 取消 / 12 解析失败 / 其他=服务端 HeaderErr，含 detail）。data 形态由 s2c_proto 决定：传了 → 只读 proto 视图对象（用 proto.get_field/get_path/list_size 等窄读，零拷贝）；不传 → 字节串（string）；解析失败 → data=nil。需先调用 ensure_udp_listener() 注册监听占位。',
     },
     {
       name: 'http_request',
@@ -318,12 +368,18 @@ const networkModule: LuaModule = {
       params: [
         { name: 'url', type: 'string', doc: '完整请求 URL' },
         { name: 'method', type: 'string', optional: true, doc: 'HTTP 方法（默认 "POST"）' },
-        { name: 'content_type', type: 'string', optional: true, doc: '"json" / "form"（默认 "form"）' },
+        {
+          name: 'content_type',
+          type: 'string',
+          optional: true,
+          doc: '"json" / "form"（默认 "form"）',
+        },
         { name: 'body', type: 'table', optional: true, doc: '请求体 table' },
       ],
       returns: 'err, status, body : (nil|table, number, string)',
       summary: 'HTTP 请求',
-      detail: 'err=nil 表示拿到响应（status 是 HTTP 状态码，不是错误）；err table 表示框架传输错误（code 1-99，含 detail）。',
+      detail:
+        'err=nil 表示拿到响应（status 是 HTTP 状态码，不是错误）；err table 表示框架传输错误（code 1-99，含 detail）。',
     },
     {
       name: 'tcp_listen',
@@ -331,12 +387,18 @@ const networkModule: LuaModule = {
       params: [
         { name: 'service', type: 'string', doc: '连接名' },
         { name: 'route', type: 'table', doc: '路由（用于计算响应键）' },
-        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
+        {
+          name: 's2c_proto',
+          type: 'string',
+          optional: true,
+          doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串',
+        },
         { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数（默认 60）' },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
       summary: '事件等待 TCP 服务端推送（由 ListenRefs 预缓存队列唤醒）',
-      detail: 'err=nil 成功；err table 失败（code=31 超时 / 6 取消 / 12 解析失败 / 其他=服务端 HeaderErr，含 detail）。data 形态由 s2c_proto 决定：传了 → 只读 proto 视图对象（用 proto.get_field/get_path/list_size 等窄读，零拷贝）；不传 → 字节串（string）；解析失败 → data=nil。需先调用 ensure_tcp_listener() 注册监听占位。等待期间只阻塞当前机器人主流程；连接收包与声明式心跳会继续独立运行。',
+      detail:
+        'err=nil 成功；err table 失败（code=31 超时 / 6 取消 / 12 解析失败 / 其他=服务端 HeaderErr，含 detail）。data 形态由 s2c_proto 决定：传了 → 只读 proto 视图对象（用 proto.get_field/get_path/list_size 等窄读，零拷贝）；不传 → 字节串（string）；解析失败 → data=nil。需先调用 ensure_tcp_listener() 注册监听占位。等待期间只阻塞当前机器人主流程；连接收包与声明式心跳会继续独立运行。',
     },
     {
       name: 'try_tcp_listen',
@@ -347,7 +409,8 @@ const networkModule: LuaModule = {
       ],
       returns: 'err, data : (nil|table, string|nil)',
       summary: '非阻塞单次 pop 最新 TCP 监听消息（不解析 proto）',
-      detail: '单次非阻塞 pop，不轮询、不 sleep。err=nil 成功（data 可能=nil 表示队列空、无新消息；data=string 表示取到原始 body，**不解析 proto**）；err table 失败（编码/routeKey 解析失败或服务端 HeaderErr，含 detail）。需 proto 解析请用阻塞版 tcp_listen。',
+      detail:
+        '单次非阻塞 pop，不轮询、不 sleep。err=nil 成功（data 可能=nil 表示队列空、无新消息；data=string 表示取到原始 body，**不解析 proto**）；err table 失败（编码/routeKey 解析失败或服务端 HeaderErr，含 detail）。需 proto 解析请用阻塞版 tcp_listen。',
     },
     {
       name: 'try_udp_listen',
@@ -358,7 +421,8 @@ const networkModule: LuaModule = {
       ],
       returns: 'err, data : (nil|table, string|nil)',
       summary: '非阻塞单次 pop 最新 UDP 监听消息（不解析 proto）',
-      detail: '返回语义同 try_tcp_listen。适用于高频 sync loop「保最新」消费场景（如 battleAck 追踪）。',
+      detail:
+        '返回语义同 try_tcp_listen。适用于高频 sync loop「保最新」消费场景（如 battleAck 追踪）。',
     },
     {
       name: 'set_tcp_secret_key',
@@ -399,22 +463,32 @@ const networkModule: LuaModule = {
       module: 'network',
       params: [
         { name: 'service', type: 'string', doc: '连接名' },
-        { name: 'response_key', type: 'string', doc: 'codec 对响应路由计算出的 routeKey 字符串（非 {cmd,act} table）' },
+        {
+          name: 'response_key',
+          type: 'string',
+          doc: 'codec 对响应路由计算出的 routeKey 字符串（非 {cmd,act} table）',
+        },
       ],
       returns: '-',
       summary: '为 TCP responseKey 注册监听占位',
-      detail: 'tcp_listen 不再自动注册监听，触发推送前须显式调用。response_key 是 codec 对响应路由计算出的 routeKey 字符串；queueSize 固定为 1，需要更大容量用 flow.json 的 listenRefs.queueSize 配置',
+      detail:
+        'tcp_listen 不再自动注册监听，触发推送前须显式调用。response_key 是 codec 对响应路由计算出的 routeKey 字符串；queueSize 固定为 1，需要更大容量用 flow.json 的 listenRefs.queueSize 配置',
     },
     {
       name: 'ensure_udp_listener',
       module: 'network',
       params: [
         { name: 'service', type: 'string', doc: '连接名' },
-        { name: 'response_key', type: 'string', doc: 'codec 对响应路由计算出的 routeKey 字符串（非 {cmd,act} table）' },
+        {
+          name: 'response_key',
+          type: 'string',
+          doc: 'codec 对响应路由计算出的 routeKey 字符串（非 {cmd,act} table）',
+        },
       ],
       returns: '-',
       summary: '为 UDP responseKey 注册监听占位',
-      detail: 'udp_listen 不再自动注册监听，触发推送前须显式调用。response_key 是 codec 对响应路由计算出的 routeKey 字符串；queueSize 固定为 1，需要更大容量用 flow.json 的 listenRefs.queueSize 配置',
+      detail:
+        'udp_listen 不再自动注册监听，触发推送前须显式调用。response_key 是 codec 对响应路由计算出的 routeKey 字符串；queueSize 固定为 1，需要更大容量用 flow.json 的 listenRefs.queueSize 配置',
     },
   ],
 };
@@ -637,7 +711,8 @@ const utilsModule: LuaModule = {
       ],
       returns: 'string',
       summary: '小端二进制打包',
-      detail: 'format 是单个格式字符（如 "u16"），对后续所有值重复同一格式；与 unpack_le（每字段独立格式）不对称',
+      detail:
+        'format 是单个格式字符（如 "u16"），对后续所有值重复同一格式；与 unpack_le（每字段独立格式）不对称',
     },
     {
       name: 'unpack_le',
@@ -649,7 +724,8 @@ const utilsModule: LuaModule = {
       ],
       returns: 'number | string ...',
       summary: '小端二进制解包',
-      detail: '每个 fmt 参数是一个独立的单字段格式（多格式，按顺序解包）；i64/u64 超过 2^53 返回字符串；与 pack_le（单格式重复）不对称',
+      detail:
+        '每个 fmt 参数是一个独立的单字段格式（多格式，按顺序解包）；i64/u64 超过 2^53 返回字符串；与 pack_le（单格式重复）不对称',
       example: `local idx, ts = utils.unpack_le(data, "u16", "i64")`,
     },
     {
@@ -742,7 +818,8 @@ const shareModule: LuaModule = {
       params: [{ name: 'key', type: 'string', doc: '键名' }],
       returns: 'value, ok, err : (any|nil, boolean, string|nil)',
       summary: '读取共享键值（ok=false 表示不存在）',
-      detail: 'ok 用于区分「键不存在」与「存储了 null」；常见用法 local v = share.get(k) 仍可只取第一个值。',
+      detail:
+        'ok 用于区分「键不存在」与「存储了 null」；常见用法 local v = share.get(k) 仍可只取第一个值。',
       example: `local v, ok, err = share.get("leader")`,
     },
     {

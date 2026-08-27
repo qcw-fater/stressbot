@@ -43,9 +43,7 @@ self.onmessage = (e: MessageEvent<ParseRequest>) => {
   if (ast && mode !== 'free') {
     // action / boolean 共用 execute(r) 签名；listen 用 on_message(r, msg)
     const expected =
-      mode === 'listen'
-        ? { name: 'on_message', params: 2 }
-        : { name: 'execute', params: 1 };
+      mode === 'listen' ? { name: 'on_message', params: 2 } : { name: 'execute', params: 1 };
     const found = findEntryFunction(ast, expected.name);
     if (!found) {
       issues.push({

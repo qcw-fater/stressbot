@@ -14,7 +14,13 @@ export interface NodeIdSelectProps {
 /** break/continue 节点用固定名称显示 */
 const FIXED_LABEL_TYPES = new Set(['break', 'continue']);
 
-export function NodeIdSelect({ value, onChange, placeholder, excludeId, allowClear = true }: NodeIdSelectProps) {
+export function NodeIdSelect({
+  value,
+  onChange,
+  placeholder,
+  excludeId,
+  allowClear = true,
+}: NodeIdSelectProps) {
   const nodes = useFlowStore((s) => s.nodes);
   const options = Object.keys(nodes)
     .filter((id) => id !== excludeId)

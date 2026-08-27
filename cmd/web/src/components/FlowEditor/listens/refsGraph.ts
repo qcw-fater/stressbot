@@ -17,11 +17,7 @@
  */
 
 import type { ListenRef, TaskFlow } from '@/types/flow';
-import {
-  computeRouteKey,
-  pseudoRouteKey,
-  getRouteKeyTemplatesSync,
-} from './routeKeyResolver';
+import { computeRouteKey, pseudoRouteKey, getRouteKeyTemplatesSync } from './routeKeyResolver';
 
 export interface RefRecord {
   nodeId: string;
@@ -120,7 +116,14 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
     }
   }
 
-  return { nodeToRefs, listenToRefs, duplicateRegisters, refCount, danglingRefs, missingCodecServers };
+  return {
+    nodeToRefs,
+    listenToRefs,
+    duplicateRegisters,
+    refCount,
+    danglingRefs,
+    missingCodecServers,
+  };
 }
 
 /**

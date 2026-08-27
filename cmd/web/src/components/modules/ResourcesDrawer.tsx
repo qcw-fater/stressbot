@@ -8,7 +8,12 @@
  * - 冲突通过 BaselineSyncModal 显式处理；本地改动会在启动任务时随配置一并提交到服务器，无需单独推送。
  */
 
-import { DeleteOutlined, InboxOutlined, EditOutlined, CloudDownloadOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  InboxOutlined,
+  EditOutlined,
+  CloudDownloadOutlined,
+} from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
@@ -64,7 +69,9 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
 
   const reloadProtos = useProtoStore((s) => s.reload);
 
-  const hasConflicts = pendingSyncResult != null && (pendingSyncResult.conflicts.length > 0 || pendingSyncResult.removed.length > 0);
+  const hasConflicts =
+    pendingSyncResult != null &&
+    (pendingSyncResult.conflicts.length > 0 || pendingSyncResult.removed.length > 0);
 
   // 拉取（svn update）：与服务器对比，自动合并"仅服务器修改/新增"，冲突弹面板。
   // 拉取成功后必须刷新内存 protoRegistry：syncResourcesFromBaseline 只改 IndexedDB/资源列表，
@@ -93,7 +100,15 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
 
   return (
     <>
-      <Drawer title="资源管理" open={open} onClose={onClose} width={760} maskClosable={false} destroyOnHidden={false} styles={{ body: { paddingBottom: 8 } }}>
+      <Drawer
+        title="资源管理"
+        open={open}
+        onClose={onClose}
+        width={760}
+        maskClosable={false}
+        destroyOnHidden={false}
+        styles={{ body: { paddingBottom: 8 } }}
+      >
         <Flex justify="space-between" align="center" style={{ marginBottom: 12 }}>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             从服务器拉取最新资源到本地；本地改动会在启动任务时随配置一并提交到服务器。
@@ -112,7 +127,10 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
             message="资源存在冲突"
             description={
               <Space>
-                <span>{pendingSyncResult.conflicts.length + pendingSyncResult.removed.length} 处冲突待处理</span>
+                <span>
+                  {pendingSyncResult.conflicts.length + pendingSyncResult.removed.length}{' '}
+                  处冲突待处理
+                </span>
                 <Button size="small" type="primary" onClick={() => setSyncModalOpen(true)}>
                   处理冲突
                 </Button>
@@ -294,7 +312,9 @@ function ResourceTable({ kind }: ResourceTableProps) {
 
     if (files.length === 1) {
       if (toWrite.length > 0) {
-        message.success(overwritten > 0 ? `${files[0].name} 已上传（覆盖）` : `${files[0].name} 已上传`);
+        message.success(
+          overwritten > 0 ? `${files[0].name} 已上传（覆盖）` : `${files[0].name} 已上传`,
+        );
       } else {
         message.info(`已跳过同名文件 ${files[0].name}`);
       }
@@ -494,8 +514,12 @@ function ResourceTable({ kind }: ResourceTableProps) {
         maskClosable={false}
         styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
         footer={[
-          <Button key="cancel" onClick={() => setEditFile(null)}>取消</Button>,
-          <Button key="save" type="primary" loading={saving} onClick={handleSaveEdit}>保存</Button>,
+          <Button key="cancel" onClick={() => setEditFile(null)}>
+            取消
+          </Button>,
+          <Button key="save" type="primary" loading={saving} onClick={handleSaveEdit}>
+            保存
+          </Button>,
         ]}
       >
         <div style={{ height: '60vh', border: '1px solid var(--border-color)' }}>
@@ -505,7 +529,12 @@ function ResourceTable({ kind }: ResourceTableProps) {
               theme={theme === 'dark' ? 'vs-dark' : 'light'}
               value={editContent}
               onChange={(val) => setEditContent(val ?? '')}
-              options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: 'on', fixedOverflowWidgets: true }}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                wordWrap: 'on',
+                fixedOverflowWidgets: true,
+              }}
             />
           )}
         </div>

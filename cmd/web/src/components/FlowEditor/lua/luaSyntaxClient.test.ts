@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createLuaSyntaxClient } from './luaSyntaxClient';
-import type {
-  LuaWorkerLike,
-  ParseRequest,
-  ParseResponse,
-  SyntaxIssue,
-} from './luaSyntaxProtocol';
+import type { LuaWorkerLike, ParseRequest, ParseResponse, SyntaxIssue } from './luaSyntaxProtocol';
 
 function issue(message: string): SyntaxIssue {
   return {

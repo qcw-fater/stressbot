@@ -29,7 +29,10 @@ export interface PatternSelectorProps {
 }
 
 const PATTERN_GROUPS: { label: string; patterns: ActionPattern[] }[] = [
-  { label: '网络通信', patterns: ['tcpSend', 'udpSend', 'tcpRequest', 'udpRequest', 'httpRequest'] },
+  {
+    label: '网络通信',
+    patterns: ['tcpSend', 'udpSend', 'tcpRequest', 'udpRequest', 'httpRequest'],
+  },
   { label: '连接管理', patterns: ['tcpConnect', 'udpConnect', 'tcpClose', 'udpClose'] },
   { label: '监听', patterns: ['tcpListen', 'udpListen'] },
   { label: '状态操作', patterns: ['setState', 'clearState'] },
@@ -50,7 +53,11 @@ export function PatternSelector({ value, onChange }: PatternSelectorProps) {
       // 下拉项额外带说明 Tooltip（不暴露实现细节）。
       optionRender={(option) => (
         <Tooltip title={PATTERN_DESC[option.value as ActionPattern]} placement="right">
-          <span className="pattern-badge" data-pattern={option.value as string} style={{ margin: 0, height: 20, lineHeight: '18px' }}>
+          <span
+            className="pattern-badge"
+            data-pattern={option.value as string}
+            style={{ margin: 0, height: 20, lineHeight: '18px' }}
+          >
             {option.label}
           </span>
         </Tooltip>

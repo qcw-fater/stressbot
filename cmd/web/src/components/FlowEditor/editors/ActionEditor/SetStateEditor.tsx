@@ -127,7 +127,11 @@ export function SetStateEditor({ value, onChange }: SetStateEditorProps) {
                 placeholder="选择已有状态或输入新名称"
                 style={{ flex: 1 }}
               />
-              {isNew && <Tag color="green" style={{ marginInlineStart: 8 }}>新状态</Tag>}
+              {isNew && (
+                <Tag color="green" style={{ marginInlineStart: 8 }}>
+                  新状态
+                </Tag>
+              )}
             </Space.Compact>
           </Form.Item>
           <Form.Item label="取值方式">
@@ -150,10 +154,7 @@ export function SetStateEditor({ value, onChange }: SetStateEditorProps) {
             currentBindings={list}
             onChange={(b) => setBinding(i, b)}
           />
-          <BindingCommonAdvancedFields
-            binding={binding}
-            onChange={(b) => setBinding(i, b)}
-          />
+          <BindingCommonAdvancedFields binding={binding} onChange={(b) => setBinding(i, b)} />
         </Space>
       ),
     };

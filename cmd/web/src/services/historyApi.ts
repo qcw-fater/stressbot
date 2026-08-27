@@ -20,9 +20,7 @@ export function listHistory(filter: HistoryFilter = {}): Promise<HistoryListResp
 }
 
 export function getHistory(id: string, stageIndex?: number): Promise<HistoryDetail> {
-  return getJson<HistoryDetail>(
-    `/history/${encodeURIComponent(id)}${buildQuery({ stageIndex })}`,
-  );
+  return getJson<HistoryDetail>(`/history/${encodeURIComponent(id)}${buildQuery({ stageIndex })}`);
 }
 
 export function updateHistory(
@@ -56,10 +54,7 @@ export function getHistoryConfigArchive(id: string): Promise<HistoryConfigArchiv
   return getJson<HistoryConfigArchive>(`/history/${encodeURIComponent(id)}/config/archive`);
 }
 
-export function cloneHistory(
-  id: string,
-  req: HistoryCloneRequest = {},
-): Promise<{ id: string }> {
+export function cloneHistory(id: string, req: HistoryCloneRequest = {}): Promise<{ id: string }> {
   return postJson<{ id: string }>(`/history/${encodeURIComponent(id)}/clone`, req);
 }
 
