@@ -19,16 +19,18 @@ const MODULE_COLOR: Record<string, string> = {
   share: 'magenta',
 };
 
-function FnCard({ fn }: { fn: LuaFunction }) {
+interface FnCardProps {
+  fn: LuaFunction;
+}
+
+function FnCard({ fn }: FnCardProps) {
   return (
     <div style={{ marginBottom: 8 }}>
       <Typography.Text code style={{ fontSize: 12 }}>
         {fn.module}.{fn.name}
         {renderSignature(fn)}
       </Typography.Text>
-      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-        {fn.summary}
-      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{fn.summary}</div>
       {fn.params.length > 0 && (
         <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
           {fn.params.map((p) => (
@@ -48,7 +50,11 @@ function FnCard({ fn }: { fn: LuaFunction }) {
   );
 }
 
-function ModuleSection({ mod }: { mod: LuaModule }) {
+interface ModuleSectionProps {
+  mod: LuaModule;
+}
+
+function ModuleSection({ mod }: ModuleSectionProps) {
   return (
     <div>
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6 }}>

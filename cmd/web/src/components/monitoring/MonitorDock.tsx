@@ -208,13 +208,12 @@ function TopSection() {
   );
 }
 
-function EmptyRuntimePanel({
-  activeTaskName,
-  nodes,
-}: {
+interface EmptyRuntimePanelProps {
   activeTaskName?: string;
   nodes: ReturnType<typeof buildLivePanelModel>['nodes'];
-}) {
+}
+
+function EmptyRuntimePanel({ activeTaskName, nodes }: EmptyRuntimePanelProps) {
   return (
     <div className="monitor-dock__top monitor-dock__top--empty">
       <div className="md-runtime-empty">
@@ -237,17 +236,14 @@ function EmptyRuntimePanel({
   );
 }
 
-function TaskLoadCard({
-  taskName,
-  taskState,
-  uptimeSeconds,
-  model,
-}: {
+interface TaskLoadCardProps {
   taskName?: string;
   taskState?: string;
   uptimeSeconds: number;
   model: ReturnType<typeof buildLivePanelModel>;
-}) {
+}
+
+function TaskLoadCard({ taskName, taskState, uptimeSeconds, model }: TaskLoadCardProps) {
   const rampUp = model.load.rampUp;
 
   return (
@@ -274,7 +270,11 @@ function TaskLoadCard({
   );
 }
 
-function NormalLoadView({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+interface NormalLoadViewProps {
+  model: ReturnType<typeof buildLivePanelModel>;
+}
+
+function NormalLoadView({ model }: NormalLoadViewProps) {
   const progress = Math.round(model.load.robotPercent);
   return (
     <div className="md-load-main md-load-main--normal">
@@ -287,7 +287,11 @@ function NormalLoadView({ model }: { model: ReturnType<typeof buildLivePanelMode
   );
 }
 
-function LoadProgress({ percent }: { percent: number }) {
+interface LoadProgressProps {
+  percent: number;
+}
+
+function LoadProgress({ percent }: LoadProgressProps) {
   const safePercent = Math.max(0, Math.min(100, percent));
   return (
     <div className="md-load-progress" aria-label={`负载进度 ${safePercent}%`}>
@@ -296,7 +300,11 @@ function LoadProgress({ percent }: { percent: number }) {
   );
 }
 
-function RampUpLoadView({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+interface RampUpLoadViewProps {
+  model: ReturnType<typeof buildLivePanelModel>;
+}
+
+function RampUpLoadView({ model }: RampUpLoadViewProps) {
   const rampUp = model.load.rampUp;
   const stages = useRuntimeStore(useShallow((s) => s.rampUpStages));
   if (!rampUp) return null;
@@ -347,7 +355,11 @@ function RampUpLoadView({ model }: { model: ReturnType<typeof buildLivePanelMode
                 ? Math.min(100, Math.max(0, ((model.load.runningRobots - prev) / count) * 100))
                 : 0;
             return (
-              <div key={i} className="md-stage-segment" style={{ width: `${widthPct}%` }}>
+              <div
+                key={`stage-${i}-${count}`}
+                className="md-stage-segment"
+                style={{ width: `${widthPct}%` }}
+              >
                 <div
                   className={`md-stage-fill${i + 1 === rampUp.currentStage ? ' md-stage-fill--active' : ''}`}
                   style={{ width: `${fill}%` }}
@@ -361,7 +373,11 @@ function RampUpLoadView({ model }: { model: ReturnType<typeof buildLivePanelMode
   );
 }
 
-function ThroughputQualityCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+interface ThroughputQualityCardProps {
+  model: ReturnType<typeof buildLivePanelModel>;
+}
+
+function ThroughputQualityCard({ model }: ThroughputQualityCardProps) {
   return (
     <MetricGroup
       title="吞吐 / 结果"
@@ -386,7 +402,11 @@ function ThroughputQualityCard({ model }: { model: ReturnType<typeof buildLivePa
   );
 }
 
-function LatencyConnectionCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+interface LatencyConnectionCardProps {
+  model: ReturnType<typeof buildLivePanelModel>;
+}
+
+function LatencyConnectionCard({ model }: LatencyConnectionCardProps) {
   return (
     <MetricGroup title="耗时 / 连接" subtitle={`RTT Apdex ${fmtScore(model.quality.rttApdex)}`}>
       <div className="md-kpi-grid md-kpi-grid--three">
@@ -416,30 +436,25 @@ function LatencyConnectionCard({ model }: { model: ReturnType<typeof buildLivePa
   );
 }
 
-function ResourceNodeCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+interface ResourceNodeCardProps {
+  model: ReturnType<typeof buildLivePanelModel>;
+}
+
+function ResourceNodeCard({ model }: ResourceNodeCardProps) {
   const resourceCoverage = compactRatio(model.nodes.resourceReporting, model.nodes.resourceScope);
   const onlineCoverage = compactRatio(model.nodes.online, model.nodes.resourceScope);
   const capacity = compactRatio(model.nodes.capacityCurrent, model.nodes.capacityMax);
   const subtitle = `资源采样 ${resourceCoverage} · 在线 ${onlineCoverage} · 容量 ${capacity}`;
   return (
-    <MetricGroup
-      title="资源 / 节点"
-      subtitle={subtitle}
-    >
+    <MetricGroup title="资源 / 节点" subtitle={subtitle}>
       <div className="md-kpi-grid md-kpi-grid--three">
-        <MetricCell
-          label="CPU 均值"
-          value={fmtPercentValue(model.resources.avgHostCpuPercent)}
-        />
+        <MetricCell label="CPU 均值" value={fmtPercentValue(model.resources.avgHostCpuPercent)} />
         <MetricCell
           label="CPU 最高"
           value={fmtPercentValue(model.resources.maxHostCpuPercent)}
           title={model.resources.hotHostCpuNode}
         />
-        <MetricCell
-          label="内存均值"
-          value={fmtPercentValue(model.resources.avgHostMemPercent)}
-        />
+        <MetricCell label="内存均值" value={fmtPercentValue(model.resources.avgHostMemPercent)} />
         <MetricCell
           label="内存最高"
           value={fmtPercentValue(model.resources.maxHostMemPercent)}
@@ -475,15 +490,13 @@ function ResourceNodeCard({ model }: { model: ReturnType<typeof buildLivePanelMo
   );
 }
 
-function MetricGroup({
-  title,
-  subtitle,
-  children,
-}: {
+interface MetricGroupProps {
   title: string;
   subtitle?: string;
   children: ReactNode;
-}) {
+}
+
+function MetricGroup({ title, subtitle, children }: MetricGroupProps) {
   return (
     <section className="md-metric-group">
       <div className="md-metric-group__head">
@@ -499,17 +512,14 @@ function MetricGroup({
   );
 }
 
-function MetricCell({
-  label,
-  value,
-  unit,
-  title,
-}: {
+interface MetricCellProps {
   label: string;
   value: string;
   unit?: string;
   title?: string;
-}) {
+}
+
+function MetricCell({ label, value, unit, title }: MetricCellProps) {
   return (
     <Tooltip title={title} mouseEnterDelay={0.4}>
       <span className="md-kpi-cell">

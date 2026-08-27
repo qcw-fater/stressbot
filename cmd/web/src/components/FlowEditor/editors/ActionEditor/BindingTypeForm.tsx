@@ -50,17 +50,14 @@ export interface BindingTypeFormProps {
 const LABEL: React.CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0 };
 
 /** source 单行（primary 段单元） */
-function SourceRow({
-  binding,
-  currentBindings,
-  set,
-  placeholder = 'state key',
-}: {
+interface SourceRowProps {
   binding: FieldBind;
   currentBindings?: FieldBind[];
   set: (p: Partial<FieldBind>) => void;
   placeholder?: string;
-}) {
+}
+
+function SourceRow({ binding, currentBindings, set, placeholder = 'state key' }: SourceRowProps) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={LABEL}>source</span>
@@ -76,15 +73,13 @@ function SourceRow({
 }
 
 /** path 单行（advanced 段单元） */
-function PathRow({
-  binding,
-  set,
-  sourceProto,
-}: {
+interface PathRowProps {
   binding: FieldBind;
   set: (p: Partial<FieldBind>) => void;
   sourceProto: string | undefined;
-}) {
+}
+
+function PathRow({ binding, set, sourceProto }: PathRowProps) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={LABEL}>path</span>
@@ -145,19 +140,21 @@ export function BindingTypeForm({
  * 字段归属严格按设计表（task-4-brief.md Step 4）的 primary 列；不要在此处放入
  * path/filters/excludeSource 等高级字段。
  */
+interface BindingPrimaryFieldsProps {
+  binding: FieldBind;
+  currentBindings?: FieldBind[];
+  set: (p: Partial<FieldBind>) => void;
+  sourceProto: string | undefined;
+  valueOnly: boolean;
+}
+
 function BindingPrimaryFields({
   binding,
   currentBindings,
   set,
   sourceProto: _sourceProto,
   valueOnly,
-}: {
-  binding: FieldBind;
-  currentBindings?: FieldBind[];
-  set: (p: Partial<FieldBind>) => void;
-  sourceProto: string | undefined;
-  valueOnly: boolean;
-}) {
+}: BindingPrimaryFieldsProps) {
   // sourceProto 仅 advanced 段的 path/filters 需要；primary 段目前不直接使用，
   // 但为了保持调用签名对称、未来扩展（如带 proto 提示的 source 选择）保留入参。
   void _sourceProto;
@@ -291,12 +288,24 @@ function BindingPrimaryFields({
     case 'randomExclude':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-          <SourceRow binding={binding} currentBindings={currentBindings} set={set} placeholder="state list" />
+          <SourceRow
+            binding={binding}
+            currentBindings={currentBindings}
+            set={set}
+            placeholder="state list"
+          />
           <ValuesField binding={binding} set={set} />
         </div>
       );
     case 'listSize':
-      return <SourceRow binding={binding} currentBindings={currentBindings} set={set} placeholder="state list key" />;
+      return (
+        <SourceRow
+          binding={binding}
+          currentBindings={currentBindings}
+          set={set}
+          placeholder="state list key"
+        />
+      );
     case 'map':
       if (valueOnly) {
         return <span style={{ color: 'var(--color-error)' }}>map value 不支持嵌套 map</span>;
@@ -314,17 +323,19 @@ function BindingPrimaryFields({
  * 注意：通用高级字段（required/optional/wrap/storeAs/condition）不在此处，由
  * BindingsTable.BindingCommonAdvancedFields 统一渲染。
  */
+interface BindingTypeAdvancedFieldsProps {
+  binding: FieldBind;
+  currentBindings?: FieldBind[];
+  set: (p: Partial<FieldBind>) => void;
+  sourceProto: string | undefined;
+}
+
 function BindingTypeAdvancedFields({
   binding,
   currentBindings,
   set,
   sourceProto,
-}: {
-  binding: FieldBind;
-  currentBindings?: FieldBind[];
-  set: (p: Partial<FieldBind>) => void;
-  sourceProto: string | undefined;
-}) {
+}: BindingTypeAdvancedFieldsProps) {
   switch (binding.type) {
     case 'state':
     case 'stateFirst':
@@ -359,7 +370,12 @@ function BindingTypeAdvancedFields({
   }
 }
 
-function FixedValueInput({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+interface FixedValueInputProps {
+  value: unknown;
+  onChange: (v: unknown) => void;
+}
+
+function FixedValueInput({ value, onChange }: FixedValueInputProps) {
   return (
     <JsonDraftInput
       mode="jsonOrString"
@@ -371,13 +387,12 @@ function FixedValueInput({ value, onChange }: { value: unknown; onChange: (v: un
   );
 }
 
-function ValuesField({
-  binding,
-  set,
-}: {
+interface ValuesFieldProps {
   binding: FieldBind;
   set: (p: Partial<FieldBind>) => void;
-}) {
+}
+
+function ValuesField({ binding, set }: ValuesFieldProps) {
   return (
     <JsonDraftInput
       mode="jsonArray"
@@ -389,7 +404,13 @@ function ValuesField({
   );
 }
 
-function FiltersField({ binding, set, sourceProto }: { binding: FieldBind; set: (p: Partial<FieldBind>) => void; sourceProto?: string }) {
+interface FiltersFieldProps {
+  binding: FieldBind;
+  set: (p: Partial<FieldBind>) => void;
+  sourceProto?: string;
+}
+
+function FiltersField({ binding, set, sourceProto }: FiltersFieldProps) {
   const filters = binding.filters ?? [];
   const updateFilter = (i: number, patch: Record<string, unknown>) => {
     const arr = [...filters];
@@ -401,8 +422,13 @@ function FiltersField({ binding, set, sourceProto }: { binding: FieldBind; set: 
 
   if (!filters.length) {
     return (
-      <Tooltip title="从 state 列表中先按条件筛选保留，再从保留结果中随机取值" mouseEnterDelay={0.4}>
-        <a onClick={addFilter} style={{ fontSize: 11 }}>+ 添加 filter</a>
+      <Tooltip
+        title="从 state 列表中先按条件筛选保留，再从保留结果中随机取值"
+        mouseEnterDelay={0.4}
+      >
+        <a onClick={addFilter} style={{ fontSize: 11 }}>
+          + 添加 filter
+        </a>
       </Tooltip>
     );
   }
@@ -410,36 +436,55 @@ function FiltersField({ binding, set, sourceProto }: { binding: FieldBind; set: 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
       <Tooltip title="多个 filter 之间为 AND 关系（全部满足才保留）" mouseEnterDelay={0.4}>
-        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>filters（全部满足才保留）</span>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+          filters（全部满足才保留）
+        </span>
       </Tooltip>
+      {/* FilterDef 是 flow.json 数据（无 id 字段）；path/op 编辑中变化会使内容 key
+          重挂载丢焦点，FilterRow 受控无本地态，索引键是正确选择 */}
       {filters.map((f, i) => (
         <FilterRow
-          key={i}
+          key={`filter-${i}`}
           filter={f}
           sourceProto={sourceProto}
           onChange={(patch) => updateFilter(i, patch)}
           onRemove={() => removeFilter(i)}
         />
       ))}
-      <a onClick={addFilter} style={{ fontSize: 11 }}>+ 继续添加</a>
+      <a onClick={addFilter} style={{ fontSize: 11 }}>
+        + 继续添加
+      </a>
     </div>
   );
 }
 
-const FILTER_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'notContains', 'in', 'notIn', 'notNil', 'isNil'] as const;
+const FILTER_OPS = [
+  'eq',
+  'neq',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'contains',
+  'notContains',
+  'in',
+  'notIn',
+  'notNil',
+  'isNil',
+] as const;
 const FILTER_OP_META: Record<string, { label: string; desc: string }> = {
-  eq:              { label: '= 等于',         desc: '字段值等于指定值' },
-  neq:             { label: '≠ 不等于',       desc: '字段值不等于指定值' },
-  gt:              { label: '> 大于',         desc: '字段值大于指定值' },
-  gte:             { label: '≥ 大于等于',     desc: '字段值大于或等于指定值' },
-  lt:              { label: '< 小于',         desc: '字段值小于指定值' },
-  lte:             { label: '≤ 小于等于',     desc: '字段值小于或等于指定值' },
-  contains:        { label: '包含',           desc: '字符串或列表包含指定值' },
-  notContains:     { label: '不包含',         desc: '字符串或列表不包含指定值' },
-  in:              { label: '在列表中',       desc: '字段值在指定列表中' },
-  notIn:           { label: '不在列表中',     desc: '字段值不在指定列表中' },
-  notNil:          { label: '不为空',         desc: '字段值不为 nil' },
-  isNil:           { label: '为空',           desc: '字段值为 nil' },
+  eq: { label: '= 等于', desc: '字段值等于指定值' },
+  neq: { label: '≠ 不等于', desc: '字段值不等于指定值' },
+  gt: { label: '> 大于', desc: '字段值大于指定值' },
+  gte: { label: '≥ 大于等于', desc: '字段值大于或等于指定值' },
+  lt: { label: '< 小于', desc: '字段值小于指定值' },
+  lte: { label: '≤ 小于等于', desc: '字段值小于或等于指定值' },
+  contains: { label: '包含', desc: '字符串或列表包含指定值' },
+  notContains: { label: '不包含', desc: '字符串或列表不包含指定值' },
+  in: { label: '在列表中', desc: '字段值在指定列表中' },
+  notIn: { label: '不在列表中', desc: '字段值不在指定列表中' },
+  notNil: { label: '不为空', desc: '字段值不为 nil' },
+  isNil: { label: '为空', desc: '字段值为 nil' },
 };
 
 const FILTER_MODE_OPTIONS = [
@@ -451,12 +496,14 @@ const FILTER_MODE_OPTIONS = [
 const NO_VALUE_OPS = new Set(['notNil', 'isNil']);
 const LIST_OPS = new Set(['in', 'notIn']);
 
-function FilterRow({ filter, sourceProto, onChange, onRemove }: {
+interface FilterRowProps {
   filter: FilterDef;
   sourceProto?: string;
   onChange: (patch: Partial<FilterDef>) => void;
   onRemove: () => void;
-}) {
+}
+
+function FilterRow({ filter, sourceProto, onChange, onRemove }: FilterRowProps) {
   const op = (filter.op as string) || 'eq';
   // 模式与 source 真值解耦：useSource 由「是否有非空 source」派生，但切换到 state 模式时写入空串会让
   // !!source 仍为 false，StateKeyInput 永远不挂载、用户无法进入 state 配置。
@@ -468,7 +515,16 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
   const isList = LIST_OPS.has(op);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', background: 'var(--hover-bg, rgba(0,0,0,0.02))', borderRadius: 6 }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        padding: '6px 8px',
+        background: 'var(--hover-bg)',
+        borderRadius: 6,
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <ProtoPathInput
           messageFullName={sourceProto}
@@ -499,7 +555,11 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
             }
             onChange(patch);
           }}
-          options={FILTER_OPS.map((o) => ({ value: o, label: FILTER_OP_META[o]?.label ?? o, title: '' }))}
+          options={FILTER_OPS.map((o) => ({
+            value: o,
+            label: FILTER_OP_META[o]?.label ?? o,
+            title: '',
+          }))}
           optionRender={(opt) => {
             const m = FILTER_OP_META[opt.value as string];
             return (
@@ -532,8 +592,9 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
         )}
         <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={onRemove} />
       </div>
-      {!noValue && !isList && (
-        useSource ? (
+      {!noValue &&
+        !isList &&
+        (useSource ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={LABEL}>state</span>
             <StateKeyInput
@@ -556,11 +617,10 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
               size="small"
             />
           </div>
-        )
-      )}
+        ))}
       {!noValue && isList && (
         <TagListInput
-          values={Array.isArray(filter.value) ? filter.value as unknown[] : []}
+          values={Array.isArray(filter.value) ? (filter.value as unknown[]) : []}
           onChange={(v) => onChange({ value: v })}
         />
       )}
@@ -568,13 +628,22 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
   );
 }
 
-function TagListInput({ values, onChange }: { values: unknown[]; onChange: (v: unknown[]) => void }) {
+interface TagListInputProps {
+  values: unknown[];
+  onChange: (v: unknown[]) => void;
+}
+
+function TagListInput({ values, onChange }: TagListInputProps) {
   const [inputVal, setInputVal] = useState('');
   const addTag = () => {
     const v = inputVal.trim();
     if (!v) return;
     let parsed: unknown = v;
-    try { parsed = JSON.parse(v); } catch { /* keep string */ }
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      /* keep string */
+    }
     onChange([...values, parsed]);
     setInputVal('');
   };
@@ -589,13 +658,15 @@ function TagListInput({ values, onChange }: { values: unknown[]; onChange: (v: u
           size="small"
           style={{ flex: 1 }}
         />
-        <Button size="small" onClick={addTag} disabled={!inputVal.trim()}>添加</Button>
+        <Button size="small" onClick={addTag} disabled={!inputVal.trim()}>
+          添加
+        </Button>
       </div>
       {values.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {values.map((v, i) => (
             <Tag
-              key={i}
+              key={`${v}#${i}`}
               closable
               onClose={() => onChange(values.filter((_, j) => j !== i))}
               style={{ margin: 0 }}
@@ -610,7 +681,13 @@ function TagListInput({ values, onChange }: { values: unknown[]; onChange: (v: u
 }
 
 /** proto map 字段编辑器：entries[{key, value}] */
-function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind; currentBindings?: FieldBind[]; set: (p: Partial<FieldBind>) => void }) {
+interface MapEntriesFieldProps {
+  binding: FieldBind;
+  currentBindings?: FieldBind[];
+  set: (p: Partial<FieldBind>) => void;
+}
+
+function MapEntriesField({ binding, currentBindings, set }: MapEntriesFieldProps) {
   const entries: MapEntryBind[] = binding.entries ?? [];
 
   const updateEntry = (i: number, patch: Partial<MapEntryBind>) => {
@@ -619,7 +696,8 @@ function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind
     set({ entries: arr });
   };
 
-  const addEntry = () => set({ entries: [...entries, { key: '', value: { type: 'fixed', value: '' } }] });
+  const addEntry = () =>
+    set({ entries: [...entries, { key: '', value: { type: 'fixed', value: '' } }] });
   const removeEntry = (i: number) => set({ entries: entries.filter((_, j) => j !== i) });
 
   /** 可选的 binding 类型（排除 map） */
@@ -627,13 +705,16 @@ function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>map entries（固定 key + 动态 value）</span>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+        map entries（固定 key + 动态 value）
+      </span>
+      {/* entry.key 在输入过程中变化（空/重复），内容 key 会重挂载丢焦点，行受控，用索引键 */}
       {entries.map((entry, i) => (
         <div
-          key={i}
+          key={`entry-${i}`}
           style={{
             padding: '6px 8px',
-            background: 'var(--hover-bg, rgba(0,0,0,0.02))',
+            background: 'var(--hover-bg)',
             borderRadius: 6,
             display: 'flex',
             flexDirection: 'column',
@@ -641,7 +722,9 @@ function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Tag color="blue" style={{ margin: 0 }}>key</Tag>
+            <Tag color="blue" style={{ margin: 0 }}>
+              key
+            </Tag>
             <JsonDraftInput
               mode="jsonOrString"
               value={entry.key}
@@ -651,7 +734,9 @@ function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind
               style={{ flex: 1 }}
               size="small"
             />
-            <Tag color="green" style={{ margin: 0 }}>value</Tag>
+            <Tag color="green" style={{ margin: 0 }}>
+              value
+            </Tag>
             <Select
               value={entry.value?.type}
               onChange={(v) => updateEntry(i, { value: { type: v, value: '' } as FieldBind })}
@@ -660,7 +745,13 @@ function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind
               size="small"
             />
             <Tooltip title="删除此 entry">
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeEntry(i)} />
+              <Button
+                size="small"
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => removeEntry(i)}
+              />
             </Tooltip>
           </div>
           {entry.value && (
@@ -675,14 +766,25 @@ function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind
           )}
         </div>
       ))}
-      <a onClick={addEntry} style={{ fontSize: 11 }}>+ 添加 entry</a>
+      <a onClick={addEntry} style={{ fontSize: 11 }}>
+        + 添加 entry
+      </a>
     </div>
   );
 }
 
 /** randomPickMap 结构化编辑器：keySource + [{key, values}] */
-function PickMapValuesField({ binding, currentBindings, set }: { binding: FieldBind; currentBindings?: FieldBind[]; set: (p: Partial<FieldBind>) => void }) {
-  const entries: Array<{ key: string; values: unknown[] }> = (binding.values ?? []) as Array<{ key: string; values: unknown[] }>;
+interface PickMapValuesFieldProps {
+  binding: FieldBind;
+  currentBindings?: FieldBind[];
+  set: (p: Partial<FieldBind>) => void;
+}
+
+function PickMapValuesField({ binding, currentBindings, set }: PickMapValuesFieldProps) {
+  const entries: Array<{ key: string; values: unknown[] }> = (binding.values ?? []) as Array<{
+    key: string;
+    values: unknown[];
+  }>;
 
   const updateEntry = (i: number, patch: Record<string, unknown>) => {
     const arr = [...entries];
@@ -706,8 +808,9 @@ function PickMapValuesField({ binding, currentBindings, set }: { binding: FieldB
         />
       </div>
       <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>映射表 (key → values[])</span>
+      {/* 同上：entry.key 编辑中变化，受控行用索引键 */}
       {entries.map((entry, i) => (
-        <Space key={i} wrap size={4} style={{ width: '100%' }}>
+        <Space key={`entry-${i}`} wrap size={4} style={{ width: '100%' }}>
           <Input
             placeholder="key"
             value={entry.key ?? ''}
@@ -725,10 +828,14 @@ function PickMapValuesField({ binding, currentBindings, set }: { binding: FieldB
             style={{ width: 200 }}
             size="small"
           />
-          <a onClick={() => removeEntry(i)} style={{ color: 'var(--color-error)', fontSize: 11 }}>删除</a>
+          <a onClick={() => removeEntry(i)} style={{ color: 'var(--color-error)', fontSize: 11 }}>
+            删除
+          </a>
         </Space>
       ))}
-      <a onClick={addEntry} style={{ fontSize: 11 }}>+ 添加映射</a>
+      <a onClick={addEntry} style={{ fontSize: 11 }}>
+        + 添加映射
+      </a>
     </div>
   );
 }

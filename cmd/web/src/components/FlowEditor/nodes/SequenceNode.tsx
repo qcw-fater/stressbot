@@ -35,7 +35,7 @@ export function SequenceNode({ id, data, selected }: NodeProps) {
       >
         <div className="row-list">
           {next.map((name, i) => (
-            <div key={i} className="row-item">
+            <div key={`${name}#${i}`} className="row-item">
               <span className="row-index">{i + 1}.</span>
               <span className="row-name">{name}</span>
             </div>
@@ -44,7 +44,10 @@ export function SequenceNode({ id, data, selected }: NodeProps) {
           <Tooltip title="从右侧虚线 handle 拖线到目标节点 → 追加 next" mouseEnterDelay={0.4}>
             <div className="row-item row-item-add">
               <span className="row-index">+</span>
-              <span className="row-name" style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+              <span
+                className="row-name"
+                style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}
+              >
                 拖线续接…
               </span>
             </div>
@@ -53,7 +56,7 @@ export function SequenceNode({ id, data, selected }: NodeProps) {
       </NodeShell>
       {next.map((_, i) => (
         <Handle
-          key={i}
+          key={`seq-${i}`}
           type="source"
           position={Position.Right}
           id={`seq-${i}`}

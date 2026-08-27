@@ -134,15 +134,13 @@ export function ReportHtml({ detail, charts }: ReportHtmlProps) {
 
 /* ── 子组件 ── */
 
-function CoverSection({
-  detail,
-  failed,
-  cs,
-}: {
+interface CoverSectionProps {
   detail: HistoryDetail;
   failed: boolean;
   cs: HistoryDetail['configSummary'];
-}) {
+}
+
+function CoverSection({ detail, failed, cs }: CoverSectionProps) {
   return (
     <div className="report-section report-cover">
       <div className="report-cover__logo">stressbot 压测报告</div>
@@ -182,17 +180,14 @@ function CoverSection({
   );
 }
 
-function KpiSection({
-  totalActions,
-  sys,
-  conn,
-  metrics,
-}: {
+interface KpiSectionProps {
   totalActions: number;
   sys: HistorySystemSummary | null;
   conn: { established: number; failed: number; dropped: number };
   metrics: SnapshotMetricsSummary;
-}) {
+}
+
+function KpiSection({ totalActions, sys, conn, metrics }: KpiSectionProps) {
   const memPct =
     sys && sys.totalMemMB > 0 ? ((sys.usedMemMB / sys.totalMemMB) * 100).toFixed(1) : '—';
 
@@ -231,15 +226,13 @@ function KpiSection({
   );
 }
 
-function ChartSection({
-  title,
-  image,
-  empty,
-}: {
+interface ChartSectionProps {
   title: string;
   image: string | null;
   empty: string;
-}) {
+}
+
+function ChartSection({ title, image, empty }: ChartSectionProps) {
   return (
     <div className="report-section">
       <div className="section-title">{title}</div>
@@ -250,7 +243,11 @@ function ChartSection({
   );
 }
 
-function FailureSummaryTable({ actions }: { actions: HistoryActionMetric[] }) {
+interface FailureSummaryTableProps {
+  actions: HistoryActionMetric[];
+}
+
+function FailureSummaryTable({ actions }: FailureSummaryTableProps) {
   const problemActions = actions.filter((a) => a.failureCount > 0 || a.timeoutCount > 0);
   if (problemActions.length === 0) {
     return (
@@ -294,13 +291,12 @@ function FailureSummaryTable({ actions }: { actions: HistoryActionMetric[] }) {
   );
 }
 
-function ErrorSection({
-  actions,
-  errorChart,
-}: {
+interface ErrorSectionProps {
   actions: HistoryActionMetric[];
   errorChart: string;
-}) {
+}
+
+function ErrorSection({ actions, errorChart }: ErrorSectionProps) {
   const allErrors: Array<{ action: string; name: string; msg: string; count: number }> = [];
   for (const a of actions) {
     for (const e of a.errors ?? []) {
@@ -318,7 +314,7 @@ function ErrorSection({
       </div>
       <div style={{ marginTop: 12 }}>
         {allErrors.slice(0, 15).map((e, i) => (
-          <div key={i} className="error-row">
+          <div key={`${e.action}/${e.name}#${i}`} className="error-row">
             <span className="error-count">×{e.count}</span>
             <span className="error-action">{e.action}</span>
             <span className="error-name">{e.name}</span>
@@ -330,7 +326,11 @@ function ErrorSection({
   );
 }
 
-function SystemSection({ sys }: { sys: HistorySystemSummary | null }) {
+interface SystemSectionProps {
+  sys: HistorySystemSummary | null;
+}
+
+function SystemSection({ sys }: SystemSectionProps) {
   if (!sys) return null;
 
   const items = [
@@ -343,8 +343,14 @@ function SystemSection({ sys }: { sys: HistorySystemSummary | null }) {
       label: '内存',
       value: `${(sys.usedMemMB / 1024).toFixed(1)} / ${(sys.totalMemMB / 1024).toFixed(1)} GB`,
     },
-    { label: '网络↑', value: sys.totalNetSendKBps == null ? '—' : fmtBytesPlain(sys.totalNetSendKBps * 1024) + '/s' },
-    { label: '网络↓', value: sys.totalNetRecvKBps == null ? '—' : fmtBytesPlain(sys.totalNetRecvKBps * 1024) + '/s' },
+    {
+      label: '网络↑',
+      value: sys.totalNetSendKBps == null ? '—' : fmtBytesPlain(sys.totalNetSendKBps * 1024) + '/s',
+    },
+    {
+      label: '网络↓',
+      value: sys.totalNetRecvKBps == null ? '—' : fmtBytesPlain(sys.totalNetRecvKBps * 1024) + '/s',
+    },
     { label: 'Goroutine', value: sys.totalGoroutines.toLocaleString() },
     { label: 'Thread', value: sys.totalThreads.toLocaleString() },
     { label: 'FD', value: sys.totalFds.toLocaleString() },
@@ -365,7 +371,11 @@ function SystemSection({ sys }: { sys: HistorySystemSummary | null }) {
   );
 }
 
-function AgentSection({ detail }: { detail: HistoryDetail }) {
+interface AgentSectionProps {
+  detail: HistoryDetail;
+}
+
+function AgentSection({ detail }: AgentSectionProps) {
   return (
     <div className="report-section">
       <div className="section-title">节点结果</div>
@@ -391,7 +401,7 @@ function AgentSection({ detail }: { detail: HistoryDetail }) {
               failed: 'c-error',
             };
             return (
-              <tr key={i}>
+              <tr key={`${r.agentId || r.agentName}#${i}`}>
                 <td>{r.agentName || r.agentId}</td>
                 <td className={colorMap[r.result] ?? ''}>{resultMap[r.result] ?? r.result}</td>
                 <td>{r.finishedAt ? formatTime(r.finishedAt) : '—'}</td>
@@ -405,13 +415,12 @@ function AgentSection({ detail }: { detail: HistoryDetail }) {
   );
 }
 
-function DetailTableSection({
-  actions,
-  timingDetail,
-}: {
+interface DetailTableSectionProps {
   actions: HistoryActionMetric[];
   timingDetail: TimingDetailLevel;
-}) {
+}
+
+function DetailTableSection({ actions, timingDetail }: DetailTableSectionProps) {
   if (actions.length === 0) return null;
 
   const sorted = [...actions].sort((a, b) => b.sampleCount - a.sampleCount);
@@ -480,11 +489,21 @@ function DetailTableSection({
                 <td className={`num${a.timeoutCount > 0 ? ' c-warning' : ''}`}>{a.timeoutCount}</td>
                 <td className={`num ${apdexColor}`}>{isNetworked ? a.rttApdex.toFixed(3) : '—'}</td>
                 <td className="num">{rate}%</td>
-                  <td className="num">{hasPrimary && primary.hist.avgMs != null ? fmtMs(primary.hist.avgMs) : '—'}</td>
-                  <td className="num">{hasPrimary && primary.hist.p50Ms != null ? fmtMs(primary.hist.p50Ms) : '—'}</td>
-                  <td className="num">{hasPrimary && primary.hist.p95Ms != null ? fmtMs(primary.hist.p95Ms) : '—'}</td>
-                  <td className="num">{hasPrimary && primary.hist.p99Ms != null ? fmtMs(primary.hist.p99Ms) : '—'}</td>
-                  <td className="num">{hasPrimary && primary.hist.maxMs != null ? fmtMs(primary.hist.maxMs) : '—'}</td>
+                <td className="num">
+                  {hasPrimary && primary.hist.avgMs != null ? fmtMs(primary.hist.avgMs) : '—'}
+                </td>
+                <td className="num">
+                  {hasPrimary && primary.hist.p50Ms != null ? fmtMs(primary.hist.p50Ms) : '—'}
+                </td>
+                <td className="num">
+                  {hasPrimary && primary.hist.p95Ms != null ? fmtMs(primary.hist.p95Ms) : '—'}
+                </td>
+                <td className="num">
+                  {hasPrimary && primary.hist.p99Ms != null ? fmtMs(primary.hist.p99Ms) : '—'}
+                </td>
+                <td className="num">
+                  {hasPrimary && primary.hist.maxMs != null ? fmtMs(primary.hist.maxMs) : '—'}
+                </td>
                 <td className="num">{fmtMs(a.nonRTTAvgMs ?? 0)}</td>
                 <td className="num">{fmtMs(a.sendAvgMs ?? 0)}</td>
                 {showCodec && <td className="num">{fmtMs(a.encodeAvgMs ?? 0)}</td>}

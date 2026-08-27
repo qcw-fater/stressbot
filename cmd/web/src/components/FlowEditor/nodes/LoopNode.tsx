@@ -37,13 +37,21 @@ function formatCondition(cond: string): { display: string; tag: string } {
 }
 
 /** 条件文本行：前缀 Tag + 截断文本 */
-function ConditionLine({ label, condition }: { label: string; condition: string }) {
+interface ConditionLineProps {
+  label: string;
+  condition: string;
+}
+
+function ConditionLine({ label, condition }: ConditionLineProps) {
   const { display, tag } = formatCondition(condition);
   const tagColor = tag === 'lua' ? 'purple' : 'blue';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
       <span style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>{label}</span>
-      <Tag color={tagColor} style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: 0, flexShrink: 0 }}>
+      <Tag
+        color={tagColor}
+        style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: 0, flexShrink: 0 }}
+      >
         {tag}
       </Tag>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -66,7 +74,9 @@ export function LoopNode({ id, data, selected }: NodeProps) {
   const conditionTitle =
     (normalizedCondition ? `前置: ${normalizedCondition.tag}:${normalizedCondition.display}` : '') +
     (normalizedCondition && normalizedBreakCondition ? ' / ' : '') +
-    (normalizedBreakCondition ? `后置: ${normalizedBreakCondition.tag}:${normalizedBreakCondition.display}` : '');
+    (normalizedBreakCondition
+      ? `后置: ${normalizedBreakCondition.tag}:${normalizedBreakCondition.display}`
+      : '');
 
   return (
     <>

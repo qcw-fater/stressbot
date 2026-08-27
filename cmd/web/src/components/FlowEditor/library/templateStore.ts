@@ -22,7 +22,7 @@ import {
   type TemplateSnapshot,
 } from '@/services/templatesApi';
 
-export interface ListenTemplateDefaultRef extends ListenTemplateDefaultRefDto {}
+export type ListenTemplateDefaultRef = ListenTemplateDefaultRefDto;
 
 const templateBus = new EventTarget();
 const TEMPLATE_CHANGE_EVENT = 'template-change';
@@ -91,7 +91,9 @@ function fromListenDto(template: ListenTemplateDto): ListenTemplate {
   };
 }
 
-function actionSave(template: Omit<ActionTemplate, 'id' | 'createdAt' | 'updatedAt'>): ActionTemplateSaveDto {
+function actionSave(
+  template: Omit<ActionTemplate, 'id' | 'createdAt' | 'updatedAt'>,
+): ActionTemplateSaveDto {
   return {
     name: template.name,
     ...(template.description ? { description: template.description } : {}),
@@ -100,7 +102,9 @@ function actionSave(template: Omit<ActionTemplate, 'id' | 'createdAt' | 'updated
   };
 }
 
-function listenSave(template: Omit<ListenTemplate, 'id' | 'createdAt' | 'updatedAt'>): ListenTemplateSaveDto {
+function listenSave(
+  template: Omit<ListenTemplate, 'id' | 'createdAt' | 'updatedAt'>,
+): ListenTemplateSaveDto {
   return {
     name: template.name,
     ...(template.description ? { description: template.description } : {}),
@@ -162,7 +166,9 @@ export async function findActionTemplateByName(name: string): Promise<ActionTemp
   return (await listActionTemplates()).find((template) => template.name === name);
 }
 
-export async function getActionTemplateSnapshot(): Promise<ComponentTemplateSnapshot<ActionTemplate>> {
+export async function getActionTemplateSnapshot(): Promise<
+  ComponentTemplateSnapshot<ActionTemplate>
+> {
   const snapshot: TemplateSnapshot<ActionTemplateDto> = await actionTemplatesApi.getSnapshot();
   return { revision: snapshot.revision, items: snapshot.items.map(fromActionDto) };
 }
@@ -175,9 +181,8 @@ export async function replaceActionTemplateSnapshot(
     idPolicy: request.idPolicy,
     items: request.items.map(actionSnapshotInput),
   };
-  const response: ReplaceTemplateSnapshotResponse<ActionTemplateDto> = (
-    await actionTemplatesApi.replaceSnapshot(wireRequest)
-  );
+  const response: ReplaceTemplateSnapshotResponse<ActionTemplateDto> =
+    await actionTemplatesApi.replaceSnapshot(wireRequest);
   emitTemplateChange();
   return { ...response, items: response.items.map(fromActionDto) };
 }
@@ -221,7 +226,9 @@ export async function findListenTemplateByName(name: string): Promise<ListenTemp
   return (await listListenTemplates()).find((template) => template.name === name);
 }
 
-export async function getListenTemplateSnapshot(): Promise<ComponentTemplateSnapshot<ListenTemplate>> {
+export async function getListenTemplateSnapshot(): Promise<
+  ComponentTemplateSnapshot<ListenTemplate>
+> {
   const snapshot: TemplateSnapshot<ListenTemplateDto> = await listenTemplatesApi.getSnapshot();
   return { revision: snapshot.revision, items: snapshot.items.map(fromListenDto) };
 }
@@ -234,9 +241,8 @@ export async function replaceListenTemplateSnapshot(
     idPolicy: request.idPolicy,
     items: request.items.map(listenSnapshotInput),
   };
-  const response: ReplaceTemplateSnapshotResponse<ListenTemplateDto> = (
-    await listenTemplatesApi.replaceSnapshot(wireRequest)
-  );
+  const response: ReplaceTemplateSnapshotResponse<ListenTemplateDto> =
+    await listenTemplatesApi.replaceSnapshot(wireRequest);
   emitTemplateChange();
   return { ...response, items: response.items.map(fromListenDto) };
 }

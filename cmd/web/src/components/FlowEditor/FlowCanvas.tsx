@@ -31,7 +31,13 @@ import { resolveWaitConnection } from './connections/waitConnection';
 import { useFlowStore } from './store/flowStore';
 import { useEditorStore, type Clipboard } from './store/editorStore';
 import { generateNodeId } from './utils/nodeIdGen';
-import { saveActionTemplate, saveListenTemplate, type ActionTemplate, type ListenTemplate, type ListenTemplateDefaultRef } from './library/templateStore';
+import {
+  saveActionTemplate,
+  saveListenTemplate,
+  type ActionTemplate,
+  type ListenTemplate,
+  type ListenTemplateDefaultRef,
+} from './library/templateStore';
 import { cloneListenDefaultRef, inferListenDefaultRef } from './library/listenTemplateDefaults';
 import { useFlowReadOnly } from './flowReadOnlyContext';
 import type { FlowNode, NodeType } from '@/types/flow';
@@ -39,26 +45,20 @@ import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import { classifyListen } from '@/types/listen';
 import { normalizeOnError } from './utils/onError';
-
-interface ContextMenu {
-  x: number;
-  y: number;
-  flowX: number; // 画布坐标：粘贴时用
-  flowY: number;
-  kind: 'node' | 'edge' | 'pane';
-  targetId?: string;
-}
+import { CanvasContextMenu, QUICK_NODE_TYPES, type ContextMenu } from './CanvasContextMenu';
 
 function FlowCanvasInner() {
   const { message } = AntApp.useApp();
   const readOnly = useFlowReadOnly();
 
   // flowStore: frequently-changing visual data (grouped for fewer re-subscriptions)
-  const { rfNodes, rfEdges, needsFitView } = useFlowStore(useShallow((s) => ({
-    rfNodes: s.rfNodes,
-    rfEdges: s.rfEdges,
-    needsFitView: s.needsFitView,
-  })));
+  const { rfNodes, rfEdges, needsFitView } = useFlowStore(
+    useShallow((s) => ({
+      rfNodes: s.rfNodes,
+      rfEdges: s.rfEdges,
+      needsFitView: s.needsFitView,
+    })),
+  );
 
   // flowStore: stable action refs (never change, individual calls are fine)
   const onNodesChange = useFlowStore((s) => s.onNodesChange);
@@ -73,11 +73,13 @@ function FlowCanvasInner() {
   const updateNode = useFlowStore((s) => s.updateNode);
 
   // editorStore: UI flags + clipboard data (grouped)
-  const { showMinimap, showGrid, clipboard } = useEditorStore(useShallow((s) => ({
-    showMinimap: s.showMinimap,
-    showGrid: s.showGrid,
-    clipboard: s.clipboard,
-  })));
+  const { showMinimap, showGrid, clipboard } = useEditorStore(
+    useShallow((s) => ({
+      showMinimap: s.showMinimap,
+      showGrid: s.showGrid,
+      clipboard: s.clipboard,
+    })),
+  );
 
   // editorStore: stable action refs
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
@@ -97,7 +99,11 @@ function FlowCanvasInner() {
       const mainPos = useFlowStore.getState().layout.nodePositions['main'];
       if (mainPos) {
         const timer = setTimeout(() => {
-          if (wrapperRef.current && wrapperRef.current.clientWidth > 0 && wrapperRef.current.clientHeight > 0) {
+          if (
+            wrapperRef.current &&
+            wrapperRef.current.clientWidth > 0 &&
+            wrapperRef.current.clientHeight > 0
+          ) {
             setCenter(mainPos.x, mainPos.y, { zoom: 1, duration: 300 });
           }
           useFlowStore.setState({ needsFitView: false });
@@ -115,7 +121,9 @@ function FlowCanvasInner() {
     const targetId = focusNodeId;
     const store = useFlowStore.getState();
     store.onNodesChange([
-      ...store.rfNodes.filter((n) => n.id !== targetId).map((n) => ({ id: n.id, type: 'select' as const, selected: false })),
+      ...store.rfNodes
+        .filter((n) => n.id !== targetId)
+        .map((n) => ({ id: n.id, type: 'select' as const, selected: false })),
       { id: targetId, type: 'select' as const, selected: true },
     ]);
     const pos = store.layout.nodePositions[targetId];
@@ -188,7 +196,11 @@ function FlowCanvasInner() {
           let nodeId = actionName;
           let nodeIndex = 1;
           while (taken.has(nodeId)) nodeId = `${actionName}_${nodeIndex++}`;
-          addNode(nodeId, { type: 'action', action: actionName, description: template.description });
+          addNode(nodeId, {
+            type: 'action',
+            action: actionName,
+            description: template.description,
+          });
           setNodePositions({ [nodeId]: flowPos });
           setSelectedNode(nodeId);
         } else if (kind === 'listen') {
@@ -206,7 +218,17 @@ function FlowCanvasInner() {
         console.warn('[FlowCanvas] 解析模板拖入数据失败：', err);
       }
     },
-    [addNode, addAction, addListen, readOnly, screenToFlowPosition, setActivePanel, setListenDefaultRef, setNodePositions, setSelectedNode],
+    [
+      addNode,
+      addAction,
+      addListen,
+      readOnly,
+      screenToFlowPosition,
+      setActivePanel,
+      setListenDefaultRef,
+      setNodePositions,
+      setSelectedNode,
+    ],
   );
 
   // 选中变化 → 计算 edgeHighlightNodeIds + 高亮颜色（取第一条选中边的源节点类型）
@@ -296,7 +318,8 @@ function FlowCanvasInner() {
         // 派生边为每条 listenRef 编码了唯一 refIndex（jsonToFlow）；旧实现按 listenName 整体过滤，
         // 会把同一 action 下所有同名 listen 的注册一起删掉。
         if (src.type === 'action' && src.listenRefs) {
-          const refIndex = typeof e.data?.refIndex === 'number' ? (e.data.refIndex as number) : null;
+          const refIndex =
+            typeof e.data?.refIndex === 'number' ? (e.data.refIndex as number) : null;
           if (refIndex === null) return;
           const next = src.listenRefs.slice();
           if (refIndex >= 0 && refIndex < next.length) {
@@ -305,7 +328,9 @@ function FlowCanvasInner() {
           }
         }
       } else if (src.type === 'action' && handleId === 'error') {
-        updateNode(e.source, { onError: normalizeOnError({ ...(src.onError ?? {}), handler: undefined }) });
+        updateNode(e.source, {
+          onError: normalizeOnError({ ...(src.onError ?? {}), handler: undefined }),
+        });
       }
     },
     [updateNode],
@@ -331,7 +356,12 @@ function FlowCanvasInner() {
    * 注：业务图通过 syncDerived 重算 rfEdges，所以这里不要直接 setEdges。
    */
   const onConnect = useCallback(
-    (params: { source: string | null; target: string | null; sourceHandle?: string | null; targetHandle?: string | null }) => {
+    (params: {
+      source: string | null;
+      target: string | null;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    }) => {
       if (readOnly) return;
       if (!params.source || !params.target) return;
       const src = useFlowStore.getState().nodes[params.source];
@@ -364,8 +394,10 @@ function FlowCanvasInner() {
         return;
       }
       if (src.type === 'boolean') {
-        if (handle === 'true' && targetNodeId) updateNode(params.source, { trueNext: targetNodeId });
-        else if (handle === 'false' && targetNodeId) updateNode(params.source, { falseNext: targetNodeId });
+        if (handle === 'true' && targetNodeId)
+          updateNode(params.source, { trueNext: targetNodeId });
+        else if (handle === 'false' && targetNodeId)
+          updateNode(params.source, { falseNext: targetNodeId });
         return;
       }
       if (src.type === 'switch') {
@@ -398,7 +430,8 @@ function FlowCanvasInner() {
           if (targetNodeId) options.push({ node: targetNodeId, weight: 1 });
         } else if (handle.startsWith('opt-')) {
           const idx = Number(handle.slice(4));
-          if (Number.isFinite(idx) && targetNodeId) options.splice(idx, 0, { node: targetNodeId, weight: 1 });
+          if (Number.isFinite(idx) && targetNodeId)
+            options.splice(idx, 0, { node: targetNodeId, weight: 1 });
         }
         updateNode(params.source, { options });
         return;
@@ -408,16 +441,18 @@ function FlowCanvasInner() {
         if (!list.some((r) => r.listen === targetListenName)) {
           const defaultRef = useFlowStore.getState().listenDefaultRefs[targetListenName];
           const clonedDefaultRef = cloneListenDefaultRef(defaultRef);
-          list.push(clonedDefaultRef
-            ? {
-                route: clonedDefaultRef.route,
-                server: clonedDefaultRef.server,
-                listen: targetListenName,
-                ...(typeof clonedDefaultRef.queueSize === 'number'
-                  ? { queueSize: clonedDefaultRef.queueSize }
-                  : {}),
-              }
-            : { route: null, server: '', listen: targetListenName });
+          list.push(
+            clonedDefaultRef
+              ? {
+                  route: clonedDefaultRef.route,
+                  server: clonedDefaultRef.server,
+                  listen: targetListenName,
+                  ...(typeof clonedDefaultRef.queueSize === 'number'
+                    ? { queueSize: clonedDefaultRef.queueSize }
+                    : {}),
+                }
+              : { route: null, server: '', listen: targetListenName },
+          );
         }
         updateNode(params.source, { listenRefs: list });
         return;
@@ -431,7 +466,9 @@ function FlowCanvasInner() {
           message.warning('错误处理节点不能指向自身');
           return;
         }
-        updateNode(params.source, { onError: normalizeOnError({ ...(src.onError ?? {}), handler: targetNodeId }) });
+        updateNode(params.source, {
+          onError: normalizeOnError({ ...(src.onError ?? {}), handler: targetNodeId }),
+        });
         return;
       }
     },
@@ -453,27 +490,47 @@ function FlowCanvasInner() {
       // 旧实现按 ReactFlow 给的顺序逐条调 deleteRfEdge，每删一条就 updateNode+syncDerived 缩短数组，
       // 第二条用的还是旧 sourceHandle index → 可能删到未选中的项。
       // 这里先按 source 收集所有要删的索引/引用，一次重建该 source，保证只删选中的项。
-      interface PendingIdx { kind: 'seq' | 'case' | 'opt'; index: number }
+      interface PendingIdx {
+        kind: 'seq' | 'case' | 'opt';
+        index: number;
+      }
       const bySource = new Map<string, { idx: PendingIdx[]; refs: number[]; errors: boolean }>();
       const others: Edge[] = []; // loop/boolean/default/error/listen 单值边，逐条删即可（无索引漂移）
       for (const e of deleted) {
         const handleId = e.sourceHandle ?? '';
-        const isIdx = handleId.startsWith('seq-') || handleId.startsWith('case-') || handleId.startsWith('opt-');
+        const isIdx =
+          handleId.startsWith('seq-') ||
+          handleId.startsWith('case-') ||
+          handleId.startsWith('opt-');
         const isListen = handleId === 'listen';
         if (isIdx) {
           let kind: PendingIdx['kind'];
           let raw: string;
-          if (handleId.startsWith('seq-')) { kind = 'seq'; raw = handleId.slice(4); }
-          else if (handleId.startsWith('case-')) { kind = 'case'; raw = handleId.slice(5); }
-          else { kind = 'opt'; raw = handleId.slice(4); }
+          if (handleId.startsWith('seq-')) {
+            kind = 'seq';
+            raw = handleId.slice(4);
+          } else if (handleId.startsWith('case-')) {
+            kind = 'case';
+            raw = handleId.slice(5);
+          } else {
+            kind = 'opt';
+            raw = handleId.slice(4);
+          }
           const index = Number(raw);
-          if (!Number.isFinite(index)) { others.push(e); continue; }
+          if (!Number.isFinite(index)) {
+            others.push(e);
+            continue;
+          }
           const p = bySource.get(e.source) ?? { idx: [], refs: [], errors: false };
           p.idx.push({ kind, index });
           bySource.set(e.source, p);
         } else if (isListen) {
-          const refIndex = typeof e.data?.refIndex === 'number' ? (e.data.refIndex as number) : null;
-          if (refIndex === null) { others.push(e); continue; }
+          const refIndex =
+            typeof e.data?.refIndex === 'number' ? (e.data.refIndex as number) : null;
+          if (refIndex === null) {
+            others.push(e);
+            continue;
+          }
           const p = bySource.get(e.source) ?? { idx: [], refs: [], errors: false };
           p.refs.push(refIndex);
           bySource.set(e.source, p);
@@ -517,52 +574,53 @@ function FlowCanvasInner() {
   }, []);
 
   /** 把一个 React Flow node（含相关 action / listen）打包到剪贴板 */
-  const copyRfNode = useCallback(
-    (n: RFNode): Clipboard => {
-      const flow = useFlowStore.getState();
-      if (n.type === 'listenCard') {
-        const listenName = (n.data as { listenName?: string }).listenName;
-        if (!listenName || !flow.listens[listenName]) return null;
-        const inferred = inferListenDefaultRef(flow.nodes, listenName);
-        return {
-          kind: 'listen',
-          listenName,
-          listen: JSON.parse(JSON.stringify(flow.listens[listenName])),
-          defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[listenName],
-        };
-      }
-      const node = flow.nodes[n.id];
-      if (!node) return null;
-      const action =
-        node.type === 'action' && node.action && flow.actions[node.action]
-          ? { name: node.action, def: JSON.parse(JSON.stringify(flow.actions[node.action])) as ActionDef }
-          : undefined;
-      // listenRefs 涉及的 listen 一并复制（跨流程粘贴时不丢引用）
-      const listens: Array<{ name: string; def: ListenDef; defaultRef?: ListenTemplateDefaultRef }> = [];
-      if (node.type === 'action' && node.listenRefs) {
-        for (const r of node.listenRefs) {
-          if (!r.listen) continue;
-          const listenDef = flow.listens[r.listen];
-          if (listenDef) {
-            const inferred = inferListenDefaultRef(flow.nodes, r.listen);
-            listens.push({
-              name: r.listen,
-              def: JSON.parse(JSON.stringify(listenDef)),
-              defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[r.listen],
-            });
+  const copyRfNode = useCallback((n: RFNode): Clipboard => {
+    const flow = useFlowStore.getState();
+    if (n.type === 'listenCard') {
+      const listenName = (n.data as { listenName?: string }).listenName;
+      if (!listenName || !flow.listens[listenName]) return null;
+      const inferred = inferListenDefaultRef(flow.nodes, listenName);
+      return {
+        kind: 'listen',
+        listenName,
+        listen: JSON.parse(JSON.stringify(flow.listens[listenName])),
+        defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[listenName],
+      };
+    }
+    const node = flow.nodes[n.id];
+    if (!node) return null;
+    const action =
+      node.type === 'action' && node.action && flow.actions[node.action]
+        ? {
+            name: node.action,
+            def: JSON.parse(JSON.stringify(flow.actions[node.action])) as ActionDef,
           }
+        : undefined;
+    // listenRefs 涉及的 listen 一并复制（跨流程粘贴时不丢引用）
+    const listens: Array<{ name: string; def: ListenDef; defaultRef?: ListenTemplateDefaultRef }> =
+      [];
+    if (node.type === 'action' && node.listenRefs) {
+      for (const r of node.listenRefs) {
+        if (!r.listen) continue;
+        const listenDef = flow.listens[r.listen];
+        if (listenDef) {
+          const inferred = inferListenDefaultRef(flow.nodes, r.listen);
+          listens.push({
+            name: r.listen,
+            def: JSON.parse(JSON.stringify(listenDef)),
+            defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[r.listen],
+          });
         }
       }
-      return {
-        kind: 'node',
-        nodeId: n.id,
-        node: JSON.parse(JSON.stringify(node)),
-        action,
-        listens: listens.length > 0 ? listens : undefined,
-      };
-    },
-    [],
-  );
+    }
+    return {
+      kind: 'node',
+      nodeId: n.id,
+      node: JSON.parse(JSON.stringify(node)),
+      action,
+      listens: listens.length > 0 ? listens : undefined,
+    };
+  }, []);
 
   const uniqueNodeId = (base: string) => {
     const taken = new Set(Object.keys(useFlowStore.getState().nodes));
@@ -625,46 +683,58 @@ function FlowCanvasInner() {
         message.success(`已粘贴 listen ${newName}`);
       }
     },
-    [addAction, addListen, addNode, clipboard, message, setListenDefaultRef, setNodePositions, setSelectedNode],
+    [
+      addAction,
+      addListen,
+      addNode,
+      clipboard,
+      message,
+      setListenDefaultRef,
+      setNodePositions,
+      setSelectedNode,
+    ],
   );
 
   /** 把节点保存为模板（写入本地模板库） */
-  const saveNodeAsTemplate = useCallback(async (n: RFNode) => {
-    const flow = useFlowStore.getState();
-    if (n.type === 'listenCard') {
-      const listenName = (n.data as { listenName?: string }).listenName;
-      if (!listenName) return;
-      const listenDef = flow.listens[listenName];
-      if (!listenDef) return;
-      const inferred = inferListenDefaultRef(flow.nodes, listenName);
-      await saveListenTemplate({
-        name: listenName,
-        kind: classifyListen(listenDef),
-        data: listenDef,
-        defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[listenName],
-      });
-      if (inferred.ambiguous) {
-        message.warning('存在多条不同监听注册，已使用第一条作为模板默认注册');
+  const saveNodeAsTemplate = useCallback(
+    async (n: RFNode) => {
+      const flow = useFlowStore.getState();
+      if (n.type === 'listenCard') {
+        const listenName = (n.data as { listenName?: string }).listenName;
+        if (!listenName) return;
+        const listenDef = flow.listens[listenName];
+        if (!listenDef) return;
+        const inferred = inferListenDefaultRef(flow.nodes, listenName);
+        await saveListenTemplate({
+          name: listenName,
+          kind: classifyListen(listenDef),
+          data: listenDef,
+          defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[listenName],
+        });
+        if (inferred.ambiguous) {
+          message.warning('存在多条不同监听注册，已使用第一条作为模板默认注册');
+        }
+        message.success(`listen ${listenName} 已保存为模板`);
+        return;
       }
-      message.success(`listen ${listenName} 已保存为模板`);
-      return;
-    }
-    const node = flow.nodes[n.id];
-    if (!node || node.type !== 'action' || !node.action) {
-      message.warning('仅 action 节点 / listen 卡片可保存为模板');
-      return;
-    }
-    const def = flow.actions[node.action];
-    if (!def) return;
-    await saveActionTemplate({
-      name: node.action,
-      // 把节点的描述继承给模板，作为复用时的提示文本
-      description: node.description?.trim() || undefined,
-      pattern: def.pattern ?? 'declarative',
-      data: def,
-    });
-    message.success(`action ${node.action} 已保存为模板`);
-  }, [message]);
+      const node = flow.nodes[n.id];
+      if (!node || node.type !== 'action' || !node.action) {
+        message.warning('仅 action 节点 / listen 卡片可保存为模板');
+        return;
+      }
+      const def = flow.actions[node.action];
+      if (!def) return;
+      await saveActionTemplate({
+        name: node.action,
+        // 把节点的描述继承给模板，作为复用时的提示文本
+        description: node.description?.trim() || undefined,
+        pattern: def.pattern ?? 'declarative',
+        data: def,
+      });
+      message.success(`action ${node.action} 已保存为模板`);
+    },
+    [message],
+  );
 
   // 记录最近一次鼠标在画布内的客户端坐标，Ctrl+V 粘贴时作为落点
   const lastMousePosRef = useRef<{ x: number; y: number } | null>(null);
@@ -685,7 +755,11 @@ function FlowCanvasInner() {
     };
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      )
+        return;
       if (!inCanvas()) return;
       // 只读模式（运行 / 查看运行 / 终态报告）下，所有写操作快捷键全部失效：
       // ReactFlow props 与右键菜单的 readOnly 保护覆盖不到全局键盘（F1~F10 / Ctrl+X / Ctrl+V）。
@@ -755,7 +829,20 @@ function FlowCanvasInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [addListen, addNode, copyRfNode, deleteRfNode, message, pasteAt, readOnly, rfNodes, screenToFlowPosition, setClipboard, setNodePositions, setSelectedNode]);
+  }, [
+    addListen,
+    addNode,
+    copyRfNode,
+    deleteRfNode,
+    message,
+    pasteAt,
+    readOnly,
+    rfNodes,
+    screenToFlowPosition,
+    setClipboard,
+    setNodePositions,
+    setSelectedNode,
+  ]);
 
   // MiniMap 节点色：直接读 CSS token，确保与节点本体配色 / 主题切换保持完全一致。
   // 注意：每次回调实时读取 getComputedStyle，不缓存（dark/light 切换不需要重 mount）。
@@ -799,9 +886,13 @@ function FlowCanvasInner() {
         nodesConnectable={!readOnly}
         edgesFocusable={!readOnly}
         onNodesChange={readOnly ? undefined : onNodesChange}
-        onNodeDragStop={readOnly ? undefined : (_event, node) => {
-          setNodePositions({ [node.id]: node.position });
-        }}
+        onNodeDragStop={
+          readOnly
+            ? undefined
+            : (_event, node) => {
+                setNodePositions({ [node.id]: node.position });
+              }
+        }
         onEdgesChange={readOnly ? undefined : onEdgesChange}
         onConnect={onConnect}
         onNodesDelete={onNodesDelete}
@@ -942,230 +1033,6 @@ function FlowCanvasInner() {
       )}
     </div>
   );
-}
-
-interface CanvasContextMenuProps {
-  menu: ContextMenu;
-  rfNodes: RFNode[];
-  clipboard: Clipboard;
-  readOnly: boolean;
-  onClose: () => void;
-  onCopyNode: (id: string) => void;
-  onCutNode: (id: string) => void;
-  onPaste: (flowX: number, flowY: number) => void;
-  onSaveAsTemplate: (id: string) => void;
-  onEditNode: (id: string) => void;
-  onAddNode: (type: NodeType, flowX: number, flowY: number) => void;
-  onAddListen: (flowX: number, flowY: number) => void;
-  onDeleteNode: (id: string) => void;
-  onDeleteEdge: (id: string) => void;
-}
-
-// 右键菜单「新建节点」+ F1..F9 快捷键对应的节点类型；listen 占 F{length+1}（当前 F10）。
-// 键盘 handler 与右键菜单均按数组长度推导（节点 F1..F{length}，listen F{length+1}），新增类型加到末尾即可顺延。
-const QUICK_NODE_TYPES: Array<{ type: NodeType; label: string }> = [
-  { type: 'sequence', label: 'Sequence' },
-  { type: 'loop', label: 'Loop' },
-  { type: 'boolean', label: 'Boolean' },
-  { type: 'switch', label: 'Switch' },
-  { type: 'weighted', label: 'Weighted' },
-  { type: 'wait', label: 'Wait' },
-  { type: 'break', label: 'Break' },
-  { type: 'continue', label: 'Continue' },
-  { type: 'action', label: 'Action' },
-];
-
-function CanvasContextMenu({
-  menu,
-  rfNodes,
-  clipboard,
-  readOnly,
-  onClose,
-  onCopyNode,
-  onCutNode,
-  onPaste,
-  onSaveAsTemplate,
-  onEditNode,
-  onAddNode,
-  onAddListen,
-  onDeleteNode,
-  onDeleteEdge,
-}: CanvasContextMenuProps) {
-  const node = menu.kind === 'node' && menu.targetId ? rfNodes.find((n) => n.id === menu.targetId) : null;
-  const isListenCard = node?.type === 'listenCard';
-  const isAction = node?.type === 'action';
-  const canSaveTemplate = isAction || isListenCard;
-
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        left: menu.x,
-        top: menu.y,
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--border-color)',
-        borderRadius: 4,
-        boxShadow: '0 6px 16px 0 rgba(0,0,0,0.18)',
-        padding: 4,
-        zIndex: 1000,
-        minWidth: 160,
-        color: 'var(--text-primary)',
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {menu.kind === 'node' && menu.targetId && (
-        <>
-          <MenuItem
-            onClick={() => {
-              onEditNode(menu.targetId!);
-              onClose();
-            }}
-          >
-            {readOnly ? '查看…' : '编辑…'}
-          </MenuItem>
-          {!readOnly && (
-            <>
-              <MenuItem
-                onClick={() => {
-                  onCopyNode(menu.targetId!);
-                  onClose();
-                }}
-              >
-                复制 <Hint>Ctrl+C</Hint>
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  onCutNode(menu.targetId!);
-                  onClose();
-                }}
-              >
-                剪切 <Hint>Ctrl+X</Hint>
-              </MenuItem>
-              {canSaveTemplate && (
-                <MenuItem
-                  onClick={() => {
-                    onSaveAsTemplate(menu.targetId!);
-                    onClose();
-                  }}
-                >
-                  保存为模板…
-                </MenuItem>
-              )}
-              <Divider />
-              <MenuItem
-                danger
-                onClick={() => {
-                  onDeleteNode(menu.targetId!);
-                  onClose();
-                }}
-              >
-                删除 <Hint>Del</Hint>
-              </MenuItem>
-            </>
-          )}
-        </>
-      )}
-      {menu.kind === 'edge' && menu.targetId && !readOnly && (
-        <MenuItem
-          danger
-          onClick={() => {
-            onDeleteEdge(menu.targetId!);
-            onClose();
-          }}
-        >
-          删除连线 <Hint>Del</Hint>
-        </MenuItem>
-      )}
-      {menu.kind === 'pane' && !readOnly && (
-        <>
-          <MenuItem
-            disabled={!clipboard}
-            onClick={() => {
-              if (!clipboard) return;
-              onPaste(menu.flowX, menu.flowY);
-              onClose();
-            }}
-          >
-            粘贴 {clipboard ? `(${clipboard.kind})` : ''}
-          </MenuItem>
-          <Divider />
-          <SubmenuLabel>新建节点</SubmenuLabel>
-          {QUICK_NODE_TYPES.map((q, i) => (
-            <MenuItem
-              key={q.type}
-              onClick={() => {
-                onAddNode(q.type, menu.flowX, menu.flowY);
-                onClose();
-              }}
-            >
-              {q.label} <Hint>F{i + 1}</Hint>
-            </MenuItem>
-          ))}
-          <MenuItem
-            onClick={() => {
-              onAddListen(menu.flowX, menu.flowY);
-              onClose();
-            }}
-          >
-            Listen <Hint>F{QUICK_NODE_TYPES.length + 1}</Hint>
-          </MenuItem>
-        </>
-      )}
-    </div>
-  );
-}
-
-function MenuItem({
-  children,
-  onClick,
-  danger,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <div
-      onClick={disabled ? undefined : onClick}
-      style={{
-        padding: '6px 12px',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        borderRadius: 3,
-        color: disabled ? 'var(--text-tertiary)' : danger ? 'var(--color-error)' : 'inherit',
-        fontSize: 13,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-      }}
-      onMouseEnter={(e) => {
-        if (!disabled) e.currentTarget.style.background = 'var(--hover-bg)';
-      }}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return (
-    <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{children}</span>
-  );
-}
-
-function SubmenuLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ padding: '4px 12px 2px', fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>
-      {children}
-    </div>
-  );
-}
-
-function Divider() {
-  return <div style={{ height: 1, background: 'var(--divider-bg)', margin: '4px 0' }} />;
 }
 
 export function FlowCanvas() {

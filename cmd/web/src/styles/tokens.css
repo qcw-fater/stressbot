@@ -122,6 +122,20 @@
   --chart-cyan: #13c2c2;
   --chart-purple: #722ed1;
   --chart-lime: #bae637;
+  --chart-axis: rgba(0, 0, 0, 0.15);
+  --chart-label: rgba(0, 0, 0, 0.65);
+  --chart-split: rgba(0, 0, 0, 0.06);
+  --chart-tip-bg: rgba(255, 255, 255, 0.96);
+  --chart-tip-border: rgba(0, 0, 0, 0.09);
+  --chart-tip-text: #333;
+  --tooltip-bg: #ffffff;
+  --tooltip-text: #333;
+  --tooltip-border: #d9d9d9;
+  --text-quaternary: rgba(0, 0, 0, 0.38);
+  --fill-quaternary: rgba(0, 0, 0, 0.02);
+  --node-selected-bg: rgba(22, 119, 255, 0.12);
+  --shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.18);
+  --shadow-popover: 0 6px 16px 0 rgba(0, 0, 0, 0.18);
 
   /* === 节点状态背景色 === */
   --status-idle-bg: rgba(82, 196, 26, 0.1);
@@ -245,6 +259,20 @@
   --chart-cyan: #36cfc9;
   --chart-purple: #b37feb;
   --chart-lime: #d3f261;
+  --chart-axis: rgba(255, 255, 255, 0.25);
+  --chart-label: rgba(255, 255, 255, 0.65);
+  --chart-split: rgba(255, 255, 255, 0.06);
+  --chart-tip-bg: rgba(20, 20, 28, 0.92);
+  --chart-tip-border: rgba(255, 255, 255, 0.12);
+  --chart-tip-text: #e0e0e0;
+  --tooltip-bg: #3c3c3c;
+  --tooltip-text: #e6e6e6;
+  --tooltip-border: #5a5a5a;
+  --text-quaternary: rgba(255, 255, 255, 0.42);
+  --fill-quaternary: rgba(0, 0, 0, 0.02);
+  --node-selected-bg: rgba(22, 119, 255, 0.12);
+  --shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.18);
+  --shadow-popover: 0 6px 16px 0 rgba(0, 0, 0, 0.18);
 
   /* 节点状态背景色：深色背景上稍提亮 */
   --status-idle-bg: rgba(149, 222, 100, 0.12);

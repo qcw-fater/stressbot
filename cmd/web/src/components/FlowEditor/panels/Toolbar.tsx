@@ -213,7 +213,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
         justifyContent: 'space-between',
         padding: '8px 16px',
         background: 'var(--bg-panel)',
-        borderBottom: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+        borderBottom: '1px solid var(--border-color)',
         boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
         gap: 8,
       }}

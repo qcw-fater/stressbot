@@ -25,9 +25,7 @@ interface TreeNode {
   storeMapping?: string;
 }
 
-type SimulateMode =
-  | { kind: 'c2s'; bindings: FieldBind[] }
-  | { kind: 's2c'; store: StoreMapping[] };
+type SimulateMode = { kind: 'c2s'; bindings: FieldBind[] } | { kind: 's2c'; store: StoreMapping[] };
 
 // ── 模拟引擎（只产出有 binding 的字段）──────────────────────
 
@@ -38,7 +36,9 @@ function stripBindings(bindings: FieldBind[], prefix: string): FieldBind[] {
   const pDot = prefix + '.';
   const pBracket = prefix + '[';
   return bindings
-    .filter((fb) => fb.field === prefix || fb.field?.startsWith(pDot) || fb.field?.startsWith(pBracket))
+    .filter(
+      (fb) => fb.field === prefix || fb.field?.startsWith(pDot) || fb.field?.startsWith(pBracket),
+    )
     .map((fb) => {
       if (fb.field === prefix) return { ...fb, field: '' };
       const rest = fb.field!.slice(pDot.length);
@@ -92,9 +92,10 @@ function simulateMessage(msgName: string, mode: SimulateMode, depth = 0): TreeNo
     if (field.kind === 'message' && field.messageName) {
       const childBindings = mode.kind === 'c2s' ? stripBindings(bindings, field.name) : [];
       const childStore = mode.kind === 's2c' ? stripStore(store, field.name) : [];
-      const childMode: SimulateMode = mode.kind === 'c2s'
-        ? { kind: 'c2s', bindings: childBindings }
-        : { kind: 's2c', store: childStore };
+      const childMode: SimulateMode =
+        mode.kind === 'c2s'
+          ? { kind: 'c2s', bindings: childBindings }
+          : { kind: 's2c', store: childStore };
       const result = simulateMessage(field.messageName, childMode, depth + 1);
       if (typeof result === 'string') {
         childNodes = result;
@@ -142,7 +143,9 @@ function simulateMessage(msgName: string, mode: SimulateMode, depth = 0): TreeNo
     if (mode.kind === 's2c') {
       const storeKey = matchStore(store, field.name);
       if (storeKey) {
-        node.storeMapping = storeKey.includes('.') ? `→ state.${storeKey}` : `→ state["${storeKey}"]`;
+        node.storeMapping = storeKey.includes('.')
+          ? `→ state.${storeKey}`
+          : `→ state["${storeKey}"]`;
         if (!node.display) {
           node.display = '（响应字段）';
           node.displayKind = 'placeholder';
@@ -184,7 +187,12 @@ const COLOR_MAP: Record<string, string> = {
   error: 'var(--color-error)',
 };
 
-function TreeNodeRow({ node, depth }: { node: TreeNode; depth: number }) {
+interface TreeNodeRowProps {
+  node: TreeNode;
+  depth: number;
+}
+
+function TreeNodeRow({ node, depth }: TreeNodeRowProps) {
   const indent = depth * 20;
   const hasChildren = node.children && node.children.length > 0;
 
@@ -235,9 +243,7 @@ function TreeNodeRow({ node, depth }: { node: TreeNode; depth: number }) {
       <span style={{ color: 'var(--text-quaternary)', fontSize: 11, marginLeft: 6 }}>
         {node.kind === 'map' ? `map<${node.mapKey}, ${node.mapValue}>` : node.protoType}
       </span>
-      <span style={{ color: COLOR_MAP[node.displayKind], marginLeft: 8 }}>
-        {node.display}
-      </span>
+      <span style={{ color: COLOR_MAP[node.displayKind], marginLeft: 8 }}>{node.display}</span>
       {node.enumValues && (
         <span style={{ color: 'var(--text-quaternary)', fontSize: 11, marginLeft: 4 }}>
           ({Object.keys(node.enumValues).slice(0, 5).join(', ')}
@@ -253,8 +259,14 @@ function TreeNodeRow({ node, depth }: { node: TreeNode; depth: number }) {
   );
 }
 
-function MessageTreeView({ nodes, depth }: { nodes: TreeNode[]; depth: number }) {
-  if (!nodes.length) return <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>（无绑定字段）</div>;
+interface MessageTreeViewProps {
+  nodes: TreeNode[];
+  depth: number;
+}
+
+function MessageTreeView({ nodes, depth }: MessageTreeViewProps) {
+  if (!nodes.length)
+    return <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>（无绑定字段）</div>;
   return (
     <div>
       {nodes.map((n, i) => (
@@ -266,16 +278,31 @@ function MessageTreeView({ nodes, depth }: { nodes: TreeNode[]; depth: number })
 
 // ── setState / httpRequest 简化预览 ─────────────────────────
 
-function FlatBindingsPreview({ bindings }: { bindings: FieldBind[] }) {
-  if (!bindings.length) return <Alert type="info" message="无 bindings" style={{ margin: '8px 0' }} />;
+interface FlatBindingsPreviewProps {
+  bindings: FieldBind[];
+}
+
+function FlatBindingsPreview({ bindings }: FlatBindingsPreviewProps) {
+  if (!bindings.length)
+    return <Alert type="info" message="无 bindings" style={{ margin: '8px 0' }} />;
   return (
     <div style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: 1.8 }}>
       {bindings.map((fb, i) => {
         const result = simulateBinding(fb);
-        const display = result.kind === 'error' ? result.message : result.kind === 'skipped' ? result.reason : (result as { display: string }).display;
-        const color = result.kind === 'error' ? 'var(--color-error)' : result.kind === 'concrete' ? 'var(--color-success)' : 'var(--text-tertiary)';
+        const display =
+          result.kind === 'error'
+            ? result.message
+            : result.kind === 'skipped'
+              ? result.reason
+              : (result as { display: string }).display;
+        const color =
+          result.kind === 'error'
+            ? 'var(--color-error)'
+            : result.kind === 'concrete'
+              ? 'var(--color-success)'
+              : 'var(--text-tertiary)';
         return (
-          <div key={i}>
+          <div key={`${fb.field || '(无字段)'}-${fb.type}#${i}`}>
             <code>{fb.field || '(未指定)'}</code>
             <span style={{ color: 'var(--text-quaternary)', marginLeft: 6 }}>{fb.type}</span>
             <span style={{ color, marginLeft: 8 }}>{display}</span>
@@ -341,13 +368,23 @@ export function ActionPreview({ action }: ActionPreviewProps) {
   );
 }
 
-function C2SPane({ msgName, bindings }: { msgName: string; bindings: FieldBind[] }) {
+interface C2SPaneProps {
+  msgName: string;
+  bindings: FieldBind[];
+}
+
+function C2SPane({ msgName, bindings }: C2SPaneProps) {
   const result = simulateMessage(msgName, { kind: 'c2s', bindings });
   if (typeof result === 'string') return <Alert type="error" message={result} />;
   return <MessageTreeView nodes={result} depth={0} />;
 }
 
-function S2CPane({ msgName, store }: { msgName: string; store: StoreMapping[] }) {
+interface S2CPaneProps {
+  msgName: string;
+  store: StoreMapping[];
+}
+
+function S2CPane({ msgName, store }: S2CPaneProps) {
   const result = simulateMessage(msgName, { kind: 's2c', store });
   if (typeof result === 'string') return <Alert type="error" message={result} />;
   return <MessageTreeView nodes={result} depth={0} />;

@@ -9,7 +9,11 @@
  */
 
 import { Space, Tag } from 'antd';
-import { resolveStateKeyDisplayType, type StateKeyInfo, type StateKeySourceType } from './stateRegistry';
+import {
+  resolveStateKeyDisplayType,
+  type StateKeyInfo,
+  type StateKeySourceType,
+} from './stateRegistry';
 
 export const STATE_SOURCE_LABEL = {
   store: { label: '响应', color: 'blue' },
@@ -26,13 +30,20 @@ export function stateKeyTypeLabel(info: StateKeyInfo): string | undefined {
   return info.builtinType ?? resolveStateKeyDisplayType(info);
 }
 
-export function StateKeyOptionLabel({ info }: { info: StateKeyInfo }) {
+interface StateKeyOptionLabelProps {
+  info: StateKeyInfo;
+}
+
+export function StateKeyOptionLabel({ info }: StateKeyOptionLabelProps) {
   const source = STATE_SOURCE_LABEL[info.sourceType];
   const type = stateKeyTypeLabel(info);
   return (
     <Space size={4}>
       <code style={{ fontSize: 12 }}>{info.key}</code>
-      <Tag color={source.color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>
+      <Tag
+        color={source.color}
+        style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}
+      >
         {source.label}
       </Tag>
       {type && <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>← {type}</span>}

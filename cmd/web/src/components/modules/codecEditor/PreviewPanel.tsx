@@ -60,7 +60,12 @@ type RouteForm = Record<string, string>;
  * hex 文本框：统一 `Input.TextArea`，monospace 小号；placeholder 各自给。
  * 非受控「预览」按钮触发，输入不立即请求。
  */
-function HexInput(props: { value: string; onChange: (v: string) => void; placeholder: string; rows?: number }) {
+function HexInput(props: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  rows?: number;
+}) {
   return (
     <Input.TextArea
       value={props.value}
@@ -141,14 +146,24 @@ function HexOutput(props: { label: string; value: string | undefined }) {
           lineHeight: 1.6,
         }}
       >
-        {val ? formatHexGrouped(val) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>（空）</Typography.Text>}
+        {val ? (
+          formatHexGrouped(val)
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            （空）
+          </Typography.Text>
+        )}
       </div>
     </div>
   );
 }
 
 /** 字段解释表（encode/decode 共用，展示 PreviewField[]）。 */
-function FieldsTable({ fields }: { fields: PreviewField[] | undefined }) {
+interface FieldsTableProps {
+  fields: PreviewField[] | undefined;
+}
+
+function FieldsTable({ fields }: FieldsTableProps) {
   const cols: ColumnsType<PreviewField> = [
     { title: '字段', dataIndex: 'name', key: 'name', render: (v: string) => <code>{v}</code> },
     { title: '值', dataIndex: 'value', key: 'value' },
@@ -156,7 +171,12 @@ function FieldsTable({ fields }: { fields: PreviewField[] | undefined }) {
     { title: '字节', dataIndex: 'size', key: 'size', width: 60 },
   ];
   if (!fields || fields.length === 0) {
-    return <Empty description={<span style={{ fontSize: 12 }}>无字段解释</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    return (
+      <Empty
+        description={<span style={{ fontSize: 12 }}>无字段解释</span>}
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
   }
   return (
     <Table<PreviewField>
@@ -263,7 +283,10 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
               {mode === 'encode' ? (
                 <>
                   <div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    <Typography.Text
+                      type="secondary"
+                      style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+                    >
                       路由字段（role:&quot;route&quot;，数值化取整）
                     </Typography.Text>
                     {routeFields.length === 0 ? (
@@ -274,7 +297,9 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                       <Space size={6} wrap>
                         {routeFields.map((f) => (
                           <Space key={f.name} size={4} align="center">
-                            <Typography.Text code style={{ fontSize: 12 }}>{f.name}</Typography.Text>
+                            <Typography.Text code style={{ fontSize: 12 }}>
+                              {f.name}
+                            </Typography.Text>
                             <Input
                               size="small"
                               style={{ width: 90 }}
@@ -290,7 +315,10 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                     )}
                   </div>
                   <div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    <Typography.Text
+                      type="secondary"
+                      style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+                    >
                       body hex
                     </Typography.Text>
                     <HexInput value={bodyHex} onChange={setBodyHex} placeholder="body hex" />
@@ -298,14 +326,20 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                 </>
               ) : (
                 <div>
-                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  <Typography.Text
+                    type="secondary"
+                    style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+                  >
                     帧 hex（完整帧）
                   </Typography.Text>
                   <HexInput value={frameHex} onChange={setFrameHex} placeholder="粘贴完整帧 hex" />
                 </div>
               )}
               <div>
-                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                <Typography.Text
+                  type="secondary"
+                  style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+                >
                   key hex（可空）
                 </Typography.Text>
                 <HexInput value={keyHex} onChange={setKeyHex} placeholder="key hex，可空" />
@@ -332,7 +366,10 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                   <>
                     <HexOutput label="帧 hex" value={result.frameHex} />
                     <div>
-                      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                      <Typography.Text
+                        type="secondary"
+                        style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+                      >
                         字段解释
                       </Typography.Text>
                       <FieldsTable fields={result.fields} />
@@ -342,8 +379,12 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                   <>
                     {result.routeKey !== undefined && (
                       <div>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>路由键：</Typography.Text>{' '}
-                        <Typography.Text code style={{ fontSize: 12 }}>{result.routeKey || '（空）'}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          路由键：
+                        </Typography.Text>{' '}
+                        <Typography.Text code style={{ fontSize: 12 }}>
+                          {result.routeKey || '（空）'}
+                        </Typography.Text>
                       </div>
                     )}
                     {result.headerErr !== undefined && result.headerErr !== 0 && (
@@ -351,11 +392,18 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                         type="error"
                         showIcon
                         style={{ padding: '4px 12px' }}
-                        message={<span style={{ fontSize: 12 }}>头 errorCode 非 0：<code>{result.headerErr}</code></span>}
+                        message={
+                          <span style={{ fontSize: 12 }}>
+                            头 errorCode 非 0：<code>{result.headerErr}</code>
+                          </span>
+                        }
                       />
                     )}
                     <div>
-                      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                      <Typography.Text
+                        type="secondary"
+                        style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+                      >
                         字段解释
                       </Typography.Text>
                       <FieldsTable fields={result.fields} />

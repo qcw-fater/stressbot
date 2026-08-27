@@ -5,7 +5,12 @@
  */
 
 import { Button, Collapse, Input, Select, Space, Switch, Tag, Tooltip } from 'antd';
-import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import type { CollapseProps } from 'antd';
 import type { BindingType, FieldBind } from '@/types/action';
 import type { ProtoField } from '@/types/proto';
@@ -25,8 +30,31 @@ export interface BindingsTableProps {
 
 const TYPE_GROUPS: { label: string; types: BindingType[] }[] = [
   { label: '固定值', types: ['fixed'] },
-  { label: 'state 取值', types: ['state', 'stateFirst', 'stateRandom', 'stateRandomN', 'stateMapKey', 'stateMapValue', 'listSize'] },
-  { label: '随机', types: ['randomPick', 'randomPickN', 'randomPickMap', 'randomInt', 'randomFloat', 'randomBool', 'randomString', 'randomExclude'] },
+  {
+    label: 'state 取值',
+    types: [
+      'state',
+      'stateFirst',
+      'stateRandom',
+      'stateRandomN',
+      'stateMapKey',
+      'stateMapValue',
+      'listSize',
+    ],
+  },
+  {
+    label: '随机',
+    types: [
+      'randomPick',
+      'randomPickN',
+      'randomPickMap',
+      'randomInt',
+      'randomFloat',
+      'randomBool',
+      'randomString',
+      'randomExclude',
+    ],
+  },
   { label: '复合', types: ['map'] },
 ];
 
@@ -68,70 +96,99 @@ export function BindingsTable({ messageFullName, value, onChange, label }: Bindi
   };
 
   const items: CollapseProps['items'] = list.map((b, i) => {
-    const fieldComment = messageFullName && b.field
-      ? resolveFieldPath(messageFullName, b.field)?.comment
-      : undefined;
+    const fieldComment =
+      messageFullName && b.field ? resolveFieldPath(messageFullName, b.field)?.comment : undefined;
     return {
-    key: String(i),
-    label: (
-      <Space>
-        {fieldComment ? (
-          <Tooltip title={fieldComment} mouseEnterDelay={0.4}>
+      key: String(i),
+      label: (
+        <Space>
+          {fieldComment ? (
+            <Tooltip title={fieldComment} mouseEnterDelay={0.4}>
+              <code>{b.field || '(未指定字段)'}</code>
+            </Tooltip>
+          ) : (
             <code>{b.field || '(未指定字段)'}</code>
+          )}
+          <Tooltip title={BINDING_TYPE_DESC[b.type]} mouseEnterDelay={0.4}>
+            <Tag color="blue">{b.type}</Tag>
           </Tooltip>
-        ) : (
-          <code>{b.field || '(未指定字段)'}</code>
-        )}
-        <Tooltip title={BINDING_TYPE_DESC[b.type]} mouseEnterDelay={0.4}>
-          <Tag color="blue">{b.type}</Tag>
-        </Tooltip>
-        {b.required && <Tooltip title="缺失时报错" mouseEnterDelay={0.4}><Tag color="red">required</Tag></Tooltip>}
-        {b.optional && <Tooltip title="缺失时跳过" mouseEnterDelay={0.4}><Tag color="default">optional</Tag></Tooltip>}
-        {b.wrap && <Tooltip title="单值包成 [v]" mouseEnterDelay={0.4}><Tag color="purple">wrap</Tag></Tooltip>}
-        {b.storeAs && <Tooltip title={`存入 state：${b.storeAs}`} mouseEnterDelay={0.4}><Tag color="green">→ {b.storeAs}</Tag></Tooltip>}
-        {b.condition && <Tooltip title="有条件绑定" mouseEnterDelay={0.4}><Tag color="orange">condition</Tag></Tooltip>}
-      </Space>
-    ),
-    extra: (
-      <Space size={2} onClick={(e) => e.stopPropagation()}>
-        <Button
-          size="small"
-          icon={<ArrowUpOutlined />}
-          disabled={i === 0}
-          onClick={() => moveItem(i, i - 1)}
+          {b.required && (
+            <Tooltip title="缺失时报错" mouseEnterDelay={0.4}>
+              <Tag color="red">required</Tag>
+            </Tooltip>
+          )}
+          {b.optional && (
+            <Tooltip title="缺失时跳过" mouseEnterDelay={0.4}>
+              <Tag color="default">optional</Tag>
+            </Tooltip>
+          )}
+          {b.wrap && (
+            <Tooltip title="单值包成 [v]" mouseEnterDelay={0.4}>
+              <Tag color="purple">wrap</Tag>
+            </Tooltip>
+          )}
+          {b.storeAs && (
+            <Tooltip title={`存入 state：${b.storeAs}`} mouseEnterDelay={0.4}>
+              <Tag color="green">→ {b.storeAs}</Tag>
+            </Tooltip>
+          )}
+          {b.condition && (
+            <Tooltip title="有条件绑定" mouseEnterDelay={0.4}>
+              <Tag color="orange">condition</Tag>
+            </Tooltip>
+          )}
+        </Space>
+      ),
+      extra: (
+        <Space size={2} onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="small"
+            icon={<ArrowUpOutlined />}
+            disabled={i === 0}
+            onClick={() => moveItem(i, i - 1)}
+          />
+          <Button
+            size="small"
+            icon={<ArrowDownOutlined />}
+            disabled={i === list.length - 1}
+            onClick={() => moveItem(i, i + 1)}
+          />
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => set(list.filter((_, j) => j !== i))}
+          />
+        </Space>
+      ),
+      children: (
+        <BindingRow
+          binding={b}
+          allBindings={list}
+          messageFullName={messageFullName}
+          onChange={(next) => {
+            const arr = [...list];
+            arr[i] = next;
+            set(arr);
+          }}
         />
-        <Button
-          size="small"
-          icon={<ArrowDownOutlined />}
-          disabled={i === list.length - 1}
-          onClick={() => moveItem(i, i + 1)}
-        />
-        <Button
-          size="small"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => set(list.filter((_, j) => j !== i))}
-        />
-      </Space>
-    ),
-    children: (
-      <BindingRow
-        binding={b}
-        allBindings={list}
-        messageFullName={messageFullName}
-        onChange={(next) => {
-          const arr = [...list];
-          arr[i] = next;
-          set(arr);
-        }}
-      />
-    ),
-  }});
+      ),
+    };
+  });
 
   return (
     <div style={{ paddingLeft: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <strong>{label ?? 'bindings'} ({list.length})</strong>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
+        <strong>
+          {label ?? 'bindings'} ({list.length})
+        </strong>
         <Button
           size="small"
           icon={<PlusOutlined />}
@@ -145,17 +202,14 @@ export function BindingsTable({ messageFullName, value, onChange, label }: Bindi
   );
 }
 
-function BindingRow({
-  binding,
-  allBindings,
-  messageFullName,
-  onChange,
-}: {
+interface BindingRowProps {
   binding: FieldBind;
   allBindings: FieldBind[];
   messageFullName?: string;
   onChange: (b: FieldBind) => void;
-}) {
+}
+
+function BindingRow({ binding, allBindings, messageFullName, onChange }: BindingRowProps) {
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -187,11 +241,7 @@ function BindingRow({
           style={{ width: 180 }}
         />
       </Space>
-      <BindingTypeForm
-        binding={binding}
-        currentBindings={allBindings}
-        onChange={onChange}
-      />
+      <BindingTypeForm binding={binding} currentBindings={allBindings} onChange={onChange} />
       <BindingCommonAdvancedFields binding={binding} onChange={onChange} />
     </Space>
   );
@@ -203,13 +253,15 @@ function BindingRow({
  * 从 BindingRow 中抽出，便于 SetStateEditor / ClearStateEditor 等状态动作编辑器复用同一份 UI；
  * 控件、label、tooltip 与原内联实现完全一致，普通动作（tcpSend / httpRequest 等）的渲染与行为不变。
  */
+interface BindingCommonAdvancedFieldsProps {
+  binding: FieldBind;
+  onChange: (binding: FieldBind) => void;
+}
+
 export function BindingCommonAdvancedFields({
   binding,
   onChange,
-}: {
-  binding: FieldBind;
-  onChange: (binding: FieldBind) => void;
-}) {
+}: BindingCommonAdvancedFieldsProps) {
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
   return (
     <>
@@ -220,7 +272,9 @@ export function BindingCommonAdvancedFields({
             <Switch
               size="small"
               checked={!!binding.required}
-              onChange={(v) => set({ required: v || undefined, optional: v ? undefined : binding.optional })}
+              onChange={(v) =>
+                set({ required: v || undefined, optional: v ? undefined : binding.optional })
+              }
             />
           </Space>
         </Tooltip>
@@ -230,7 +284,9 @@ export function BindingCommonAdvancedFields({
             <Switch
               size="small"
               checked={!!binding.optional}
-              onChange={(v) => set({ optional: v || undefined, required: v ? undefined : binding.required })}
+              onChange={(v) =>
+                set({ optional: v || undefined, required: v ? undefined : binding.required })
+              }
             />
           </Space>
         </Tooltip>
@@ -257,9 +313,14 @@ export function BindingCommonAdvancedFields({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Tooltip title="运行时先检查条件，不满足则跳过此 binding" mouseEnterDelay={0.4}>
-              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>条件（不满足时跳过本绑定）</span>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                条件（不满足时跳过本绑定）
+              </span>
             </Tooltip>
-            <a onClick={() => set({ condition: undefined })} style={{ color: 'var(--color-error)', fontSize: 11 }}>
+            <a
+              onClick={() => set({ condition: undefined })}
+              style={{ color: 'var(--color-error)', fontSize: 11 }}
+            >
               删除条件
             </a>
           </div>
@@ -283,8 +344,8 @@ export function BindingCommonAdvancedFields({
 function resolveFieldPath(messageFullName: string, path: string): ProtoField | undefined {
   const segments = path
     .split(/[.[\]]/)
-    .map(s => s.replace(/\]$/, ''))
-    .filter(s => s && !/^\d+$/.test(s));
+    .map((s) => s.replace(/\]$/, ''))
+    .filter((s) => s && !/^\d+$/.test(s));
   let currentMsg = messageFullName;
   let field: ProtoField | undefined;
   for (const seg of segments) {

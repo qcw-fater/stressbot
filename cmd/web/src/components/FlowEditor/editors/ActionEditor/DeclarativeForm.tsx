@@ -25,9 +25,14 @@ export interface DeclarativeFormProps {
 export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const { pattern } = action;
   const requestTimeoutSec = useRuntimeStore((s) => s.robotConfig.timeoutSec);
-  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const {
+    connections,
+    loading: connectionsLoading,
+    error: connectionsError,
+  } = useCodecConnections();
   const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
-  const timeoutPlaceholder = pattern === 'tcpRequest' || pattern === 'udpRequest' ? String(requestTimeoutSec || 60) : '60';
+  const timeoutPlaceholder =
+    pattern === 'tcpRequest' || pattern === 'udpRequest' ? String(requestTimeoutSec || 60) : '60';
   const set = (partial: Partial<ActionDef>) => onChange({ ...action, ...partial });
 
   // 用 ProtoBrowser 选 c2sProto / s2cProto（受控模式，不触碰 activePanel）
@@ -41,7 +46,11 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showS2C = patternHas(pattern, ['s2cProto']);
   const showBindings = patternHas(pattern, ['bindings']);
   const showStore = patternHas(pattern, ['store']);
-  const showTimeout = pattern === 'tcpListen' || pattern === 'udpListen' || pattern === 'tcpRequest' || pattern === 'udpRequest';
+  const showTimeout =
+    pattern === 'tcpListen' ||
+    pattern === 'udpListen' ||
+    pattern === 'tcpRequest' ||
+    pattern === 'udpRequest';
   const showURL = pattern === 'httpRequest';
   const showMethod = pattern === 'httpRequest';
   const showContentType = pattern === 'httpRequest';
@@ -173,7 +182,9 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             messageFullName={pattern === 'httpRequest' ? undefined : action.c2sProto}
             value={action.bindings}
             onChange={(v) => set({ bindings: v })}
-            label={pattern === 'httpRequest' ? 'bindings（请求体字段）' : 'bindings（C2S 字段绑定）'}
+            label={
+              pattern === 'httpRequest' ? 'bindings（请求体字段）' : 'bindings（C2S 字段绑定）'
+            }
           />
         </div>
       )}
@@ -184,7 +195,9 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             s2cProto={pattern === 'httpRequest' ? undefined : action.s2cProto}
             value={action.store}
             onChange={(v) => set({ store: v })}
-            label={pattern === 'httpRequest' ? 'store（JSON 响应 → state）' : 'store（S2C → state）'}
+            label={
+              pattern === 'httpRequest' ? 'store（JSON 响应 → state）' : 'store（S2C → state）'
+            }
           />
         </div>
       )}
@@ -202,15 +215,30 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
                 onChange={(v) => set({ timeout: (v as number) ?? undefined })}
                 style={{ width: 120 }}
               />
-              <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '0 6px 6px 0', fontSize: 13 }}>s</span>
+              <span
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0 8px',
+                  background: 'var(--container-bg)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '0 6px 6px 0',
+                  fontSize: 13,
+                }}
+              >
+                s
+              </span>
             </Space.Compact>
           </Space>
         </Form.Item>
       )}
 
       {(pattern === 'tcpListen' || pattern === 'udpListen') && (
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: -8, marginBottom: 16 }}>
-          listen 由消息事件直接唤醒；此 route 必须在之前节点的 listenRefs 中预注册（listen=null），否则运行时会超时
+        <div
+          style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: -8, marginBottom: 16 }}
+        >
+          listen 由消息事件直接唤醒；此 route 必须在之前节点的 listenRefs
+          中预注册（listen=null），否则运行时会超时
         </div>
       )}
 
@@ -255,13 +283,15 @@ function patternHas(pattern: ActionPattern, fields: Array<keyof ActionDef>): boo
   return fields.some((f) => allowed.includes(f));
 }
 
-function ProtoHint({ fullName }: { fullName?: string }) {
+interface ProtoHintProps {
+  fullName?: string;
+}
+
+function ProtoHint({ fullName }: ProtoHintProps) {
   if (!fullName || !protoRegistry.isLoaded()) return null;
   const msg = protoRegistry.lookupMessage(fullName);
   if (!msg?.comment) return null;
   return (
-    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-      {msg.comment}
-    </div>
+    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>{msg.comment}</div>
   );
 }

@@ -40,9 +40,12 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
     return value.startsWith('state:') ? value.slice(6) : value;
   }, [value]);
 
-  const setTail = useCallback((t: string) => {
-    onChange?.(t ? 'state:' + t : '');
-  }, [onChange]);
+  const setTail = useCallback(
+    (t: string) => {
+      onChange?.(t ? 'state:' + t : '');
+    },
+    [onChange],
+  );
 
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSearch, setBrowseSearch] = useState('');
@@ -58,24 +61,27 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
     return allKeys.filter((k) => k.key.toLowerCase().includes(lower));
   }, [allKeys, browseSearch]);
 
-  const insertKeyAtCursor = useCallback((key: string) => {
-    const input = inputRef.current?.input;
-    if (!input) {
-      setTail(tail + key);
-      return;
-    }
-    const start = input.selectionStart ?? tail.length;
-    const end = input.selectionEnd ?? tail.length;
-    const newTail = tail.slice(0, start) + key + tail.slice(end);
-    setTail(newTail);
-    setBrowseOpen(false);
-    setBrowseSearch('');
-    requestAnimationFrame(() => {
-      const pos = start + key.length;
-      input.setSelectionRange(pos, pos);
-      input.focus();
-    });
-  }, [tail, setTail]);
+  const insertKeyAtCursor = useCallback(
+    (key: string) => {
+      const input = inputRef.current?.input;
+      if (!input) {
+        setTail(tail + key);
+        return;
+      }
+      const start = input.selectionStart ?? tail.length;
+      const end = input.selectionEnd ?? tail.length;
+      const newTail = tail.slice(0, start) + key + tail.slice(end);
+      setTail(newTail);
+      setBrowseOpen(false);
+      setBrowseSearch('');
+      requestAnimationFrame(() => {
+        const pos = start + key.length;
+        input.setSelectionRange(pos, pos);
+        input.focus();
+      });
+    },
+    [tail, setTail],
+  );
 
   const toggleExpand = useCallback((path: string) => {
     setExpanded((prev) => ({ ...prev, [path]: !prev[path] }));
@@ -133,14 +139,13 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
           overlayStyle={{ zIndex: popupZ }}
         >
           <Tooltip title="浏览已有 state key 并插入到表达式">
-            <Button icon={<SearchOutlined />}>
-              浏览
-            </Button>
+            <Button icon={<SearchOutlined />}>浏览</Button>
           </Tooltip>
         </Popover>
       </div>
       <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-        示例：<code>alive</code>（布尔字段）、<code>hp &gt; 0</code>（比较）、<code>index % 2 == 0</code>（算术）、<code>role == "member"</code>（文字值需加双引号）；
+        示例：<code>alive</code>（布尔字段）、<code>hp &gt; 0</code>（比较）、
+        <code>index % 2 == 0</code>（算术）、<code>role == "member"</code>（文字值需加双引号）；
         可用 <code>&&</code>（并且）、<code>||</code>（或者）、<code>!</code>（取反）与括号组合
       </div>
       {previewNodes && previewNodes.length > 0 && (
@@ -148,7 +153,7 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
           style={{
             marginTop: 4,
             padding: '4px 8px',
-            background: 'var(--hover-bg, rgba(0,0,0,0.02))',
+            background: 'var(--hover-bg)',
             borderRadius: 4,
             fontSize: 11,
             lineHeight: '20px',
@@ -187,11 +192,12 @@ function shortFieldType(field: ProtoField): string {
     const val = field.messageName?.split('.').pop() ?? field.mapValue ?? field.type;
     return `map<${field.mapKey}, ${val}>`;
   }
-  const base = field.kind === 'message'
-    ? field.messageName?.split('.').pop() ?? field.type
-    : field.kind === 'enum'
-      ? field.enumName?.split('.').pop() ?? field.type
-      : field.type;
+  const base =
+    field.kind === 'message'
+      ? (field.messageName?.split('.').pop() ?? field.type)
+      : field.kind === 'enum'
+        ? (field.enumName?.split('.').pop() ?? field.type)
+        : field.type;
   return field.repeated ? `${base}[]` : base;
 }
 
@@ -200,10 +206,7 @@ function StateKeyRow({ keyInfo, expanded, onToggleExpand, onInsert }: StateKeyRo
   const isExpanded = expanded[keyInfo.key] ?? false;
 
   // 获取子字段列表
-  const subFields = useMemo(
-    () => resolveSubFields(keyInfo),
-    [keyInfo],
-  );
+  const subFields = useMemo(() => resolveSubFields(keyInfo), [keyInfo]);
 
   const hasChildren = subFields !== null && subFields.length > 0;
 
@@ -219,12 +222,15 @@ function StateKeyRow({ keyInfo, expanded, onToggleExpand, onInsert }: StateKeyRo
           gap: 6,
           fontSize: 12,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg, rgba(0,0,0,0.04))')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
         {/* 展开箭头或占位 */}
         <span
-          onClick={(e) => { e.stopPropagation(); if (hasChildren) onToggleExpand(keyInfo.key); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasChildren) onToggleExpand(keyInfo.key);
+          }}
           style={{
             width: 16,
             height: 16,
@@ -238,7 +244,11 @@ function StateKeyRow({ keyInfo, expanded, onToggleExpand, onInsert }: StateKeyRo
         >
           {hasChildren && (
             <RightOutlined
-              style={{ fontSize: 9, transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              style={{
+                fontSize: 9,
+                transition: 'transform 0.15s',
+                transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
             />
           )}
         </span>
@@ -262,17 +272,19 @@ function StateKeyRow({ keyInfo, expanded, onToggleExpand, onInsert }: StateKeyRo
         </span>
       </div>
       {/* 展开的子字段 */}
-      {isExpanded && subFields && subFields.map((f) => (
-        <FieldRow
-          key={f.name}
-          field={f}
-          pathPrefix={`${keyInfo.key}.${f.name}`}
-          expanded={expanded}
-          onToggleExpand={onToggleExpand}
-          onInsert={onInsert}
-          depth={1}
-        />
-      ))}
+      {isExpanded &&
+        subFields &&
+        subFields.map((f) => (
+          <FieldRow
+            key={f.name}
+            field={f}
+            pathPrefix={`${keyInfo.key}.${f.name}`}
+            expanded={expanded}
+            onToggleExpand={onToggleExpand}
+            onInsert={onInsert}
+            depth={1}
+          />
+        ))}
     </>
   );
 }
@@ -318,12 +330,15 @@ function FieldRow({ field, pathPrefix, expanded, onToggleExpand, onInsert, depth
           gap: 6,
           fontSize: 12,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg, rgba(0,0,0,0.04))')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
         {/* 展开箭头 */}
         <span
-          onClick={(e) => { e.stopPropagation(); if (canExpand && childFields && childFields.length > 0) onToggleExpand(pathPrefix); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (canExpand && childFields && childFields.length > 0) onToggleExpand(pathPrefix);
+          }}
           style={{
             width: 16,
             height: 16,
@@ -337,7 +352,11 @@ function FieldRow({ field, pathPrefix, expanded, onToggleExpand, onInsert, depth
         >
           {canExpand && childFields && childFields.length > 0 && (
             <RightOutlined
-              style={{ fontSize: 9, transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              style={{
+                fontSize: 9,
+                transition: 'transform 0.15s',
+                transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
             />
           )}
         </span>
@@ -347,25 +366,26 @@ function FieldRow({ field, pathPrefix, expanded, onToggleExpand, onInsert, depth
           style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <code style={{ whiteSpace: 'nowrap' }}>
-            {field.name}{field.repeated ? '[]' : ''}
+            {field.name}
+            {field.repeated ? '[]' : ''}
           </code>
-          <span style={{ fontSize: 10, color: 'var(--text-terti)' }}>
-            {shortFieldType(field)}
-          </span>
+          <span style={{ fontSize: 10, color: 'var(--text-terti)' }}>{shortFieldType(field)}</span>
         </span>
       </div>
       {/* 展开的子字段 */}
-      {isExpanded && childFields && childFields.map((f) => (
-        <FieldRow
-          key={f.name}
-          field={f}
-          pathPrefix={`${pathPrefix}${field.repeated ? '[0]' : ''}.${f.name}`}
-          expanded={expanded}
-          onToggleExpand={onToggleExpand}
-          onInsert={onInsert}
-          depth={depth + 1}
-        />
-      ))}
+      {isExpanded &&
+        childFields &&
+        childFields.map((f) => (
+          <FieldRow
+            key={f.name}
+            field={f}
+            pathPrefix={`${pathPrefix}${field.repeated ? '[0]' : ''}.${f.name}`}
+            expanded={expanded}
+            onToggleExpand={onToggleExpand}
+            onInsert={onInsert}
+            depth={depth + 1}
+          />
+        ))}
     </>
   );
 }

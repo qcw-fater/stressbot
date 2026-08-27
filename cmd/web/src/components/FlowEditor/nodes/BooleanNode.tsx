@@ -56,7 +56,15 @@ export function BooleanNode({ id, data, selected }: NodeProps) {
       >
         {node.condition ? (
           <Tooltip title={conditionTitle} mouseEnterDelay={0.4}>
-            <div style={{ fontFamily: 'monospace', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div
+              style={{
+                fontFamily: 'monospace',
+                fontSize: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
               <ConditionDisplay condition={node.condition} />
             </div>
           </Tooltip>
@@ -81,12 +89,19 @@ export function BooleanNode({ id, data, selected }: NodeProps) {
 }
 
 /** 条件文本显示组件 */
-function ConditionDisplay({ condition }: { condition: string }) {
+interface ConditionDisplayProps {
+  condition: string;
+}
+
+function ConditionDisplay({ condition }: ConditionDisplayProps) {
   const { display, tag } = formatCondition(condition);
   const tagColor = tag === 'lua' ? 'purple' : 'blue';
   return (
     <>
-      <Tag color={tagColor} style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: 0, flexShrink: 0 }}>
+      <Tag
+        color={tagColor}
+        style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: 0, flexShrink: 0 }}
+      >
         {tag}
       </Tag>
       {trim(display, 28)}

@@ -8,7 +8,12 @@
 
 import type { CSSProperties } from 'react';
 import { Button, Collapse, Space, type CollapseProps } from 'antd';
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { ConditionInput } from './shared/ConditionInput';
 import { NodeIdSelect } from './shared/NodeIdSelect';
 import { useFlowStore } from '../store/flowStore';
@@ -108,7 +113,14 @@ export function SwitchEditor({ nodeId }: SwitchEditorProps) {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
         <strong>分支条件（{cases.length}）</strong>
         <Button
           icon={<PlusOutlined />}
@@ -127,7 +139,9 @@ export function SwitchEditor({ nodeId }: SwitchEditorProps) {
           defaultActiveKey={cases.length <= 3 ? cases.map((_, i) => String(i)) : []}
         />
       ) : (
-        <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 16, textAlign: 'center' }}>
+        <div
+          style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 16, textAlign: 'center' }}
+        >
           尚无分支，点击「添加分支」
         </div>
       )}
@@ -137,11 +151,13 @@ export function SwitchEditor({ nodeId }: SwitchEditorProps) {
           marginTop: 12,
           padding: 10,
           borderRadius: 6,
-          background: 'var(--hover-bg, rgba(0,0,0,0.03))',
-          border: '1px dashed var(--border-color, rgba(0,0,0,0.12))',
+          background: 'var(--hover-bg)',
+          border: '1px dashed var(--border-color)',
         }}
       >
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4 }}>默认分支（可选，推荐）</div>
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4 }}>
+          默认分支（可选，推荐）
+        </div>
         <NodeIdSelect
           value={node.defaultNext || undefined}
           onChange={(v) => updateNode(nodeId, { defaultNext: v ?? '' })}

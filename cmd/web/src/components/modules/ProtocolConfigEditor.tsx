@@ -8,7 +8,13 @@
  * - 内嵌「新建 / 复制连接」Modal 走 floatingWindowStore zIndex 合规 pattern（浮窗基线 1000+，内嵌 Modal 更高）。
  */
 
-import { CopyOutlined, DeleteOutlined, InboxOutlined, PlusOutlined, CloudDownloadOutlined } from '@ant-design/icons';
+import {
+  CopyOutlined,
+  DeleteOutlined,
+  InboxOutlined,
+  PlusOutlined,
+  CloudDownloadOutlined,
+} from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
@@ -132,9 +138,15 @@ export function ProtocolConfigEditor() {
     if (section !== 'errors') return;
     let cancelled = false;
     getErrorCodes()
-      .then((codes) => { if (!cancelled) setFrameworkCodes(codes); })
-      .catch(() => { if (!cancelled) setFrameworkCodes([]); });
-    return () => { cancelled = true; };
+      .then((codes) => {
+        if (!cancelled) setFrameworkCodes(codes);
+      })
+      .catch(() => {
+        if (!cancelled) setFrameworkCodes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [section]);
 
   // 结构化视图：把 content 解析为 raw（lossless）+ schema（typed 视图）+ error。
@@ -286,7 +298,11 @@ export function ProtocolConfigEditor() {
   };
 
   const submitCreate = async () => {
-    const err = validateCodecCreateInput(createProtocol, createService, files.map((f) => f.name));
+    const err = validateCodecCreateInput(
+      createProtocol,
+      createService,
+      files.map((f) => f.name),
+    );
     if (err) {
       message.error(err);
       return;
@@ -360,7 +376,9 @@ export function ProtocolConfigEditor() {
         return;
       }
       if (errorMapErrors.length > 0) {
-        message.error(`errors.json 有 ${errorMapErrors.length} 处错误（含 < 100 或重复码），无法保存`);
+        message.error(
+          `errors.json 有 ${errorMapErrors.length} 处错误（含 < 100 或重复码），无法保存`,
+        );
         return;
       }
       try {
@@ -418,7 +436,9 @@ export function ProtocolConfigEditor() {
       }
       const errs = validateErrorMap(parseErrorMapSafe(text));
       if (errs.length > 0) {
-        message.error(`错误码映射未通过校验，已拒绝导入（共 ${errs.length} 处问题）：${errs[0].message}`);
+        message.error(
+          `错误码映射未通过校验，已拒绝导入（共 ${errs.length} 处问题）：${errs[0].message}`,
+        );
         return false;
       }
       await setErrorMap(text);
@@ -569,17 +589,25 @@ export function ProtocolConfigEditor() {
                 onChange={handleSwitch}
                 options={selectOptions}
               />
-              <Typography.Text code className="pce-target-name">{activeLabel}</Typography.Text>
+              <Typography.Text code className="pce-target-name">
+                {activeLabel}
+              </Typography.Text>
             </>
           ) : (
             <>
               <Typography.Text className="pce-target-kicker">共享对象</Typography.Text>
-              <Typography.Text code className="pce-target-name">errors.json</Typography.Text>
+              <Typography.Text code className="pce-target-name">
+                errors.json
+              </Typography.Text>
             </>
           )}
           <span className="pce-source-label">
             {source ?? '尚未加载'}
-            {isDirty && <Typography.Text type="danger" style={{ marginLeft: 6 }}>· 未保存</Typography.Text>}
+            {isDirty && (
+              <Typography.Text type="danger" style={{ marginLeft: 6 }}>
+                · 未保存
+              </Typography.Text>
+            )}
           </span>
         </div>
 
@@ -588,13 +616,30 @@ export function ProtocolConfigEditor() {
             <>
               <div className="pce-cmdbar-group">
                 <Tooltip title="新建连接（选择 protocol，填写 service）">
-                  <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
+                  <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>
+                    新建
+                  </Button>
                 </Tooltip>
                 <Tooltip title="复制当前连接为新连接">
-                  <Button size="small" icon={<CopyOutlined />} disabled={activeConn === null} onClick={() => openCreate('copy')}>复制</Button>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    disabled={activeConn === null}
+                    onClick={() => openCreate('copy')}
+                  >
+                    复制
+                  </Button>
                 </Tooltip>
                 <Tooltip title="删除当前连接">
-                  <Button size="small" danger icon={<DeleteOutlined />} disabled={activeConn === null} onClick={() => activeConn && handleDelete(activeConn)}>删除</Button>
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={activeConn === null}
+                    onClick={() => activeConn && handleDelete(activeConn)}
+                  >
+                    删除
+                  </Button>
                 </Tooltip>
               </div>
               <span className="pce-cmdbar-divider" />
@@ -602,16 +647,43 @@ export function ProtocolConfigEditor() {
           )}
           <div className="pce-cmdbar-group">
             <Tooltip title="从服务器拉取全部协议配置到本地">
-              <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={() => confirmIfDirty(onPullBaseline)}>从基线载入</Button>
+              <Button
+                size="small"
+                icon={<CloudDownloadOutlined />}
+                loading={pullingBaseline}
+                onClick={() => confirmIfDirty(onPullBaseline)}
+              >
+                从基线载入
+              </Button>
             </Tooltip>
             <Upload accept=".json,application/json" beforeUpload={onUpload} showUploadList={false}>
-              <Button icon={<InboxOutlined />} size="small" disabled={section === 'codec' && activeConn === null}>导入</Button>
+              <Button
+                icon={<InboxOutlined />}
+                size="small"
+                disabled={section === 'codec' && activeConn === null}
+              >
+                导入
+              </Button>
             </Upload>
           </div>
           <span className="pce-cmdbar-divider" />
           <div className="pce-cmdbar-group">
-            <Button onClick={onSave} type="primary" size="small" disabled={section === 'codec' && activeConn === null}>保存</Button>
-            <Button onClick={onClear} danger size="small" disabled={section === 'codec' && activeConn === null}>清空</Button>
+            <Button
+              onClick={onSave}
+              type="primary"
+              size="small"
+              disabled={section === 'codec' && activeConn === null}
+            >
+              保存
+            </Button>
+            <Button
+              onClick={onClear}
+              danger
+              size="small"
+              disabled={section === 'codec' && activeConn === null}
+            >
+              清空
+            </Button>
           </div>
           {!isErrorsView && (
             <Segmented
@@ -627,27 +699,37 @@ export function ProtocolConfigEditor() {
         </div>
       </div>
 
-      <div className={`pce-status${liveErrors.length > 0 || loadError || fileListError ? ' pce-status-warn' : ''}`}>
+      <div
+        className={`pce-status${liveErrors.length > 0 || loadError || fileListError ? ' pce-status-warn' : ''}`}
+      >
         <Typography.Text className="pce-status-title">
           {fileListError ? '协议配置文件名非法' : loadError ? '配置文件不存在' : validationSummary}
         </Typography.Text>
         <Typography.Text className="pce-status-note">
-          {fileListError ? fileListError : loadError ? '请新建连接或从基线载入。' : '协议配置启动任务时随连接配置一起下发。'}
+          {fileListError
+            ? fileListError
+            : loadError
+              ? '请新建连接或从基线载入。'
+              : '协议配置启动任务时随连接配置一起下发。'}
         </Typography.Text>
         {section === 'codec' && liveErrors.length > 1 && (
           <Collapse
             ghost
             size="small"
             className="pce-status-details"
-            items={[{
-              key: 'errors',
-              label: `查看全部 ${liveErrors.length} 处问题`,
-              children: (
-                <ul className="pce-status-list">
-                  {liveErrors.map((e, i) => <li key={i}>{e}</li>)}
-                </ul>
-              ),
-            }]}
+            items={[
+              {
+                key: 'errors',
+                label: `查看全部 ${liveErrors.length} 处问题`,
+                children: (
+                  <ul className="pce-status-list">
+                    {liveErrors.map((e, i) => (
+                      <li key={`${e}#${i}`}>{e}</li>
+                    ))}
+                  </ul>
+                ),
+              },
+            ]}
           />
         )}
       </div>
@@ -660,11 +742,45 @@ export function ProtocolConfigEditor() {
             className="pce-tabs"
             defaultActiveKey="frame"
             items={[
-              { key: 'frame', label: '帧布局', children: <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
-              { key: 'pipeline', label: '管线', children: <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
-              { key: 'route', label: '路由键', children: <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
-              { key: 'heartbeat', label: '心跳', children: <HeartbeatEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
-              { key: 'preview', label: '预览', children: <PreviewPanel raw={parsed.raw} schema={parsed.schema} transport={deriveTransport(activeConn)} /> },
+              {
+                key: 'frame',
+                label: '帧布局',
+                children: (
+                  <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+                ),
+              },
+              {
+                key: 'pipeline',
+                label: '管线',
+                children: (
+                  <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+                ),
+              },
+              {
+                key: 'route',
+                label: '路由键',
+                children: (
+                  <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+                ),
+              },
+              {
+                key: 'heartbeat',
+                label: '心跳',
+                children: (
+                  <HeartbeatEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+                ),
+              },
+              {
+                key: 'preview',
+                label: '预览',
+                children: (
+                  <PreviewPanel
+                    raw={parsed.raw}
+                    schema={parsed.schema}
+                    transport={deriveTransport(activeConn)}
+                  />
+                ),
+              },
             ]}
           />
         ) : (
@@ -683,7 +799,9 @@ export function ProtocolConfigEditor() {
                 value={content}
                 onChange={(next) => {
                   setContent(next);
-                  setErrorMapErrors(validateErrorMap(parseErrorMapSafe(next)).map((e) => e.message));
+                  setErrorMapErrors(
+                    validateErrorMap(parseErrorMapSafe(next)).map((e) => e.message),
+                  );
                 }}
                 frameworkCodes={frameworkCodes}
               />
@@ -720,7 +838,8 @@ export function ProtocolConfigEditor() {
         styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       >
         <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-          请选择 <code>protocol</code>，并填写 <code>service</code>。service 不能为空，且不能包含 <code>:</code> 或 <code>_</code>。
+          请选择 <code>protocol</code>，并填写 <code>service</code>。service 不能为空，且不能包含{' '}
+          <code>:</code> 或 <code>_</code>。
         </Typography.Paragraph>
         <Space.Compact style={{ width: '100%' }}>
           <Select

@@ -84,19 +84,15 @@ export function FrameScalars({ raw, schema, onEdit }: FrameScalarsProps) {
   );
 }
 
-function LabeledNumber({
-  label,
-  tooltip,
-  value,
-  min,
-  onChange,
-}: {
+interface LabeledNumberProps {
   label: string;
   tooltip?: string;
   value: number;
   min?: number;
   onChange: (v: number | null) => void;
-}) {
+}
+
+function LabeledNumber({ label, tooltip, value, min, onChange }: LabeledNumberProps) {
   const labelNode = (
     <Typography.Text type="secondary" className="frame-control-label">
       {label}

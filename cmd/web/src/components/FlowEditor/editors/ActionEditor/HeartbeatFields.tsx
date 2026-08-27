@@ -10,7 +10,12 @@
  */
 
 import { Button, Input, InputNumber, Select, Space, Table, Tooltip } from 'antd';
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import type { HeartbeatField, HeartbeatFieldType, HeartbeatFieldSource } from '@/types/action';
 import { ALL_HEARTBEAT_FIELD_TYPES } from '@/types/action';
 
@@ -50,8 +55,17 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{label ?? 'heartbeatFields（小端二进制布局）'}</span>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          {label ?? 'heartbeatFields（小端二进制布局）'}
+        </span>
         <Button size="small" icon={<PlusOutlined />} onClick={() => set([...list, emptyField()])}>
           添加字段
         </Button>
@@ -141,26 +155,38 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
         ]}
       />
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-        字段按顺序以小端字节序拼接。source=fixed 填 value（f32/f64 填 floatValue）；state/stateCounter 填 key；randomInt 填 min/max。
+        字段按顺序以小端字节序拼接。source=fixed 填 value（f32/f64 填
+        floatValue）；state/stateCounter 填 key；randomInt 填 min/max。
       </div>
     </div>
   );
 }
 
 /** 按 source 动态展示配套字段。 */
-function SourceParams({ field, onChange }: { field: HeartbeatField; onChange: (p: Partial<HeartbeatField>) => void }) {
+interface SourceParamsProps {
+  field: HeartbeatField;
+  onChange: (p: Partial<HeartbeatField>) => void;
+}
+
+function SourceParams({ field, onChange }: SourceParamsProps) {
   switch (field.source) {
     case 'fixed': {
       // f32/f64 走 floatValue（支持小数）；整型走 value。两者同属 source=fixed，按 type 切换绑定字段。
       const isFloat = field.type === 'f32' || field.type === 'f64';
       return (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{isFloat ? 'floatValue' : 'value'}</span>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
+            {isFloat ? 'floatValue' : 'value'}
+          </span>
           <InputNumber
             size="small"
             value={isFloat ? field.floatValue : field.value}
             onChange={(v) =>
-              onChange(isFloat ? { floatValue: (v as number) ?? undefined } : { value: (v as number) ?? undefined })
+              onChange(
+                isFloat
+                  ? { floatValue: (v as number) ?? undefined }
+                  : { value: (v as number) ?? undefined },
+              )
             }
             step={isFloat ? 0.1 : 1}
             style={{ width: 140 }}

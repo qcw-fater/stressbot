@@ -17,7 +17,12 @@
  */
 
 import { Alert, AutoComplete, App as AntApp, Button, Space, Tag, Upload } from 'antd';
-import { CloudDownloadOutlined, ImportOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
+import {
+  CloudDownloadOutlined,
+  ImportOutlined,
+  SaveOutlined,
+  UndoOutlined,
+} from '@ant-design/icons';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -228,8 +233,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
     URL.revokeObjectURL(url);
   };
 
-  const expectedSig =
-    mode === 'listen' ? 'function on_message(r, msg)' : 'function execute(r)';
+  const expectedSig = mode === 'listen' ? 'function on_message(r, msg)' : 'function execute(r)';
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const warnCount = issues.filter((i) => i.severity === 'warning').length;
   const lintFallbackWarn = issues.length === 0 && !content.includes(expectedSig);
@@ -283,7 +287,9 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}
+      >
         <Space size={8} wrap>
           <span>脚本文件：</span>
           <AutoComplete
@@ -297,9 +303,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
               (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
             }
           />
-          {script?.trim() && !script.trim().endsWith('.lua') && (
-            <Tag color="purple">.lua</Tag>
-          )}
+          {script?.trim() && !script.trim().endsWith('.lua') && <Tag color="purple">.lua</Tag>}
           <Upload accept=".lua" beforeUpload={onImport} showUploadList={false}>
             <Button icon={<ImportOutlined />} size="small">
               导入
@@ -374,7 +378,9 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
               </span>
             )}
             {warnCount > 0 && (
-              <span style={{ marginLeft: 8, color: 'var(--color-warning)' }}>· {warnCount} 个警告</span>
+              <span style={{ marginLeft: 8, color: 'var(--color-warning)' }}>
+                · {warnCount} 个警告
+              </span>
             )}
           </span>
         }
@@ -382,7 +388,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
           issues.length > 0 ? (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11 }}>
               {issues.slice(0, 5).map((it, i) => (
-                <li key={i}>
+                <li key={`${it.source}:${it.line}:${it.message}#${i}`}>
                   <code>L{it.line}</code> [{it.source}] {it.message}
                 </li>
               ))}
@@ -422,7 +428,8 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
       {/* 抹除 lintWarn 未使用警告（仅作为兜底状态） */}
       <span style={{ display: 'none' }}>{lintWarn ? '1' : '0'}</span>
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>
-        编辑后点击「保存到本地」或按 Ctrl+S 保存。启动任务时会随流程一起提交。如需同步到代码仓库，请用「下载当前内容」导出。
+        编辑后点击「保存到本地」或按 Ctrl+S
+        保存。启动任务时会随流程一起提交。如需同步到代码仓库，请用「下载当前内容」导出。
       </div>
     </div>
   );

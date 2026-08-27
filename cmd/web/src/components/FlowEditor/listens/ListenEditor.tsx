@@ -135,21 +135,41 @@ export function ListenEditor() {
               还原修改
             </Button>
           </Popconfirm>
-          <Button onClick={handleClose}>
-            关闭
-          </Button>
+          <Button onClick={handleClose}>关闭</Button>
         </Space>
       }
     >
       <Space style={{ width: '100%', marginBottom: 12, justifyContent: 'space-between' }}>
         <Space.Compact style={{ width: 360 }}>
-          <span style={{ display: 'flex', alignItems: 'center', padding: '0 11px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '6px 0 0 6px', fontSize: 14, whiteSpace: 'nowrap' }}>名称</span>
-          <Input style={{ flex: 1 }} value={draftName} onChange={(e) => setDraftName(e.target.value)} />
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 11px',
+              background: 'var(--container-bg)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px 0 0 6px',
+              fontSize: 14,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            名称
+          </span>
+          <Input
+            style={{ flex: 1 }}
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+          />
           <Button onClick={onApplyRename} disabled={draftName === listenName || !draftName}>
             重命名
           </Button>
         </Space.Compact>
-        <SaveTemplateButton kind="listen" name={listenName} data={listen} description={listen.description} />
+        <SaveTemplateButton
+          kind="listen"
+          name={listenName}
+          data={listen}
+          description={listen.description}
+        />
       </Space>
 
       <Input.TextArea
@@ -224,15 +244,13 @@ export function ListenEditor() {
   );
 }
 
-function DeclarativeListenBody({
-  value,
-  onChange,
-  onOpenProto,
-}: {
+interface DeclarativeListenBodyProps {
   value: ListenDef;
   onChange: (v: ListenDef) => void;
   onOpenProto: () => void;
-}) {
+}
+
+function DeclarativeListenBody({ value, onChange, onOpenProto }: DeclarativeListenBodyProps) {
   return (
     <div>
       <div style={{ marginBottom: 12 }}>

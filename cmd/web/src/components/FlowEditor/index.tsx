@@ -90,7 +90,6 @@ function FlowEditorInner({
 
   useEffect(() => {
     // 启动时全量加载 proto：先尝试 vite 中间件 /conf/proto/*，失败再用编译期 glob 兜底
-    console.log('[FlowEditor] 触发 proto 加载…');
     void loadProtos({ kind: 'static' });
   }, [loadProtos]);
 
@@ -228,7 +227,7 @@ function FlowEditorInner({
               <div
                 style={{
                   width: 240,
-                  borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+                  borderRight: '1px solid var(--border-color)',
                   background: 'var(--bg-panel)',
                 }}
               >

@@ -60,12 +60,18 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
             const { display, tag } = formatCondition(c.condition ?? '');
             const title = `${tag}:${display}`;
             return (
-              <Tooltip key={i} title={title} mouseEnterDelay={0.4}>
+              <Tooltip key={`${c.condition ?? ''}#${i}`} title={title} mouseEnterDelay={0.4}>
                 <div className="row-item">
                   <span className="row-index">{i + 1}.</span>
                   <Tag
                     color={tag === 'lua' ? 'purple' : 'blue'}
-                    style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: 0, flexShrink: 0 }}
+                    style={{
+                      fontSize: 9,
+                      lineHeight: '14px',
+                      padding: '0 3px',
+                      margin: 0,
+                      flexShrink: 0,
+                    }}
                   >
                     {tag || 'state'}
                   </Tag>
@@ -78,7 +84,10 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
           {/* 拖线续接 case：从右侧虚线 case-add handle 拖到目标节点 → 追加 case */}
           <Tooltip title="从右侧虚线 handle 拖线到目标节点 → 追加 case" mouseEnterDelay={0.4}>
             <div className="row-item row-item-add">
-              <span className="row-name" style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+              <span
+                className="row-name"
+                style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}
+              >
                 + 拖线续接…
               </span>
             </div>
@@ -86,12 +95,16 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
         </div>
         {/* default 分支页脚：目标节点 + 底部 handle */}
         <Tooltip
-          title={node.defaultNext ? `default → ${node.defaultNext}` : '从底部 handle 拖线到目标 → 设置默认分支'}
+          title={
+            node.defaultNext
+              ? `default → ${node.defaultNext}`
+              : '从底部 handle 拖线到目标 → 设置默认分支'
+          }
           mouseEnterDelay={0.4}
         >
           <div
             className="row-item"
-            style={{ borderTop: '1px dashed var(--border-color, rgba(0,0,0,0.12))', marginTop: 3, paddingTop: 3 }}
+            style={{ borderTop: '1px dashed var(--border-color)', marginTop: 3, paddingTop: 3 }}
           >
             <span className="row-index">↳</span>
             <span
@@ -112,7 +125,7 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
       </NodeShell>
       {cases.map((_, i) => (
         <Handle
-          key={i}
+          key={`case-${i}`}
           type="source"
           position={Position.Right}
           id={`case-${i}`}
@@ -120,7 +133,10 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
         />
       ))}
       {/* case-add：拖线到目标 → 追加 case（condition 默认 state:，进编辑面板再填） */}
-      <Tooltip title="拖线到目标节点 → 追加 case（默认条件 state:，可在编辑面板修改）" mouseEnterDelay={0.4}>
+      <Tooltip
+        title="拖线到目标节点 → 追加 case（默认条件 state:，可在编辑面板修改）"
+        mouseEnterDelay={0.4}
+      >
         <Handle
           type="source"
           position={Position.Right}
@@ -134,4 +150,3 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
     </>
   );
 }
-

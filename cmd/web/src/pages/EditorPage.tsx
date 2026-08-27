@@ -64,26 +64,23 @@ const LazyActiveTaskGuardModal = lazy(() =>
 import type { TaskBrief, TaskDetail } from '@/types/api';
 
 /** 只读重型视图关闭即卸载；有未提交草稿的编辑器可显式保活。 */
-function LazyMount({
-  visible,
-  keepMounted = false,
-  children,
-}: {
+interface LazyMountProps {
   visible: boolean;
   keepMounted?: boolean;
   children: React.ReactNode;
-}) {
+}
+
+function LazyMount({ visible, keepMounted = false, children }: LazyMountProps) {
   if (!keepMounted) return visible ? <>{children}</> : null;
   return <PersistentLazyMount visible={visible}>{children}</PersistentLazyMount>;
 }
 
-function PersistentLazyMount({
-  visible,
-  children,
-}: {
+interface PersistentLazyMountProps {
   visible: boolean;
   children: React.ReactNode;
-}) {
+}
+
+function PersistentLazyMount({ visible, children }: PersistentLazyMountProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     if (visible) setMounted(true);

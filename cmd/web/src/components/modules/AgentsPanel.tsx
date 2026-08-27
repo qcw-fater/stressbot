@@ -234,17 +234,14 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
   );
 }
 
-function AgentMetricCard({
-  agent,
-  stressMetrics,
-  onShutdown,
-  onDelete,
-}: {
+interface AgentMetricCardProps {
   agent: AgentBrief;
   stressMetrics?: PerAgentMetricsItem;
   onShutdown: (a: AgentBrief) => void;
   onDelete: (a: AgentBrief) => void;
-}) {
+}
+
+function AgentMetricCard({ agent, stressMetrics, onShutdown, onDelete }: AgentMetricCardProps) {
   const { message } = AntApp.useApp();
   const isOffline = agent.status === 'offline';
   const cpu = agent.hostCpuPercent;

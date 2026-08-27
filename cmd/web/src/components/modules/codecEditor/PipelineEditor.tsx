@@ -22,16 +22,10 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Button, Card, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
+import { App as AntApp, Button, Card, InputNumber, Select, Space, Switch, Typography } from 'antd';
 import { DeleteOutlined, DownOutlined, PlusOutlined, UpOutlined } from '@ant-design/icons';
 import type { AlgoMeta, CodecSchema, FlagBit, PipelineStep } from '@/types/codec';
-import {
-  GUARD_OPS,
-  ON_ERROR,
-  OVER_KINDS,
-  PIPELINE_OPS,
-  PRODUCE_REGIONS,
-} from '@/types/codec';
+import { GUARD_OPS, ON_ERROR, OVER_KINDS, PIPELINE_OPS, PRODUCE_REGIONS } from '@/types/codec';
 import {
   addPipelineStep,
   movePipelineStep,
@@ -93,6 +87,7 @@ interface UseCodecAlgorithmsResult {
 }
 
 function useCodecAlgorithms(): UseCodecAlgorithmsResult {
+  const { message } = AntApp.useApp();
   const [algos, setAlgos] = useState<AlgoMeta[]>(algoCache.loaded ? algoCache.algos : []);
   const [loading, setLoading] = useState(!algoCache.loaded);
   // reloadTick 触发 useEffect 重新拉取（重置 cache 后 loaded=false，不再走「直接用 cache」分支）。
@@ -131,14 +126,20 @@ function useCodecAlgorithms(): UseCodecAlgorithmsResult {
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, [reloadTick, message]);
 
   return { algos, loading, reload };
 }
 
 export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
-  const steps: PipelineStep[] = Array.isArray(schema.pipeline) ? (schema.pipeline as PipelineStep[]) : [];
-  const { algos: algorithms, reload: reloadAlgorithms, loading: algosLoading } = useCodecAlgorithms();
+  const steps: PipelineStep[] = Array.isArray(schema.pipeline)
+    ? (schema.pipeline as PipelineStep[])
+    : [];
+  const {
+    algos: algorithms,
+    reload: reloadAlgorithms,
+    loading: algosLoading,
+  } = useCodecAlgorithms();
 
   // flag 下拉选项 = 所有 role:"flags" 字段的命名位 name 并集。
   const flagOptions = collectFlagBitNames(schema).map((n) => ({ label: n, value: n }));
@@ -164,7 +165,16 @@ export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
     >
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
         {algorithms.length === 0 && (
-          <Space size={8} align="center" style={{ padding: '6px 10px', border: '1px solid var(--border-color)', borderRadius: 6, background: 'var(--bg-elevated)' }}>
+          <Space
+            size={8}
+            align="center"
+            style={{
+              padding: '6px 10px',
+              border: '1px solid var(--border-color)',
+              borderRadius: 6,
+              background: 'var(--bg-elevated)',
+            }}
+          >
             <Typography.Text type="warning" style={{ fontSize: 12 }}>
               算法清单为空（可能加载失败或后端未提供）
             </Typography.Text>
@@ -178,9 +188,11 @@ export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
             暂无管线步骤
           </Typography.Text>
         )}
+        {/* step 是 schema JSON 对象（无 id 字段，编辑时整对象替换），卡片受控无本地态：
+            索引键是此处的正确选择，内容 key 会在敲键时重挂载丢焦点 */}
         {steps.map((step, i) => (
           <PipelineStepCard
-            key={i}
+            key={`step-${i}`}
             raw={raw}
             index={i}
             total={steps.length}
@@ -286,7 +298,11 @@ function PipelineStepCard({
                 return (
                   <span>
                     {option.label}
-                    {desc ? <span style={{ color: 'var(--text-secondary)', marginLeft: 6, fontSize: 11 }}>{desc}</span> : null}
+                    {desc ? (
+                      <span style={{ color: 'var(--text-secondary)', marginLeft: 6, fontSize: 11 }}>
+                        {desc}
+                      </span>
+                    ) : null}
                   </span>
                 );
               }}
@@ -347,7 +363,10 @@ function PipelineStepCard({
         )}
 
         {(isEncrypt || isStandaloneDigest || selectedAlgo) && (
-          <Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: '0.04em', marginTop: 4 }}>
+          <Typography.Text
+            type="secondary"
+            style={{ fontSize: 11, letterSpacing: '0.04em', marginTop: 4 }}
+          >
             输入处理
           </Typography.Text>
         )}
@@ -370,7 +389,9 @@ function PipelineStepCard({
                 min={0}
                 value={step.offset?.encode ?? 0}
                 onChange={(v) =>
-                  patch({ offset: makeOffset(step.offset, 'encode', typeof v === 'number' ? v : 0) })
+                  patch({
+                    offset: makeOffset(step.offset, 'encode', typeof v === 'number' ? v : 0),
+                  })
                 }
               />
             </Field>
@@ -381,7 +402,9 @@ function PipelineStepCard({
                 min={0}
                 value={step.offset?.decode ?? 0}
                 onChange={(v) =>
-                  patch({ offset: makeOffset(step.offset, 'decode', typeof v === 'number' ? v : 0) })
+                  patch({
+                    offset: makeOffset(step.offset, 'decode', typeof v === 'number' ? v : 0),
+                  })
                 }
               />
             </Field>
@@ -392,14 +415,15 @@ function PipelineStepCard({
         )}
 
         {/* 独立 checksum/hash：over */}
-        {isStandaloneDigest && (
-          <OverSubform step={step} onPatch={patch} />
-        )}
+        {isStandaloneDigest && <OverSubform step={step} onPatch={patch} />}
 
         {/* 动态 params：按选中算法的 AlgoParam[] 渲染字段。algo 元数据外的残留键保留在 raw。 */}
         <ParamsDynamic step={step} algo={selectedAlgo} onPatch={patch} />
 
-        <Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: '0.04em', marginTop: 4 }}>
+        <Typography.Text
+          type="secondary"
+          style={{ fontSize: 11, letterSpacing: '0.04em', marginTop: 4 }}
+        >
           输出与条件
         </Typography.Text>
 
@@ -415,13 +439,12 @@ function PipelineStepCard({
 
 // ─── over 子表单（checksum/hash 独立步） ─────────────────────────────
 
-function OverSubform({
-  step,
-  onPatch,
-}: {
+interface OverSubformProps {
   step: PipelineStep;
   onPatch: (p: Partial<PipelineStep>) => void;
-}) {
+}
+
+function OverSubform({ step, onPatch }: OverSubformProps) {
   const over = step.over ?? { kind: 'bodyPlain' };
   const kind = over.kind ?? '';
   const kindInvalid = !(OVER_KINDS as readonly string[]).includes(kind);
@@ -449,7 +472,9 @@ function OverSubform({
                 style={{ width: 90 }}
                 min={0}
                 value={typeof over.rangeStart === 'number' ? over.rangeStart : 0}
-                onChange={(v) => onPatch({ over: { ...over, rangeStart: typeof v === 'number' ? v : 0 } })}
+                onChange={(v) =>
+                  onPatch({ over: { ...over, rangeStart: typeof v === 'number' ? v : 0 } })
+                }
               />
             </Field>
             <Field label="rangeEnd">
@@ -458,7 +483,9 @@ function OverSubform({
                 style={{ width: 90 }}
                 min={0}
                 value={typeof over.rangeEnd === 'number' ? over.rangeEnd : 0}
-                onChange={(v) => onPatch({ over: { ...over, rangeEnd: typeof v === 'number' ? v : 0 } })}
+                onChange={(v) =>
+                  onPatch({ over: { ...over, rangeEnd: typeof v === 'number' ? v : 0 } })
+                }
               />
             </Field>
           </>
@@ -480,15 +507,13 @@ function OverSubform({
  *   - algo 无 params（空/缺）→ 整个 params 区不渲染。
  *   - step.params 中 algo 元数据之外的残留键（手编残留）不显示、不删除（保留在 raw，切源码可见）。
  */
-function ParamsDynamic({
-  step,
-  algo,
-  onPatch,
-}: {
+interface ParamsDynamicProps {
   step: PipelineStep;
   algo: AlgoMeta | undefined;
   onPatch: (p: Partial<PipelineStep>) => void;
-}) {
+}
+
+function ParamsDynamic({ step, algo, onPatch }: ParamsDynamicProps) {
   const paramsMeta = algo?.params;
   // algo 元数据缺/空 → 不显示 params 区（也不丢弃已有 step.params 残留键）。
   if (!paramsMeta || paramsMeta.length === 0) return null;
@@ -530,17 +555,14 @@ function ParamsDynamic({
 }
 
 /** 单个参数控件：按 AlgoParam.type 选 antd 组件。未选中/清空时传 undefined（保留 default 作 placeholder）。 */
-function ParamControl({
-  type,
-  value,
-  placeholder,
-  onChange,
-}: {
+interface ParamControlProps {
   type: 'int' | 'string' | 'bool' | 'bytes';
   value: unknown;
   placeholder: string;
   onChange: (v: unknown) => void;
-}) {
+}
+
+function ParamControl({ type, value, placeholder, onChange }: ParamControlProps) {
   if (type === 'int') {
     return (
       <InputNumber
@@ -553,13 +575,7 @@ function ParamControl({
     );
   }
   if (type === 'bool') {
-    return (
-      <Switch
-        size="small"
-        checked={value === true}
-        onChange={(v) => onChange(v)}
-      />
-    );
+    return <Switch size="small" checked={value === true} onChange={(v) => onChange(v)} />;
   }
   // string + bytes 都走文本输入；bytes 的 placeholder 提示「hex」。
   return (
@@ -585,20 +601,20 @@ function paramLabel(name: string, description?: string): string {
 
 // ─── produces 子表单 ────────────────────────────────────────────────
 
-function ProducesSubform({
-  step,
-  onPatch,
-}: {
+interface ProducesSubformProps {
   step: PipelineStep;
   onPatch: (p: Partial<PipelineStep>) => void;
-}) {
+}
+
+function ProducesSubform({ step, onPatch }: ProducesSubformProps) {
   const produces = Array.isArray(step.produces) ? step.produces : [];
 
   const update = (i: number, patchObj: Partial<{ name: string; algo: string; region: string }>) => {
     const next = produces.map((p, idx) => (idx === i ? { ...p, ...patchObj } : p));
     onPatch({ produces: next });
   };
-  const add = () => onPatch({ produces: [...produces, { name: '', algo: '', region: 'ciphered' }] });
+  const add = () =>
+    onPatch({ produces: [...produces, { name: '', algo: '', region: 'ciphered' }] });
   const remove = (i: number) => onPatch({ produces: produces.filter((_, idx) => idx !== i) });
 
   return (
@@ -607,8 +623,9 @@ function ProducesSubform({
         produces（派生产物）
       </Typography.Text>
       <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        {/* 同上：行对象由 JSON 派生且无 id，受控行 */}
         {produces.map((p, i) => (
-          <Space size={4} key={i} wrap>
+          <Space size={4} key={`produce-${i}`} wrap>
             <input
               className="flet-input"
               style={{ width: 100 }}
@@ -630,7 +647,13 @@ function ProducesSubform({
               onChange={(v) => update(i, { region: v })}
               options={(PRODUCE_REGIONS as readonly string[]).map((r) => ({ label: r, value: r }))}
             />
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => remove(i)} />
+            <Button
+              size="small"
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => remove(i)}
+            />
           </Space>
         ))}
         <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={add}>
@@ -643,15 +666,13 @@ function ProducesSubform({
 
 // ─── when 子表单 ────────────────────────────────────────────────────
 
-function WhenSubform({
-  step,
-  stepNameOptions,
-  onPatch,
-}: {
+interface WhenSubformProps {
   step: PipelineStep;
   stepNameOptions: { label: string; value: string }[];
   onPatch: (p: Partial<PipelineStep>) => void;
-}) {
+}
+
+function WhenSubform({ step, stepNameOptions, onPatch }: WhenSubformProps) {
   const hasWhen = step.when !== undefined;
   const when = step.when ?? {};
 
@@ -668,7 +689,10 @@ function WhenSubform({
   const setField = (patchObj: Partial<typeof when>) => onPatch({ when: { ...when, ...patchObj } });
 
   const guards = Array.isArray(when.guards) ? when.guards : [];
-  const updateGuard = (i: number, patchObj: Partial<{ field: string; op: string; value: number }>) => {
+  const updateGuard = (
+    i: number,
+    patchObj: Partial<{ field: string; op: string; value: number }>,
+  ) => {
     const next = guards.map((g, idx) => (idx === i ? { ...g, ...patchObj } : g));
     setField({ guards: next });
   };
@@ -730,12 +754,16 @@ function WhenSubform({
             </Field>
           </Space>
           <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+            <Typography.Text
+              type="secondary"
+              style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+            >
               guards
             </Typography.Text>
             <Space direction="vertical" size={4}>
+              {/* 同上：行对象由 JSON 派生且无 id，受控行 */}
               {guards.map((g, i) => (
-                <Space size={4} key={i} wrap>
+                <Space size={4} key={`guard-${i}`} wrap>
                   <input
                     className="flet-input"
                     style={{ width: 110 }}
@@ -756,7 +784,13 @@ function WhenSubform({
                     value={typeof g?.value === 'number' ? g.value : 0}
                     onChange={(v) => updateGuard(i, { value: typeof v === 'number' ? v : 0 })}
                   />
-                  <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeGuard(i)} />
+                  <Button
+                    size="small"
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => removeGuard(i)}
+                  />
                 </Space>
               ))}
               <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addGuard}>
@@ -794,7 +828,12 @@ function collectFlagBitNames(schema: CodecSchema): string[] {
 /** 小字段标签 + 控件的统一布局。
  *  宽度足够时 label + 控件同一行（label 固定 80px，控件 flex:1）；
  *  窄时（< 160px 容器）通过 flex-wrap 回退为 label 独占行，保持可读。 */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+interface FieldProps {
+  label: string;
+  children: React.ReactNode;
+}
+
+function Field({ label, children }: FieldProps) {
   return (
     <div
       style={{

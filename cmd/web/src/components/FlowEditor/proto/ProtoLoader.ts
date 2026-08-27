@@ -72,21 +72,15 @@ async function loadFromInline(): Promise<LoadResult> {
       // 不补的话残缺集会让 resolveAll 中断、注册表部分可用，校验就会误报字段/proto 缺失
       // （如 GMAddItem 的 GM.type 因 GMEventType 链解析不全而报「字段不存在」）。
       const missing = missingProtoImports(userProtos);
-      let gapFilled = 0;
       for (const name of missing) {
         if (name in sources) continue;
         const text = await fetchBaselineProtoContent(name);
         if (text !== null) {
           sources[name] = text;
           files.push(name);
-          gapFilled++;
         }
       }
       files.sort();
-      console.log(
-        `[ProtoLoader] 通过 本地存储 加载（${userProtos.length} 个文件` +
-          `${gapFilled > 0 ? `，基线补齐 ${gapFilled} 个缺失 import` : ''}）`,
-      );
       return parseAll(sources, files);
     }
   } catch (e) {
@@ -96,10 +90,12 @@ async function loadFromInline(): Promise<LoadResult> {
   // 2) 走 baselineApi（后端服务器或 Vite 代理提供）
   try {
     const r = await loadFromBaselineApi();
-    console.log(`[ProtoLoader] 通过 baselineApi 加载成功（${r.files.length} 个文件）`);
     return r;
   } catch (e) {
-    console.warn(`[ProtoLoader] 服务器基线加载失败，尝试 import.meta.glob 兜底：`, (e as Error).message);
+    console.warn(
+      `[ProtoLoader] 服务器基线加载失败，尝试 import.meta.glob 兜底：`,
+      (e as Error).message,
+    );
   }
 
   // 3) 兜底：编译期 glob 注入
@@ -116,7 +112,6 @@ async function loadFromInline(): Promise<LoadResult> {
     );
   }
   files.sort();
-  console.log(`[ProtoLoader] 通过 import.meta.glob 加载（${files.length} 个文件）`);
   return parseAll(sources, files);
 }
 
@@ -158,19 +153,17 @@ async function loadFromFiles(files: File[]): Promise<LoadResult> {
   );
 }
 
-async function parseAll(
-  sources: Record<string, string>,
-  fileList: string[],
-): Promise<LoadResult> {
+async function parseAll(sources: Record<string, string>, fileList: string[]): Promise<LoadResult> {
   const root = new protobuf.Root();
 
   // 重写 fetch：让 root.load 内部对 import 解析走内存查找，避免向后端发请求。
   // 路径形态可能是 "common.proto"、"player.proto"、"google/protobuf/empty.proto" 等，
   // 用 basename 兜底匹配；google/* 返回空 proto3 让 protobufjs 跳过。
-  (root as unknown as { fetch: (path: string, cb: (err: Error | null, src?: string) => void) => void }).fetch = (
-    filename,
-    callback,
-  ) => {
+  (
+    root as unknown as {
+      fetch: (path: string, cb: (err: Error | null, src?: string) => void) => void;
+    }
+  ).fetch = (filename, callback) => {
     if (filename in sources) {
       callback(null, sources[filename]);
       return;
@@ -190,13 +183,17 @@ async function parseAll(
     callback(new Error('not found: ' + filename));
   };
 
-  type LoadOpts = { keepCase?: boolean; alternateCommentMode?: boolean; preferTrailingComment?: boolean };
+  type LoadOpts = {
+    keepCase?: boolean;
+    alternateCommentMode?: boolean;
+    preferTrailingComment?: boolean;
+  };
   type LoadFn = (
     filename: string | string[],
     options?: LoadOpts,
     callback?: (err: Error | null, root?: protobuf.Root) => void,
   ) => Promise<protobuf.Root>;
-  const load = (root.load as unknown) as LoadFn;
+  const load = root.load as unknown as LoadFn;
   const errors: string[] = [];
 
   const parseOpts = { keepCase: true, alternateCommentMode: true, preferTrailingComment: true };
@@ -214,7 +211,6 @@ async function parseAll(
 
   // 第二阶段：兜底逐文件 parse —— root.load 中断时仍然可以补齐剩余文件。
   // 同名 message 会抛 "duplicate name"，安全跳过即可（说明 root.load 已注册过它）。
-  const registeredAfterLoad = countMessages(root);
   for (const name of fileList) {
     try {
       protobuf.parse(sources[name], root, parseOpts);
@@ -233,9 +229,6 @@ async function parseAll(
     errors.push(`resolveAll：${(e as Error).message}`);
   }
 
-  console.log(
-    `[ProtoLoader] 加载完成：${fileList.length} 个 .proto 文件、${countMessages(root)} 个 message（load 阶段 ${registeredAfterLoad} → 兜底后 ${registeredAfterFallback}）`,
-  );
   if (errors.length > 0) {
     console.warn(`[ProtoLoader] ${errors.length} 处错误：`, errors.slice(0, 8));
   }

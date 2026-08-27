@@ -28,13 +28,19 @@ export interface ProtoBrowserProps {
   filter?: (m: ProtoMessage) => boolean;
 }
 
-export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose, onSelect, filter }: ProtoBrowserProps) {
+export function ProtoBrowser({
+  windowId: customWindowId,
+  open: openProp,
+  onClose,
+  onSelect,
+  filter,
+}: ProtoBrowserProps) {
   const isPickerMode = openProp !== undefined;
   const activePanel = useEditorStore((s) => s.activePanel.protoBrowser);
   const closePanel = useEditorStore((s) => s.closePanel);
   const open = openProp ?? activePanel?.kind === 'protoBrowser';
 
-  const windowId = customWindowId ?? (isPickerMode ? "protoPicker" : "protoBrowser");
+  const windowId = customWindowId ?? (isPickerMode ? 'protoPicker' : 'protoBrowser');
 
   const protoStatus = useProtoStore((s) => s.status);
   const protoHash = useProtoStore((s) => s.hash);
@@ -97,7 +103,7 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
             style={{
               width: '40%',
               overflow: 'auto',
-              borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+              borderRight: '1px solid var(--border-color)',
             }}
           >
             <Typography.Text type="secondary" style={{ fontSize: 12, paddingLeft: 4 }}>
@@ -114,7 +120,7 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
                     style={{
                       cursor: 'pointer',
                       padding: '4px 8px',
-                      background: isActive ? 'var(--node-selected-bg, rgba(22,119,255,0.12))' : undefined,
+                      background: isActive ? 'var(--node-selected-bg)' : undefined,
                       borderRadius: 4,
                     }}
                   >
@@ -161,7 +167,9 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
                   </Typography.Text>
                 </div>
                 {detail.comment && (
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>{detail.comment}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    {detail.comment}
+                  </div>
                 )}
                 <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                   <colgroup>
@@ -181,36 +189,65 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
                   <tbody>
                     {detail.fields.map((f) => (
                       <tr key={f.number} style={{ borderTop: '1px solid var(--divider-bg)' }}>
-                        <td style={{ color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>{f.number}</td>
-                        <td><code style={{ fontSize: 12 }}>{f.name}</code></td>
+                        <td
+                          style={{
+                            color: 'var(--text-tertiary)',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {f.number}
+                        </td>
+                        <td>
+                          <code style={{ fontSize: 12 }}>{f.name}</code>
+                        </td>
                         <td>
                           <code style={{ fontSize: 12 }}>
                             {f.kind === 'map' ? `map<${f.mapKey}, ${f.mapValue}>` : f.type}
                           </code>
                           {f.repeated && (
-                            <span style={{
-                              marginLeft: 4, fontSize: 10, color: 'var(--color-primary)',
-                              background: 'var(--node-selected-bg)',
-                              padding: '0 4px', borderRadius: 3,
-                            }}>repeated</span>
+                            <span
+                              style={{
+                                marginLeft: 4,
+                                fontSize: 10,
+                                color: 'var(--color-primary)',
+                                background: 'var(--node-selected-bg)',
+                                padding: '0 4px',
+                                borderRadius: 3,
+                              }}
+                            >
+                              repeated
+                            </span>
                           )}
                           {f.optional && !f.repeated && (
-                            <span style={{
-                              marginLeft: 4, fontSize: 10, color: 'var(--text-tertiary)',
-                              background: 'var(--fill-quaternary, rgba(0,0,0,0.02))',
-                              padding: '0 4px', borderRadius: 3,
-                            }}>optional</span>
+                            <span
+                              style={{
+                                marginLeft: 4,
+                                fontSize: 10,
+                                color: 'var(--text-tertiary)',
+                                background: 'var(--fill-quaternary)',
+                                padding: '0 4px',
+                                borderRadius: 3,
+                              }}
+                            >
+                              optional
+                            </span>
                           )}
                         </td>
-                        <td style={{
-                          color: 'var(--text-secondary)',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }}>
+                        <td
+                          style={{
+                            color: 'var(--text-secondary)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
                           {f.comment ? (
                             <Tooltip title={f.comment} mouseEnterDelay={0.4}>
                               <span>{f.comment}</span>
                             </Tooltip>
-                          ) : ''}
+                          ) : (
+                            ''
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -240,7 +277,7 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
   const windowNode = (
     <FloatingWindow
       windowId={windowId}
-      title={isPickerMode ? "Proto 选择器" : "Proto 浏览器"}
+      title={isPickerMode ? 'Proto 选择器' : 'Proto 浏览器'}
       defaultSize={{ width: 780, height: 540 }}
       minSize={{ width: 500, height: 350 }}
       open={open}

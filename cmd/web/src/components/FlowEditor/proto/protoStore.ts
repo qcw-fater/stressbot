@@ -29,13 +29,16 @@ export const useProtoStore = create<ProtoState>()((set, get) => ({
   fileCount: 0,
   errors: [],
   load: async (source) => {
-    console.log(`[ProtoStore] 开始加载 proto（source=${source.kind}）`);
     set({ status: 'loading', error: undefined, errors: [], lastSource: source });
     try {
       const result = await loadProtos(source);
       protoRegistry.load(result.root);
-      set({ status: 'ready', hash: result.hash, fileCount: result.files.length, errors: result.errors });
-      console.log(`[ProtoStore] 加载成功，状态切换为 ready（${result.files.length} 文件）`);
+      set({
+        status: 'ready',
+        hash: result.hash,
+        fileCount: result.files.length,
+        errors: result.errors,
+      });
     } catch (e) {
       const msg = (e as Error).message;
       console.error(`[ProtoStore] 加载失败：${msg}`);

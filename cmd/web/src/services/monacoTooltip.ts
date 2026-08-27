@@ -41,7 +41,6 @@ function lookupLabel(el: HTMLElement): string | null {
 
 export function useMonacoFindTooltip(themeMode: string) {
   useEffect(() => {
-    const dark = themeMode === 'dark';
     const tip = document.createElement('div');
     tip.style.cssText = [
       'position:fixed',
@@ -54,10 +53,10 @@ export function useMonacoFindTooltip(themeMode: string) {
       'opacity:0',
       'transition:opacity 0.12s ease',
       'white-space:nowrap',
-      'box-shadow:0 2px 8px rgba(0,0,0,0.18)',
-      `background:${dark ? '#3c3c3c' : '#ffffff'}`,
-      `color:${dark ? '#e6e6e6' : '#333'}`,
-      `border:1px solid ${dark ? '#5a5a5a' : '#d9d9d9'}`,
+      'box-shadow:var(--shadow-tooltip)',
+      'background:var(--tooltip-bg)',
+      'color:var(--tooltip-text)',
+      'border:1px solid var(--tooltip-border)',
     ].join(';');
     document.body.appendChild(tip);
 
@@ -65,11 +64,16 @@ export function useMonacoFindTooltip(themeMode: string) {
     let hideTimer: number | null = null;
 
     const onOver = (e: MouseEvent) => {
-      const t = (e.target as HTMLElement | null)?.closest?.('.find-widget [aria-label]') as HTMLElement | null;
+      const t = (e.target as HTMLElement | null)?.closest?.(
+        '.find-widget [aria-label]',
+      ) as HTMLElement | null;
       if (!t) return;
       const label = lookupLabel(t);
       if (!label) return;
-      if (hideTimer) { window.clearTimeout(hideTimer); hideTimer = null; }
+      if (hideTimer) {
+        window.clearTimeout(hideTimer);
+        hideTimer = null;
+      }
       if (showTimer) window.clearTimeout(showTimer);
       showTimer = window.setTimeout(() => {
         tip.textContent = label;
@@ -88,8 +92,13 @@ export function useMonacoFindTooltip(themeMode: string) {
     const onOut = (e: MouseEvent) => {
       const t = (e.target as HTMLElement | null)?.closest?.('.find-widget [aria-label]');
       if (!t) return;
-      if (showTimer) { window.clearTimeout(showTimer); showTimer = null; }
-      hideTimer = window.setTimeout(() => { tip.style.opacity = '0'; }, 80);
+      if (showTimer) {
+        window.clearTimeout(showTimer);
+        showTimer = null;
+      }
+      hideTimer = window.setTimeout(() => {
+        tip.style.opacity = '0';
+      }, 80);
     };
 
     document.addEventListener('mouseover', onOver);

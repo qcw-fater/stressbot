@@ -165,12 +165,20 @@ export function TemplateEditorDrawer() {
             description="此处修改的是模板本身，保存后只对今后从模板创建的节点生效；当前流程已使用的副本不受影响。"
           />
           <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>名称</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+              名称
+            </div>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>描述（可选）</div>
-            <Input.TextArea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+              描述（可选）
+            </div>
+            <Input.TextArea
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </div>
 
           {templateKind === 'action' && actionDef && (
@@ -193,7 +201,12 @@ export function TemplateEditorDrawer() {
   );
 }
 
-function ActionTemplateBody({ def, onChange }: { def: ActionDef; onChange: (d: ActionDef) => void }) {
+interface ActionTemplateBodyProps {
+  def: ActionDef;
+  onChange: (d: ActionDef) => void;
+}
+
+function ActionTemplateBody({ def, onChange }: ActionTemplateBodyProps) {
   const onPatternChange = (p: ActionPattern) => onChange({ ...def, pattern: p });
   return (
     <div>
@@ -217,6 +230,15 @@ function ActionTemplateBody({ def, onChange }: { def: ActionDef; onChange: (d: A
   );
 }
 
+interface ListenTemplateBodyProps {
+  def: ListenDef;
+  kind: ListenKind;
+  onChangeDef: (d: ListenDef) => void;
+  onChangeKind: (k: ListenKind) => void;
+  defaultRef?: ListenTemplateDefaultRef;
+  onChangeDefaultRef: (ref?: ListenTemplateDefaultRef) => void;
+}
+
 function ListenTemplateBody({
   def,
   kind,
@@ -224,33 +246,53 @@ function ListenTemplateBody({
   onChangeKind,
   defaultRef,
   onChangeDefaultRef,
-}: {
-  def: ListenDef;
-  kind: ListenKind;
-  onChangeDef: (d: ListenDef) => void;
-  onChangeKind: (k: ListenKind) => void;
-  defaultRef?: ListenTemplateDefaultRef;
-  onChangeDefaultRef: (ref?: ListenTemplateDefaultRef) => void;
-}) {
+}: ListenTemplateBodyProps) {
   const [protoOpen, setProtoOpen] = useState(false);
-  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const {
+    connections,
+    loading: connectionsLoading,
+    error: connectionsError,
+  } = useCodecConnections();
   const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
   return (
     <div>
-      <div style={{ marginBottom: 12, padding: 12, border: '1px solid var(--border-color)', borderRadius: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+      <div
+        style={{
+          marginBottom: 12,
+          padding: 12,
+          border: '1px solid var(--border-color)',
+          borderRadius: 8,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 8,
+          }}
+        >
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>默认注册</span>
           {defaultRef ? (
-            <Button size="small" onClick={() => onChangeDefaultRef(undefined)}>清除</Button>
+            <Button size="small" onClick={() => onChangeDefaultRef(undefined)}>
+              清除
+            </Button>
           ) : (
-            <Button size="small" onClick={() => onChangeDefaultRef({ server: '', route: undefined })}>添加</Button>
+            <Button
+              size="small"
+              onClick={() => onChangeDefaultRef({ server: '', route: undefined })}
+            >
+              添加
+            </Button>
           )}
         </div>
         {defaultRef ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <TargetConnectionRouteEditor
               server={defaultRef.server}
-              onChangeServer={(server) => onChangeDefaultRef({ ...defaultRef, server: server ?? '' })}
+              onChangeServer={(server) =>
+                onChangeDefaultRef({ ...defaultRef, server: server ?? '' })
+              }
               route={defaultRef.route}
               onChangeRoute={(route) => onChangeDefaultRef({ ...defaultRef, route })}
               connections={connections}
@@ -262,7 +304,11 @@ function ListenTemplateBody({
             />
           </div>
         ) : (
-          <Alert type="info" showIcon message="未设置默认注册；从 action 连到该 listen 时需选择 server，并按 routeKeyTemplate 填写 route 字段。" />
+          <Alert
+            type="info"
+            showIcon
+            message="未设置默认注册；从 action 连到该 listen 时需选择 server，并按 routeKeyTemplate 填写 route 字段。"
+          />
         )}
       </div>
       <Tabs

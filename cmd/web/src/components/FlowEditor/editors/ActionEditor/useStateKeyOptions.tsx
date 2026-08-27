@@ -53,10 +53,12 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
 
   const scriptNameSignature = useFlowStore((state) => {
     if (!enabled) return '';
-    return [...collectUsedScriptNames(state.actions, state.listens, state.nodes)].sort().join('\u0000');
+    return [...collectUsedScriptNames(state.actions, state.listens, state.nodes)]
+      .sort()
+      .join('\u0000');
   });
   const scriptNames = useMemo(
-    () => scriptNameSignature ? scriptNameSignature.split('\u0000') : [],
+    () => (scriptNameSignature ? scriptNameSignature.split('\u0000') : []),
     [scriptNameSignature],
   );
   const [scripts, setScripts] = useState<LuaScript[]>([]);
@@ -72,28 +74,38 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
     setReady(scriptNames.length === 0);
     if (scriptNames.length === 0) {
       setScripts([]);
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
-    Promise.all(scriptNames.map(async (name) => {
-      try {
-        const file = await getScript(name);
-        return file ? { name: file.name, content: file.content } : null;
-      } catch {
-        return null;
-      }
-    })).then((loaded) => {
+    Promise.all(
+      scriptNames.map(async (name) => {
+        try {
+          const file = await getScript(name);
+          return file ? { name: file.name, content: file.content } : null;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((loaded) => {
       if (cancelled) return;
       setScripts(loaded.filter((it): it is LuaScript => it !== null));
       setReady(true);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [enabled, scriptNameSignature, scriptNames, resourceVersion]);
 
   return { scripts, ready };
 }
 
 /** FlowEditor 顶层挂载一次，共享脚本加载结果。 */
-export function StateKeyOptionsProvider({ children }: { children: ReactNode }) {
+interface StateKeyOptionsProviderProps {
+  children: ReactNode;
+}
+
+export function StateKeyOptionsProvider({ children }: StateKeyOptionsProviderProps) {
   const loaded = useLoadedStateKeyScripts(true);
   const actions = useFlowStore((state) => state.actions);
   const listens = useFlowStore((state) => state.listens);
@@ -103,7 +115,9 @@ export function StateKeyOptionsProvider({ children }: { children: ReactNode }) {
     [actions, listens, stateExtra, loaded.scripts],
   );
   const value = useMemo(() => ({ keys, ready: loaded.ready }), [keys, loaded.ready]);
-  return <StateKeyOptionsContext.Provider value={value}>{children}</StateKeyOptionsContext.Provider>;
+  return (
+    <StateKeyOptionsContext.Provider value={value}>{children}</StateKeyOptionsContext.Provider>
+  );
 }
 
 /**
@@ -116,13 +130,16 @@ export function useStateKeyOptions(currentBindings?: FieldBind[]): StateKeyOptio
   const local = useLoadedStateKeyScripts(ctx === null);
   const ready = ctx ? ctx.ready : local.ready;
 
-  const actions = useFlowStore((state) => ctx ? EMPTY_ACTIONS : state.actions);
-  const listens = useFlowStore((state) => ctx ? EMPTY_LISTENS : state.listens);
-  const stateExtra = useRuntimeStore((state) => ctx ? EMPTY_STATE_EXTRA : state.robotConfig.stateExtra);
+  const actions = useFlowStore((state) => (ctx ? EMPTY_ACTIONS : state.actions));
+  const listens = useFlowStore((state) => (ctx ? EMPTY_LISTENS : state.listens));
+  const stateExtra = useRuntimeStore((state) =>
+    ctx ? EMPTY_STATE_EXTRA : state.robotConfig.stateExtra,
+  );
   const keys = useMemo(
-    () => ctx
-      ? mergeCurrentBindingKeys(ctx.keys, currentBindings)
-      : collectStateKeys(actions, listens, stateExtra, currentBindings, local.scripts),
+    () =>
+      ctx
+        ? mergeCurrentBindingKeys(ctx.keys, currentBindings)
+        : collectStateKeys(actions, listens, stateExtra, currentBindings, local.scripts),
     [actions, listens, stateExtra, currentBindings, ctx, local.scripts],
   );
   return { keys, ready };
@@ -137,8 +154,10 @@ function mergeCurrentBindingKeys(
   for (const binding of currentBindings) {
     if (!binding.storeAs) continue;
     const existing = map.get(binding.storeAs);
-    const isFallback = existing?.sourceType === 'lua'
-      || ((existing?.sourceType === 'store' || existing?.sourceType === 'listenStore') && !existing.storeField);
+    const isFallback =
+      existing?.sourceType === 'lua' ||
+      ((existing?.sourceType === 'store' || existing?.sourceType === 'listenStore') &&
+        !existing.storeField);
     if (!existing || isFallback) {
       map.set(binding.storeAs, {
         key: binding.storeAs,

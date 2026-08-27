@@ -144,7 +144,9 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
       const protectedByStar = isTaskProtected(record.id, record.starred);
       modal.confirm({
         title: '确认删除？',
-        content: protectedByStar ? '该任务或阶段已收藏，需要强制删除' : `将删除 ${record.name} 的所有数据`,
+        content: protectedByStar
+          ? '该任务或阶段已收藏，需要强制删除'
+          : `将删除 ${record.name} 的所有数据`,
         zIndex: popupZ,
         okText: protectedByStar ? '强制删除' : '删除',
         okButtonProps: { danger: true },
@@ -231,7 +233,12 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const titleContent = (
     <div className="hp-titlebar">
       {view.kind !== 'list' && (
-        <Button size="small" type="text" icon={<ArrowLeftOutlined />} onClick={() => setView({ kind: 'list' })}>
+        <Button
+          size="small"
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          onClick={() => setView({ kind: 'list' })}
+        >
           返回
         </Button>
       )}
@@ -304,7 +311,10 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
               </div>
             ) : items.length === 0 ? (
               <div className="hp-list-state">
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无压测归档，完成任务后将出现在此处" />
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="暂无压测归档，完成任务后将出现在此处"
+                />
               </div>
             ) : (
               <div className="hp-list">
@@ -326,7 +336,9 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
                       key={r.id}
                       record={r}
                       selected={isSelected({ id: r.id })}
-                      onSelect={(e) => toggleSelect({ id: r.id, name: r.name, starred: r.starred }, e)}
+                      onSelect={(e) =>
+                        toggleSelect({ id: r.id, name: r.name, starred: r.starred }, e)
+                      }
                       onStar={onToggleStar}
                       onDelete={onDelete}
                       onClick={() => setView({ kind: 'detail', id: r.id })}
@@ -376,6 +388,15 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
 
 /* ── 列表记录行 ── */
 
+interface HistoryCardProps {
+  record: HistoryRecord;
+  selected: boolean;
+  onSelect: (e?: React.MouseEvent) => void;
+  onStar: (r: HistoryRecord, e?: React.MouseEvent) => void;
+  onDelete: (r: HistoryRecord, e?: React.MouseEvent) => void;
+  onClick: () => void;
+}
+
 function HistoryCard({
   record: r,
   selected,
@@ -383,14 +404,7 @@ function HistoryCard({
   onStar,
   onDelete,
   onClick,
-}: {
-  record: HistoryRecord;
-  selected: boolean;
-  onSelect: (e?: React.MouseEvent) => void;
-  onStar: (r: HistoryRecord, e?: React.MouseEvent) => void;
-  onDelete: (r: HistoryRecord, e?: React.MouseEvent) => void;
-  onClick: () => void;
-}) {
+}: HistoryCardProps) {
   const tags = r.tags ?? [];
   const visibleTags = tags.slice(0, 3);
   const hiddenTagCount = Math.max(0, tags.length - visibleTags.length);
@@ -413,14 +427,13 @@ function HistoryCard({
       }}
     >
       <div className="hp-record-select">
-        <Checkbox
-          checked={selected}
-          onClick={(e) => onSelect(e as unknown as React.MouseEvent)}
-        />
+        <Checkbox checked={selected} onClick={(e) => onSelect(e as unknown as React.MouseEvent)} />
       </div>
 
       <div className="hp-record-identity">
-        <span className={`hp-record-state hp-record-state--${failed ? 'bad' : 'ok'}`}>{failed ? '失败' : '完成'}</span>
+        <span className={`hp-record-state hp-record-state--${failed ? 'bad' : 'ok'}`}>
+          {failed ? '失败' : '完成'}
+        </span>
         <Tooltip title={r.debugMode ? '调试模式' : '测试模式'} mouseEnterDelay={0.3}>
           <span className={`hp-mode-marker hp-mode-marker--${r.debugMode ? 'debug' : 'test'}`} />
         </Tooltip>
@@ -443,10 +456,23 @@ function HistoryCard({
       </div>
 
       <div className="hp-record-load">
-        <span>机器人 <b>{r.totalBots.toLocaleString()}</b></span>
-        <span>节点 <b>{r.activeAgentCount}/{r.agentCount}</b></span>
-        <span>并发 <b>{cfg.concurrency}</b></span>
-        {!!r.stageCount && r.stageCount > 0 && <span>阶段 <b>{r.stageCount}</b></span>}
+        <span>
+          机器人 <b>{r.totalBots.toLocaleString()}</b>
+        </span>
+        <span>
+          节点{' '}
+          <b>
+            {r.activeAgentCount}/{r.agentCount}
+          </b>
+        </span>
+        <span>
+          并发 <b>{cfg.concurrency}</b>
+        </span>
+        {!!r.stageCount && r.stageCount > 0 && (
+          <span>
+            阶段 <b>{r.stageCount}</b>
+          </span>
+        )}
       </div>
 
       <div className="hp-record-config">
@@ -459,7 +485,11 @@ function HistoryCard({
       <div className="hp-record-tags">
         {visibleTags.length > 0 ? (
           <>
-            {visibleTags.map((t) => <span key={t} className="hp-tag-pill">{t}</span>)}
+            {visibleTags.map((t) => (
+              <span key={t} className="hp-tag-pill">
+                {t}
+              </span>
+            ))}
             {hiddenTagCount > 0 && (
               <Tooltip title={tags.slice(visibleTags.length).join('、')} mouseEnterDelay={0.3}>
                 <span className="hp-tag-pill hp-tag-pill--more">+{hiddenTagCount}</span>
@@ -472,7 +502,9 @@ function HistoryCard({
       </div>
 
       <Tooltip title={note || '无备注'} mouseEnterDelay={0.4}>
-        <div className={`hp-record-note${note ? '' : ' hp-record-note--empty'}`}>{note || '无备注'}</div>
+        <div className={`hp-record-note${note ? '' : ' hp-record-note--empty'}`}>
+          {note || '无备注'}
+        </div>
       </Tooltip>
 
       <div className="hp-record-actions" onClick={(e) => e.stopPropagation()}>
@@ -481,7 +513,13 @@ function HistoryCard({
             type="text"
             size="small"
             className="hp-record-icon-btn"
-            icon={r.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
+            icon={
+              r.starred ? (
+                <StarFilled style={{ color: 'var(--color-warning)' }} />
+              ) : (
+                <StarOutlined />
+              )
+            }
             onClick={(e) => onStar(r, e)}
           />
         </Tooltip>
@@ -502,6 +540,15 @@ function HistoryCard({
 
 /* ── 含 reset 的渐进式加压：阶段组（父任务 + 阶段段落子记录） ── */
 
+interface StageGroupProps {
+  record: HistoryRecord;
+  isSelected: (t: { id: string; stageIndex?: number }) => boolean;
+  onSelect: (t: SelTarget, e?: React.MouseEvent) => void;
+  onStarStage: (child: HistoryRecord, e?: React.MouseEvent) => void;
+  onDelete: (r: HistoryRecord, e?: React.MouseEvent) => void;
+  onOpenStage: (stageIndex: number, stageLabel: string) => void;
+}
+
 function StageGroup({
   record: r,
   isSelected,
@@ -509,14 +556,7 @@ function StageGroup({
   onStarStage,
   onDelete,
   onOpenStage,
-}: {
-  record: HistoryRecord;
-  isSelected: (t: { id: string; stageIndex?: number }) => boolean;
-  onSelect: (t: SelTarget, e?: React.MouseEvent) => void;
-  onStarStage: (child: HistoryRecord, e?: React.MouseEvent) => void;
-  onDelete: (r: HistoryRecord, e?: React.MouseEvent) => void;
-  onOpenStage: (stageIndex: number, stageLabel: string) => void;
-}) {
+}: StageGroupProps) {
   const [expanded, setExpanded] = useState(true);
   const failed = r.state === 'failed';
   const children = r.children ?? [];
@@ -547,7 +587,12 @@ function StageGroup({
         <div className="hp-record-select" onClick={(e) => e.stopPropagation()}>
           <Checkbox
             checked={isSelected({ id: r.id })}
-            onClick={(e) => onSelect({ id: r.id, name: r.name, starred: r.starred }, e as unknown as React.MouseEvent)}
+            onClick={(e) =>
+              onSelect(
+                { id: r.id, name: r.name, starred: r.starred },
+                e as unknown as React.MouseEvent,
+              )
+            }
           />
         </div>
 
@@ -555,7 +600,9 @@ function StageGroup({
           <span className="hp-stage-caption__chevron" aria-hidden>
             {expanded ? <DownOutlined /> : <RightOutlined />}
           </span>
-          <span className={`hp-record-state hp-record-state--${failed ? 'bad' : 'ok'}`}>{failed ? '失败' : '完成'}</span>
+          <span className={`hp-record-state hp-record-state--${failed ? 'bad' : 'ok'}`}>
+            {failed ? '失败' : '完成'}
+          </span>
           <Tooltip title={r.debugMode ? '调试模式' : '测试模式'} mouseEnterDelay={0.3}>
             <span className={`hp-mode-marker hp-mode-marker--${r.debugMode ? 'debug' : 'test'}`} />
           </Tooltip>
@@ -579,10 +626,21 @@ function StageGroup({
         </div>
 
         <div className="hp-record-load">
-          <span>机器人 <b>{r.totalBots.toLocaleString()}</b></span>
-          <span>节点 <b>{r.activeAgentCount}/{r.agentCount}</b></span>
-          <span>并发 <b>{cfg.concurrency}</b></span>
-          <span>阶段 <b>{r.stageCount}</b></span>
+          <span>
+            机器人 <b>{r.totalBots.toLocaleString()}</b>
+          </span>
+          <span>
+            节点{' '}
+            <b>
+              {r.activeAgentCount}/{r.agentCount}
+            </b>
+          </span>
+          <span>
+            并发 <b>{cfg.concurrency}</b>
+          </span>
+          <span>
+            阶段 <b>{r.stageCount}</b>
+          </span>
         </div>
 
         <div className="hp-record-config">
@@ -595,7 +653,11 @@ function StageGroup({
         <div className="hp-record-tags">
           {visibleTags.length > 0 ? (
             <>
-              {visibleTags.map((t) => <span key={t} className="hp-tag-pill">{t}</span>)}
+              {visibleTags.map((t) => (
+                <span key={t} className="hp-tag-pill">
+                  {t}
+                </span>
+              ))}
               {hiddenTagCount > 0 && (
                 <Tooltip title={tags.slice(visibleTags.length).join('、')} mouseEnterDelay={0.3}>
                   <span className="hp-tag-pill hp-tag-pill--more">+{hiddenTagCount}</span>
@@ -608,7 +670,9 @@ function StageGroup({
         </div>
 
         <Tooltip title={note || '无备注'} mouseEnterDelay={0.4}>
-          <div className={`hp-record-note${note ? '' : ' hp-record-note--empty'}`}>{note || '无备注'}</div>
+          <div className={`hp-record-note${note ? '' : ' hp-record-note--empty'}`}>
+            {note || '无备注'}
+          </div>
         </Tooltip>
 
         <div className="hp-record-actions" onClick={(e) => e.stopPropagation()}>
@@ -672,7 +736,9 @@ function StageGroup({
 
                 {/* Col 2: Identity — state pill + segment label */}
                 <div className="hp-record-identity">
-                  <span className={`hp-sc-state hp-sc-state--${cFailed ? 'bad' : 'ok'}`}>{cFailed ? '失败' : '完成'}</span>
+                  <span className={`hp-sc-state hp-sc-state--${cFailed ? 'bad' : 'ok'}`}>
+                    {cFailed ? '失败' : '完成'}
+                  </span>
                   <span className="hp-stage-status-marker" aria-hidden />
                   <span className="hp-sc-label">{displayStageLabel}</span>
                 </div>
@@ -680,7 +746,9 @@ function StageGroup({
                 {/* Col 3: Peak bots */}
                 <div className="hp-record-time">
                   <span className="hp-record-k">峰值</span>
-                  <span className="hp-record-v hp-record-v--strong">{c.totalBots.toLocaleString()}</span>
+                  <span className="hp-record-v hp-record-v--strong">
+                    {c.totalBots.toLocaleString()}
+                  </span>
                 </div>
 
                 {/* Col 4: Concurrency */}
@@ -693,8 +761,13 @@ function StageGroup({
                 <div className="hp-record-load">
                   {hasMetrics ? (
                     <>
-                      <span>动作 <b>{fmtMetricCount(c.totalActions ?? 0)}</b></span>
-                      <span>成功 <b className={fmtRateClass(c.successRate)}>{fmtPercent(c.successRate)}</b></span>
+                      <span>
+                        动作 <b>{fmtMetricCount(c.totalActions ?? 0)}</b>
+                      </span>
+                      <span>
+                        成功{' '}
+                        <b className={fmtRateClass(c.successRate)}>{fmtPercent(c.successRate)}</b>
+                      </span>
                     </>
                   ) : (
                     <span className="hp-record-empty">—</span>
@@ -705,22 +778,32 @@ function StageGroup({
                 <div className="hp-record-config">
                   {hasMetrics ? (
                     <>
-                      <span>RTT <b>{fmtMs(c.avgRttMs)}</b></span>
-                      <span>P95 <b>{fmtMs(c.p95RttMs)}</b></span>
+                      <span>
+                        RTT <b>{fmtMs(c.avgRttMs)}</b>
+                      </span>
+                      <span>
+                        P95 <b>{fmtMs(c.p95RttMs)}</b>
+                      </span>
                     </>
                   ) : null}
                 </div>
 
                 {/* Col 7: Tags */}
                 <div className="hp-record-tags">
-                  {cTags.length > 0 ? (
-                    cTags.slice(0, 3).map((t) => <span key={t} className="hp-tag-pill">{t}</span>)
-                  ) : null}
+                  {cTags.length > 0
+                    ? cTags.slice(0, 3).map((t) => (
+                        <span key={t} className="hp-tag-pill">
+                          {t}
+                        </span>
+                      ))
+                    : null}
                 </div>
 
                 {/* Col 8: Note */}
                 <Tooltip title={cNote || undefined} mouseEnterDelay={0.3}>
-                  <div className={`hp-record-note${cNote ? '' : ' hp-record-note--empty'}`}>{cNote || ''}</div>
+                  <div className={`hp-record-note${cNote ? '' : ' hp-record-note--empty'}`}>
+                    {cNote || ''}
+                  </div>
                 </Tooltip>
 
                 {/* Col 9: Star */}
@@ -730,7 +813,13 @@ function StageGroup({
                       type="text"
                       size="small"
                       className="hp-record-icon-btn"
-                      icon={c.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
+                      icon={
+                        c.starred ? (
+                          <StarFilled style={{ color: 'var(--color-warning)' }} />
+                        ) : (
+                          <StarOutlined />
+                        )
+                      }
                       onClick={(e) => onStarStage(c, e)}
                     />
                   </Tooltip>

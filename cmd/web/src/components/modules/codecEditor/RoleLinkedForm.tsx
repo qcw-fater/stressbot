@@ -35,7 +35,16 @@ export function RoleLinkedForm({ fieldIndex, field, raw, onEdit }: RoleLinkedFor
   const fieldName = field.name || '未命名';
   return (
     <div className="field-detail-inline">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+          flexWrap: 'wrap',
+        }}
+      >
         <div>
           <Typography.Text className="pce-bench-title">字段详情</Typography.Text>
           <Typography.Text className="pce-bench-meta">{fieldName}</Typography.Text>
@@ -48,7 +57,8 @@ export function RoleLinkedForm({ fieldIndex, field, raw, onEdit }: RoleLinkedFor
 
       {field.role === 'route' && (
         <Typography.Text type="secondary" className="field-inspector-text">
-          该字段被标记为路由字段（role: route）。路由字段的字段名可在「路由键」标签页的模板里作为占位引用；本字段在此无需配置。
+          该字段被标记为路由字段（role:
+          route）。路由字段的字段名可在「路由键」标签页的模板里作为占位引用；本字段在此无需配置。
         </Typography.Text>
       )}
 
@@ -70,7 +80,9 @@ export function RoleLinkedForm({ fieldIndex, field, raw, onEdit }: RoleLinkedFor
         </Space>
       )}
 
-      {field.role === 'value' && <ValueSourceEditor source={source} onChange={(next) => patch({ source: next })} />}
+      {field.role === 'value' && (
+        <ValueSourceEditor source={source} onChange={(next) => patch({ source: next })} />
+      )}
 
       {field.role === 'errorCode' && (
         <Typography.Text type="secondary" className="field-inspector-text">
@@ -85,7 +97,9 @@ export function RoleLinkedForm({ fieldIndex, field, raw, onEdit }: RoleLinkedFor
       )}
 
       {field.role === 'reserved' && (
-        <Typography.Text type="secondary" className="field-inspector-text">保留字段，无额外配置。</Typography.Text>
+        <Typography.Text type="secondary" className="field-inspector-text">
+          保留字段，无额外配置。
+        </Typography.Text>
       )}
     </div>
   );
@@ -93,15 +107,13 @@ export function RoleLinkedForm({ fieldIndex, field, raw, onEdit }: RoleLinkedFor
 
 // ─── flags 命名位编辑器 ─────────────────────────────────────────────
 
-function FlagsEditor({
-  bits,
-  maxBit,
-  onChange,
-}: {
+interface FlagsEditorProps {
   bits: FlagBit[];
   maxBit: number;
   onChange: (next: FlagBit[]) => void;
-}) {
+}
+
+function FlagsEditor({ bits, maxBit, onChange }: FlagsEditorProps) {
   const update = (i: number, p: Partial<FlagBit>) => {
     const next = bits.map((b, idx) => (idx === i ? { ...b, ...p } : b));
     onChange(next);
@@ -111,8 +123,10 @@ function FlagsEditor({
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         命名位（bit 范围 0–{Math.max(0, maxBit - 1)}，即 size×8 = {maxBit} 位）
       </Typography.Text>
+      {/* bits 是 schema JSON 字段（无 id 列）；bit/name 在输入过程中变化，内容 key 会导致
+          敲键重挂载丢焦点，行组件本身受控无本地态，索引键在此是正确选择 */}
       {bits.map((b, i) => (
-        <Space key={i} size={6} align="center">
+        <Space key={`bit-${i}`} size={6} align="center">
           <input
             className="flet-input"
             style={{ width: 140 }}
@@ -128,10 +142,7 @@ function FlagsEditor({
             style={{ width: 70 }}
             onChange={(v) => update(i, { bit: typeof v === 'number' ? v : 0 })}
           />
-          <a
-            style={{ fontSize: 12 }}
-            onClick={() => onChange(bits.filter((_, idx) => idx !== i))}
-          >
+          <a style={{ fontSize: 12 }} onClick={() => onChange(bits.filter((_, idx) => idx !== i))}>
             删除
           </a>
         </Space>
@@ -145,13 +156,12 @@ function FlagsEditor({
 
 // ─── value source 编辑器 ───────────────────────────────────────────
 
-function ValueSourceEditor({
-  source,
-  onChange,
-}: {
+interface ValueSourceEditorProps {
   source: ValueSource;
   onChange: (next: ValueSource) => void;
-}) {
+}
+
+function ValueSourceEditor({ source, onChange }: ValueSourceEditorProps) {
   const kindOptions = Object.keys(VALUE_SOURCE_KINDS_SUPPORTED).map((k) => ({
     value: k,
     label: VALUE_SOURCE_KINDS_SUPPORTED[k] ? k : `${k}（v1.1）`,

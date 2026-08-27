@@ -21,6 +21,7 @@
 import { Button, Input, Space, Tag, Tooltip, Typography } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useEffect, useRef, useState } from 'react';
+import { nanoid } from 'nanoid';
 
 export interface AuthExtraEditorProps {
   value?: Record<string, string>;
@@ -35,14 +36,16 @@ export interface AuthExtraEditorProps {
 
 const DEFAULT_SUGGESTED: string[] = [];
 
+// id 是行内稳定标识（nanoid），只用于 React key，不参与 toMap 导出。
 interface Row {
+  id: string;
   key: string;
   value: string;
 }
 
 function toRows(v: Record<string, string> | undefined): Row[] {
   if (!v) return [];
-  return Object.entries(v).map(([key, value]) => ({ key, value }));
+  return Object.entries(v).map(([key, value]) => ({ id: nanoid(), key, value }));
 }
 
 function toMap(rows: Row[]): Record<string, string> {
@@ -92,7 +95,7 @@ export function AuthExtraEditor({
     onChange(map);
   };
 
-  const addRow = (key = '') => commit([...rows, { key, value: '' }]);
+  const addRow = (key = '') => commit([...rows, { id: nanoid(), key, value: '' }]);
   const removeRow = (idx: number) => commit(rows.filter((_, i) => i !== idx));
   const setKey = (idx: number, k: string) => {
     const next = rows.slice();
@@ -130,7 +133,7 @@ export function AuthExtraEditor({
       )}
 
       {rows.map((row, idx) => (
-        <Space.Compact key={idx} block style={{ marginBottom: 6 }}>
+        <Space.Compact key={row.id} block style={{ marginBottom: 6 }}>
           <Input
             placeholder="字段名（如 version）"
             value={row.key}
@@ -138,11 +141,7 @@ export function AuthExtraEditor({
             status={dupKeys.has(row.key.trim()) ? 'error' : undefined}
             style={{ width: '38%' }}
           />
-          <Input
-            placeholder="值"
-            value={row.value}
-            onChange={(e) => setVal(idx, e.target.value)}
-          />
+          <Input placeholder="值" value={row.value} onChange={(e) => setVal(idx, e.target.value)} />
           <Tooltip title="删除该字段">
             <Button icon={<DeleteOutlined />} danger onClick={() => removeRow(idx)} />
           </Tooltip>

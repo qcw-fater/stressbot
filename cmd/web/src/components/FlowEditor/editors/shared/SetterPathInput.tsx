@@ -28,11 +28,7 @@ export interface SetterPathInputProps {
 
 type ExpandedMap = Record<string, boolean>;
 
-export function SetterPathInput({
-  value,
-  onChange,
-  style,
-}: SetterPathInputProps) {
+export function SetterPathInput({ value, onChange, style }: SetterPathInputProps) {
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
 
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -49,14 +45,17 @@ export function SetterPathInput({
     return allKeys.filter((k) => k.key.toLowerCase().includes(lower));
   }, [allKeys, browseSearch]);
 
-  const selectKey = useCallback((path: string) => {
-    onChange(path);
-    setBrowseOpen(false);
-    setBrowseSearch('');
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
-  }, [onChange]);
+  const selectKey = useCallback(
+    (path: string) => {
+      onChange(path);
+      setBrowseOpen(false);
+      setBrowseSearch('');
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+    },
+    [onChange],
+  );
 
   const toggleExpand = useCallback((path: string) => {
     setExpanded((prev) => ({ ...prev, [path]: !prev[path] }));
@@ -147,20 +146,32 @@ function SetterKeyRow({ keyInfo, expanded, onToggleExpand, onSelect }: SetterKey
           gap: 6,
           fontSize: 12,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg, rgba(0,0,0,0.04))')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
         <span
-          onClick={(e) => { e.stopPropagation(); if (hasChildren) onToggleExpand(keyInfo.key); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasChildren) onToggleExpand(keyInfo.key);
+          }}
           style={{
-            width: 16, height: 16, display: 'inline-flex', alignItems: 'center',
-            justifyContent: 'center', cursor: hasChildren ? 'pointer' : 'default',
-            color: hasChildren ? 'var(--text-secondary)' : 'transparent', flexShrink: 0,
+            width: 16,
+            height: 16,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: hasChildren ? 'pointer' : 'default',
+            color: hasChildren ? 'var(--text-secondary)' : 'transparent',
+            flexShrink: 0,
           }}
         >
           {hasChildren && (
             <RightOutlined
-              style={{ fontSize: 9, transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              style={{
+                fontSize: 9,
+                transition: 'transform 0.15s',
+                transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
             />
           )}
         </span>
@@ -177,22 +188,27 @@ function SetterKeyRow({ keyInfo, expanded, onToggleExpand, onSelect }: SetterKey
           </Tag>
           {keyInfo.s2cProto && (
             <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-              ← {resolveStateKeyDisplayType(keyInfo as Parameters<typeof resolveStateKeyDisplayType>[0]) ?? keyInfo.s2cProto.split('.').pop()}
+              ←{' '}
+              {resolveStateKeyDisplayType(
+                keyInfo as Parameters<typeof resolveStateKeyDisplayType>[0],
+              ) ?? keyInfo.s2cProto.split('.').pop()}
             </span>
           )}
         </span>
       </div>
-      {isExpanded && subFields && subFields.map((f) => (
-        <SetterFieldRow
-          key={f.name}
-          field={f}
-          pathPrefix={`${keyInfo.key}.${f.name}`}
-          expanded={expanded}
-          onToggleExpand={onToggleExpand}
-          onSelect={onSelect}
-          depth={1}
-        />
-      ))}
+      {isExpanded &&
+        subFields &&
+        subFields.map((f) => (
+          <SetterFieldRow
+            key={f.name}
+            field={f}
+            pathPrefix={`${keyInfo.key}.${f.name}`}
+            expanded={expanded}
+            onToggleExpand={onToggleExpand}
+            onSelect={onSelect}
+            depth={1}
+          />
+        ))}
     </>
   );
 }
@@ -210,11 +226,12 @@ function shortFieldType(field: ProtoField): string {
     const val = field.messageName?.split('.').pop() ?? field.mapValue ?? field.type;
     return `map<${field.mapKey}, ${val}>`;
   }
-  const base = field.kind === 'message'
-    ? field.messageName?.split('.').pop() ?? field.type
-    : field.kind === 'enum'
-      ? field.enumName?.split('.').pop() ?? field.type
-      : field.type;
+  const base =
+    field.kind === 'message'
+      ? (field.messageName?.split('.').pop() ?? field.type)
+      : field.kind === 'enum'
+        ? (field.enumName?.split('.').pop() ?? field.type)
+        : field.type;
   return field.repeated ? `${base}[]` : base;
 }
 
@@ -227,7 +244,14 @@ interface SetterFieldRowProps {
   depth: number;
 }
 
-function SetterFieldRow({ field, pathPrefix, expanded, onToggleExpand, onSelect, depth }: SetterFieldRowProps) {
+function SetterFieldRow({
+  field,
+  pathPrefix,
+  expanded,
+  onToggleExpand,
+  onSelect,
+  depth,
+}: SetterFieldRowProps) {
   const isExpanded = expanded[pathPrefix] ?? false;
   const canExpand = isExpandable(field);
   const maxDepth = 4;
@@ -245,24 +269,41 @@ function SetterFieldRow({ field, pathPrefix, expanded, onToggleExpand, onSelect,
     <>
       <div
         style={{
-          padding: '3px 6px', paddingLeft: 6 + depth * 16,
-          cursor: 'pointer', borderRadius: 4, display: 'flex', alignItems: 'center',
-          gap: 6, fontSize: 12,
+          padding: '3px 6px',
+          paddingLeft: 6 + depth * 16,
+          cursor: 'pointer',
+          borderRadius: 4,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 12,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg, rgba(0,0,0,0.04))')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover-bg)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
         <span
-          onClick={(e) => { e.stopPropagation(); if (canExpand && childFields && childFields.length > 0) onToggleExpand(pathPrefix); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (canExpand && childFields && childFields.length > 0) onToggleExpand(pathPrefix);
+          }}
           style={{
-            width: 16, height: 16, display: 'inline-flex', alignItems: 'center',
-            justifyContent: 'center', cursor: canExpand ? 'pointer' : 'default',
-            color: canExpand ? 'var(--text-secondary)' : 'transparent', flexShrink: 0,
+            width: 16,
+            height: 16,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: canExpand ? 'pointer' : 'default',
+            color: canExpand ? 'var(--text-secondary)' : 'transparent',
+            flexShrink: 0,
           }}
         >
           {canExpand && childFields && childFields.length > 0 && (
             <RightOutlined
-              style={{ fontSize: 9, transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              style={{
+                fontSize: 9,
+                transition: 'transform 0.15s',
+                transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
             />
           )}
         </span>
@@ -270,21 +311,28 @@ function SetterFieldRow({ field, pathPrefix, expanded, onToggleExpand, onSelect,
           onClick={() => onSelect(insertPath)}
           style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}
         >
-          <code style={{ whiteSpace: 'nowrap' }}>{field.name}{field.repeated ? '[]' : ''}</code>
-          <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{shortFieldType(field)}</span>
+          <code style={{ whiteSpace: 'nowrap' }}>
+            {field.name}
+            {field.repeated ? '[]' : ''}
+          </code>
+          <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+            {shortFieldType(field)}
+          </span>
         </span>
       </div>
-      {isExpanded && childFields && childFields.map((f) => (
-        <SetterFieldRow
-          key={f.name}
-          field={f}
-          pathPrefix={`${pathPrefix}${field.repeated ? '[0]' : ''}.${f.name}`}
-          expanded={expanded}
-          onToggleExpand={onToggleExpand}
-          onSelect={onSelect}
-          depth={depth + 1}
-        />
-      ))}
+      {isExpanded &&
+        childFields &&
+        childFields.map((f) => (
+          <SetterFieldRow
+            key={f.name}
+            field={f}
+            pathPrefix={`${pathPrefix}${field.repeated ? '[0]' : ''}.${f.name}`}
+            expanded={expanded}
+            onToggleExpand={onToggleExpand}
+            onSelect={onSelect}
+            depth={depth + 1}
+          />
+        ))}
     </>
   );
 }
