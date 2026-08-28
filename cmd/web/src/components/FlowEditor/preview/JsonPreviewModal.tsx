@@ -4,7 +4,7 @@
 
 import { App as AntApp, Button, Tooltip } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
-import Editor from '@monaco-editor/react';
+import { MonacoEditor as Editor } from '@/components/shared/monaco/MonacoLazy';
 import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';

@@ -69,7 +69,8 @@ export interface ActionMetricsTableProps<T extends ActionMetricsTableRow> {
   loading?: boolean;
   compact?: boolean;
   size?: 'small' | 'middle';
-  scrollY?: number | string;
+  /** 虚拟滚动模式下 antd 要求像素数值高度 */
+  scrollY?: number;
   popupZIndex?: number;
 
   latencyMode?: ActionLatencyMode;
@@ -776,6 +777,8 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
           dataSource={dataSource}
           columns={columns}
           pagination={false}
+          // 大流程的动作行可达数百行且每 5s 轮询整体换新数组；虚拟滚动固定渲染窗口内的行
+          virtual
           scroll={{ x: 'max-content', y: scrollY }}
         />
       </div>

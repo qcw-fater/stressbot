@@ -7,7 +7,7 @@
 
 import { FileTextOutlined } from '@ant-design/icons';
 import { App as AntApp } from 'antd';
-import Editor from '@monaco-editor/react';
+import { MonacoEditor as Editor } from '@/components/shared/monaco/MonacoLazy';
 import { useCallback } from 'react';
 import { useNotepadStore } from './notepadStore';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';

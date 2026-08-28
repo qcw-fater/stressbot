@@ -9,7 +9,7 @@
  */
 
 import { Button, Modal, Radio, Space, Tag, Typography } from 'antd';
-import { DiffEditor } from '@monaco-editor/react';
+import { MonacoDiffEditor as DiffEditor } from '@/components/shared/monaco/MonacoLazy';
 import type { editor } from 'monaco-editor';
 import type {
   BaselineSyncResult,

@@ -23,7 +23,8 @@ import {
   SaveOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
-import Editor, { type Monaco } from '@monaco-editor/react';
+import { MonacoEditor as Editor } from '@/components/shared/monaco/MonacoLazy';
+import type { Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UploadProps } from 'antd';

@@ -34,7 +34,7 @@ import {
 import type { UploadProps } from 'antd';
 import './codecEditor/codecEditor.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import { MonacoEditor as Editor } from '@/components/shared/monaco/MonacoLazy';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '../FlowEditor/store/floatingWindowStore';
 import {

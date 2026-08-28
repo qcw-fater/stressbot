@@ -30,7 +30,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import { MonacoEditor as Editor } from '@/components/shared/monaco/MonacoLazy';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '../FlowEditor/store/floatingWindowStore';

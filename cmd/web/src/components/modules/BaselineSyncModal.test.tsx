@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BaselineSyncModal } from './BaselineSyncModal';
 import type { BaselineSyncResult } from '@/services/resourcesStore';
 
-vi.mock('@monaco-editor/react', () => ({
-  DiffEditor: () => <div data-testid="diff-editor" />,
+vi.mock('@/components/shared/monaco/MonacoLazy', () => ({
+  MonacoDiffEditor: () => <div data-testid="diff-editor" />,
 }));
 
 const nativeGetComputedStyle = window.getComputedStyle.bind(window);
