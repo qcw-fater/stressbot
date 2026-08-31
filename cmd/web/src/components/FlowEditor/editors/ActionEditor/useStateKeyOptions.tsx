@@ -11,6 +11,7 @@
  */
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { FieldBind } from '@/types/action';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { getScript, subscribe } from '@/services/resourcesStore';
@@ -36,6 +37,7 @@ interface SharedStateKeys {
 
 const EMPTY_ACTIONS = {};
 const EMPTY_LISTENS = {};
+const EMPTY_NODES = {};
 const EMPTY_STATE_EXTRA = {};
 
 const StateKeyOptionsContext = createContext<SharedStateKeys | null>(null);
@@ -51,12 +53,21 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
     return subscribe(() => setResourceVersion((version) => version + 1));
   }, [enabled]);
 
-  const scriptNameSignature = useFlowStore((state) => {
+  const scriptSources = useFlowStore(
+    useShallow((state) => ({
+      actions: enabled ? state.actions : EMPTY_ACTIONS,
+      listens: enabled ? state.listens : EMPTY_LISTENS,
+      nodes: enabled ? state.nodes : EMPTY_NODES,
+    })),
+  );
+  const scriptNameSignature = useMemo(() => {
     if (!enabled) return '';
-    return [...collectUsedScriptNames(state.actions, state.listens, state.nodes)]
+    return [
+      ...collectUsedScriptNames(scriptSources.actions, scriptSources.listens, scriptSources.nodes),
+    ]
       .sort()
       .join('\u0000');
-  });
+  }, [enabled, scriptSources.actions, scriptSources.listens, scriptSources.nodes]);
   const scriptNames = useMemo(
     () => (scriptNameSignature ? scriptNameSignature.split('\u0000') : []),
     [scriptNameSignature],

@@ -1,8 +1,21 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import * as React from 'react';
+import type * as StateRegistry from './stateRegistry';
 import { useStateKeyOptions, StateKeyOptionsProvider } from './useStateKeyOptions';
 import { useFlowStore } from '../../store/flowStore';
+
+const collectUsedScriptNamesMock = vi.hoisted(() => vi.fn());
+vi.mock('./stateRegistry', async () => {
+  const actual = await vi.importActual<typeof StateRegistry>('./stateRegistry');
+  return {
+    ...actual,
+    collectUsedScriptNames: (...args: Parameters<typeof actual.collectUsedScriptNames>) => {
+      collectUsedScriptNamesMock(...args);
+      return actual.collectUsedScriptNames(...args);
+    },
+  };
+});
 
 // 必须用提升（hoisted）的 vi.mock 拦截 resourcesStore.getScript —— useStateKeyOptions
 // 在模块顶层静态 import getScript，vi.doMock 对已加载的 ESM 模块无效。
@@ -41,6 +54,7 @@ describe('StateKeyOptionsProvider', () => {
     getScriptMock.mockReset();
     getScriptMock.mockResolvedValue({ name: 'demo.lua', content: 'robot.set("demoKey", 1)' });
     subscribeMock.mockClear();
+    collectUsedScriptNamesMock.mockClear();
     resourceListener = undefined;
     seedScriptAction();
   });
@@ -113,5 +127,22 @@ describe('StateKeyOptionsProvider', () => {
       useFlowStore.getState().updateAction('A1', { script: 'other.lua' });
     });
     await waitFor(() => expect(getScriptMock).toHaveBeenCalledWith('other.lua'));
+  });
+
+  it('React Flow 视觉状态变化不重新扫描脚本引用', async () => {
+    const ref = React.createRef<{ keys: unknown[]; ready: boolean }>();
+    render(
+      <StateKeyOptionsProvider>
+        <Consumer ref={ref} />
+      </StateKeyOptionsProvider>,
+    );
+    await waitFor(() => expect(ref.current?.ready).toBe(true));
+    const callsBeforeVisualUpdate = collectUsedScriptNamesMock.mock.calls.length;
+
+    act(() => {
+      useFlowStore.setState((state) => ({ rfNodes: [...state.rfNodes] }));
+    });
+
+    expect(collectUsedScriptNamesMock).toHaveBeenCalledTimes(callsBeforeVisualUpdate);
   });
 });

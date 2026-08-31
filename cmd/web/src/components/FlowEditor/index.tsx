@@ -85,8 +85,11 @@ function FlowEditorInner({
   //     paint 时所有 NodeShell/MetricsBadge 拿到的都是新值，不会出现残留闪烁。
   useLayoutEffect(() => {
     setMetrics(metrics);
-    return () => setMetrics(undefined);
   }, [metrics, setMetrics]);
+
+  // 只在 FlowEditor 真正卸载时清空；若放在上面的 effect cleanup 中，每次快照变化都会
+  // 先广播一次空 Map、再广播新 Map，让所有节点重复执行指标 selector。
+  useLayoutEffect(() => () => setMetrics(undefined), [setMetrics]);
 
   useEffect(() => {
     // 启动时全量加载 proto：先尝试 vite 中间件 /conf/proto/*，失败再用编译期 glob 兜底

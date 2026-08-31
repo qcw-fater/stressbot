@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AgentBrief, ClusterSystemSnapshot, StressSnapshot } from '@/types/api';
 import { useRuntimeStore } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { MonitorDock } from './MonitorDock';
 import { SystemTab } from './tabs/SystemTab';
 
+const actionMetricsTableRender = vi.hoisted(() => vi.fn());
 vi.mock('./shared/ActionMetricsTable', () => ({
-  ActionMetricsTable: () => <div data-testid="action-metrics-table" />,
+  ActionMetricsTable: () => {
+    actionMetricsTableRender();
+    return <div data-testid="action-metrics-table" />;
+  },
 }));
 
 const stressSnapshot = {
@@ -135,5 +139,22 @@ describe('MonitorDock resource summary', () => {
     expect(container.textContent).not.toContain('主机');
     expect(container.textContent).not.toContain('进程');
     expect(container.textContent).not.toContain('句柄');
+  });
+
+  it('does not rerender the metrics table for every resize mousemove', async () => {
+    actionMetricsTableRender.mockClear();
+    useEditorStore.setState({ monitorDockOpen: true });
+    useRuntimeStore.setState({ mode: 'running', latestStress: stressSnapshot });
+    const { container } = render(<MonitorDock />);
+    await waitFor(() => expect(actionMetricsTableRender).toHaveBeenCalled());
+    const rendersBeforeDrag = actionMetricsTableRender.mock.calls.length;
+
+    const handle = container.querySelector('.monitor-dock__handle');
+    expect(handle).not.toBeNull();
+    fireEvent.mouseDown(handle!, { clientY: 400 });
+    fireEvent.mouseMove(window, { clientY: 360 });
+
+    expect(actionMetricsTableRender).toHaveBeenCalledTimes(rendersBeforeDrag);
+    fireEvent.mouseUp(window);
   });
 });

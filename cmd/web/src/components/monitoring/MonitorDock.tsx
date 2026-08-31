@@ -51,7 +51,9 @@ export function MonitorDock() {
     return saved >= MIN_H ? saved : DEFAULT_H;
   });
   const [topCollapsed, setTopCollapsed] = useState(false);
+  const dockRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
 
   const lastModeRef = useRef(mode);
   useEffect(() => {
@@ -61,9 +63,12 @@ export function MonitorDock() {
     lastModeRef.current = mode;
   }, [mode, setDockOpen]);
 
+  useEffect(() => () => dragCleanupRef.current?.(), []);
+
   const onDragStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
+      dragCleanupRef.current?.();
       dragRef.current = { startY: e.clientY, startH: height };
       let lastHeight = height;
       const onMove = (ev: MouseEvent) => {
@@ -74,14 +79,20 @@ export function MonitorDock() {
           Math.min(max, dragRef.current.startH + (dragRef.current.startY - ev.clientY)),
         );
         lastHeight = next;
-        setHeight(next);
+        if (dockRef.current) dockRef.current.style.height = `${next}px`;
       };
-      const onUp = () => {
-        if (dragRef.current) localStorage.setItem('stressbot.monitorDock.h', String(lastHeight));
+      const cleanupDrag = () => {
         dragRef.current = null;
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        if (dragCleanupRef.current === cleanupDrag) dragCleanupRef.current = null;
       };
+      const onUp = () => {
+        if (dragRef.current) localStorage.setItem('stressbot.monitorDock.h', String(lastHeight));
+        cleanupDrag();
+        setHeight(lastHeight);
+      };
+      dragCleanupRef.current = cleanupDrag;
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     },
@@ -113,7 +124,7 @@ export function MonitorDock() {
   }
 
   return (
-    <div className="monitor-dock" style={{ height }}>
+    <div ref={dockRef} className="monitor-dock" style={{ height }}>
       <Tooltip title="拖动调整高度">
         <div className="monitor-dock__handle" onMouseDown={onDragStart} />
       </Tooltip>

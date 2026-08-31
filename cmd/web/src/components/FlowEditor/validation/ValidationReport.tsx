@@ -2,13 +2,8 @@
  * 校验报告浮动窗口：列出 errors / warnings / infos，点击跳转到对应节点 / action / listen。
  */
 
-import { Alert, App as AntApp, Badge, Button, Empty, List, Space, Tabs, Tag } from 'antd';
-import {
-  CloseCircleFilled,
-  ExclamationCircleFilled,
-  InfoCircleFilled,
-  ReloadOutlined,
-} from '@ant-design/icons';
+import { Alert, App as AntApp, Badge, Empty, List, Space, Tabs, Tag } from 'antd';
+import { CloseCircleFilled, ExclamationCircleFilled, InfoCircleFilled } from '@ant-design/icons';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import type { ValidationIssue } from './refsCheck';
@@ -116,11 +111,7 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
       onClose={onClose}
       defaultSize={{ width: 580, height: 460 }}
       minSize={{ width: 400, height: 300 }}
-      extra={
-        <Button icon={<ReloadOutlined />} size="small" onClick={() => 0}>
-          自动更新
-        </Button>
-      }
+      extra={<Tag color="processing">自动更新</Tag>}
     >
       {report.total === 0 ? (
         <Alert

@@ -93,9 +93,9 @@ function FlowCanvasInner() {
   const [menu, setMenu] = useState<ContextMenu | null>(null);
 
   // 加载/新建流程后定位到 main 入口节点
-  const rfNodeIds = useFlowStore((s) => s.rfNodes.map((n) => n.id).join(','));
+  const flowNodes = useFlowStore((s) => s.nodes);
   useEffect(() => {
-    if (needsFitView && rfNodeIds.length > 0) {
+    if (needsFitView && Object.keys(flowNodes).length > 0) {
       const mainPos = useFlowStore.getState().layout.nodePositions['main'];
       if (mainPos) {
         const timer = setTimeout(() => {
@@ -111,7 +111,7 @@ function FlowCanvasInner() {
         return () => clearTimeout(timer);
       }
     }
-  }, [needsFitView, rfNodeIds, setCenter]);
+  }, [flowNodes, needsFitView, setCenter]);
 
   // 校验报告"跳转"：把目标节点 pan 到中央 + RF 原生 selected 高亮（单选目标，取消其余）
   const focusNodeId = useEditorStore((s) => s.focusRequestNodeId);

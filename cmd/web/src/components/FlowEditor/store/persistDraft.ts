@@ -9,7 +9,7 @@ import type { ListenDef } from '@/types/listen';
 import type { FlowLayout } from '@/types/editor';
 import type { FlowNode } from '@/types/flow';
 import type { FlowJson } from '../codec/flowToJson';
-import { useFlowStore } from './flowStore';
+import { useFlowStore, type FlowState } from './flowStore';
 
 const KEY_FLOW = 'stressbot-editor-draft-flow-v2';
 const KEY_LAYOUT = 'stressbot-editor-draft-layout-v2';
@@ -30,6 +30,31 @@ export interface DraftSnapshot {
 
 let timer: number | null = null;
 
+type PersistedSource = Pick<
+  FlowState,
+  'defaultDelayMs' | 'nodes' | 'actions' | 'listens' | 'layout'
+>;
+
+function selectPersistedSource(state: FlowState): PersistedSource {
+  return {
+    defaultDelayMs: state.defaultDelayMs,
+    nodes: state.nodes,
+    actions: state.actions,
+    listens: state.listens,
+    layout: state.layout,
+  };
+}
+
+function isSamePersistedSource(left: PersistedSource, right: PersistedSource): boolean {
+  return (
+    left.defaultDelayMs === right.defaultDelayMs &&
+    left.nodes === right.nodes &&
+    left.actions === right.actions &&
+    left.listens === right.listens &&
+    left.layout === right.layout
+  );
+}
+
 /** 立即写盘（同步）。供卸载/关闭页面时调用，避免 debounce 内的修改丢失。 */
 function flushNow(): void {
   try {
@@ -41,7 +66,11 @@ function flushNow(): void {
 
 /** 注册自动持久化。debounce 300ms 写盘 + beforeunload 同步 flush。返回反订阅函数。 */
 export function startAutoPersist(): () => void {
-  const unsub = useFlowStore.subscribe(() => {
+  let previous = selectPersistedSource(useFlowStore.getState());
+  const unsub = useFlowStore.subscribe((state) => {
+    const next = selectPersistedSource(state);
+    if (isSamePersistedSource(previous, next)) return;
+    previous = next;
     if (timer) clearTimeout(timer);
     timer = window.setTimeout(() => {
       flushNow();
@@ -60,7 +89,10 @@ export function startAutoPersist(): () => void {
   return () => {
     unsub();
     window.removeEventListener('beforeunload', onBeforeUnload);
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
   };
 }
 

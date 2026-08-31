@@ -4,7 +4,7 @@
  * 节点配色取自 CSS token（设计文档 §5.2 / tokens.css）。
  */
 
-import type { ReactNode } from 'react';
+import { useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { Tooltip } from 'antd';
 import { useEditorStore } from '../../store/editorStore';
 import { useFlowStore } from '../../store/flowStore';
@@ -38,6 +38,30 @@ export interface NodeShellProps {
   description?: string;
 }
 
+function subscribeListenHighlight(onStoreChange: () => void): () => void {
+  const unsubscribeEditor = useEditorStore.subscribe((state, previous) => {
+    if (state.hoveredListen !== previous.hoveredListen) onStoreChange();
+  });
+  const unsubscribeFlow = useFlowStore.subscribe((state, previous) => {
+    if (state.nodesByListen !== previous.nodesByListen) onStoreChange();
+  });
+  return () => {
+    unsubscribeEditor();
+    unsubscribeFlow();
+  };
+}
+
+function isNodeRegisteredForHoveredListen(nodeId: string): boolean {
+  const hoveredListen = useEditorStore.getState().hoveredListen;
+  if (!hoveredListen) return false;
+  return (useFlowStore.getState().nodesByListen[hoveredListen] ?? []).includes(nodeId);
+}
+
+function useListenHighlight(nodeId: string): boolean {
+  const getSnapshot = useCallback(() => isNodeRegisteredForHoveredListen(nodeId), [nodeId]);
+  return useSyncExternalStore(subscribeListenHighlight, getSnapshot, getSnapshot);
+}
+
 export function NodeShell({
   nodeId,
   nodeType,
@@ -50,11 +74,10 @@ export function NodeShell({
   compact,
   description,
 }: NodeShellProps) {
-  const hoveredListen = useEditorStore((s) => s.hoveredListen);
-  const edgeHighlight = useEditorStore((s) =>
-    s.edgeHighlightNodeIds.includes(nodeId) ? 'edge-highlight' : '',
+  const edgeHighlightColor = useEditorStore((s) =>
+    s.edgeHighlightNodeIds.includes(nodeId) ? (s.edgeHighlightColor ?? '') : null,
   );
-  const edgeHighlightColor = useEditorStore((s) => s.edgeHighlightColor);
+  const edgeHighlight = edgeHighlightColor === null ? '' : 'edge-highlight';
   const issues = useValidationStore((state) => state.issuesByNodeId[nodeId]);
   const errCount = issues?.filter((i) => i.severity === 'error').length ?? 0;
   const warnCount = issues?.filter((i) => i.severity === 'warning').length ?? 0;
@@ -62,9 +85,7 @@ export function NodeShell({
 
   // 仅当本节点真的在 listenRefs 中注册了 hoveredListen 时高亮，
   // 而非 hoveredListen 非空时把所有节点都高亮。
-  const isRegisteringHoveredListen = useFlowStore((s) =>
-    hoveredListen ? (s.nodesByListen[hoveredListen] ?? []).includes(nodeId) : false,
-  );
+  const isRegisteringHoveredListen = useListenHighlight(nodeId);
   const listenHighlight = isRegisteringHoveredListen ? 'highlight-by-listen' : '';
   const shapeClass = `shape-${shape}`;
   const compactClass = compact ? 'compact' : '';
