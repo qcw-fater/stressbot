@@ -18,7 +18,7 @@ import {
 } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
-import { ApiError, historyApi, showApiError } from '@/services';
+import { ApiError, historyApi, isAbortError, showApiError } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
@@ -51,6 +51,8 @@ type View =
   | { kind: 'detail'; id: string; stageIndex?: number; stageLabel?: string }
   | { kind: 'compare'; targets: SelTarget[] };
 
+const PAGE_SIZE = 20;
+
 export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const { message, modal } = App.useApp();
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
@@ -58,39 +60,64 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const [items, setItems] = useState<HistoryRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [starredOnly, setStarredOnly] = useState(false);
   const [selected, setSelected] = useState<SelTarget[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const [reloadVersion, setReloadVersion] = useState(0);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const resp = await historyApi.listHistory({
-        search: search || undefined,
-        starred: starredOnly ? true : undefined,
-        limit: 100,
-        includeStages: true,
-      });
-      setItems(resp.items);
-      setTotal(resp.total);
-      useEditorStore.getState().setHistoryEnabled(true);
-    } catch (err) {
-      if (err instanceof ApiError && err.code === 'HISTORY_DISABLED') {
-        useEditorStore.getState().setHistoryEnabled(false);
-      }
-      showApiError(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [search, starredOnly]);
+  const refresh = useCallback(() => setReloadVersion((version) => version + 1), []);
 
   useEffect(() => {
-    if (open && view.kind === 'list') {
+    if (!open || view.kind !== 'list') return;
+
+    const controller = new AbortController();
+    setLoading(true);
+    void historyApi
+      .listHistory(
+        {
+          search: search || undefined,
+          starred: starredOnly ? true : undefined,
+          limit: PAGE_SIZE,
+          offset: (page - 1) * PAGE_SIZE,
+          includeStages: true,
+        },
+        { signal: controller.signal },
+      )
+      .then((resp) => {
+        if (controller.signal.aborted) return;
+        const lastPage = Math.max(1, Math.ceil(resp.total / PAGE_SIZE));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
+        setItems(resp.items);
+        setTotal(resp.total);
+        useEditorStore.getState().setHistoryEnabled(true);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || isAbortError(err)) return;
+        if (err instanceof ApiError && err.code === 'HISTORY_DISABLED') {
+          useEditorStore.getState().setHistoryEnabled(false);
+        }
+        showApiError(err);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [open, page, reloadVersion, search, starredOnly, view.kind]);
+
+  const submitSearch = useCallback(
+    (value: string) => {
+      setSearch(value.trim());
+      setPage(1);
       refresh();
-    }
-  }, [open, view.kind, refresh]);
+    },
+    [refresh],
+  );
 
   const onToggleStar = useCallback(
     async (record: HistoryRecord, e?: React.MouseEvent) => {
@@ -225,8 +252,6 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     });
   }, [modal, message, popupZ, refresh, selected, uniqueParents]);
 
-  const paged = items.slice((page - 1) * pageSize, page * pageSize);
-
   const titleLabel =
     view.kind === 'list' ? '历史压测记录' : view.kind === 'detail' ? '记录详情' : '对比记录';
 
@@ -274,15 +299,26 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
             <Input.Search
               className="hp-list-toolbar__search"
               placeholder="名称、ID、标签或备注"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onSearch={refresh}
+              value={searchInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSearchInput(value);
+                if (value === '' && search !== '') submitSearch('');
+              }}
+              onSearch={submitSearch}
               allowClear
             />
             <div className="hp-list-toolbar__filters">
               <label className="hp-filter-toggle">
                 <span>仅收藏</span>
-                <Switch checked={starredOnly} onChange={setStarredOnly} size="small" />
+                <Switch
+                  checked={starredOnly}
+                  onChange={(checked) => {
+                    setStarredOnly(checked);
+                    setPage(1);
+                  }}
+                  size="small"
+                />
               </label>
               <Button
                 type="primary"
@@ -318,7 +354,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
               </div>
             ) : (
               <div className="hp-list">
-                {paged.map((r) =>
+                {items.map((r) =>
                   r.hasResetStages && r.children && r.children.length > 0 ? (
                     <StageGroup
                       key={r.id}
@@ -349,13 +385,13 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
             )}
           </div>
 
-          {items.length > pageSize && (
+          {total > PAGE_SIZE && (
             <footer className="hp-list-pagination">
               <Pagination
                 size="small"
                 current={page}
-                pageSize={pageSize}
-                total={items.length}
+                pageSize={PAGE_SIZE}
+                total={total}
                 onChange={setPage}
                 showSizeChanger={false}
               />

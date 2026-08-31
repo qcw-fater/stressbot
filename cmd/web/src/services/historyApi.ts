@@ -15,8 +15,14 @@ import type {
   UpdateHistoryRequest,
 } from '@/types/api';
 
-export function listHistory(filter: HistoryFilter = {}): Promise<HistoryListResponse> {
-  return getJson<HistoryListResponse>('/history' + buildQuery(filter as Record<string, unknown>));
+export function listHistory(
+  filter: HistoryFilter = {},
+  init?: RequestInit,
+): Promise<HistoryListResponse> {
+  return getJson<HistoryListResponse>(
+    '/history' + buildQuery(filter as Record<string, unknown>),
+    init,
+  );
 }
 
 export function getHistory(id: string, stageIndex?: number): Promise<HistoryDetail> {
