@@ -6,10 +6,10 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/DataDog/sketches-go v1.4.8
 	github.com/bufbuild/protocompile v0.14.1
-	github.com/bytedance/sonic v1.15.2
+	github.com/bytedance/sonic v1.15.3
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/fluxcd/pkg/envsubst v1.7.0
-	github.com/getkin/kin-openapi v0.147.0
+	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/oapi-codegen/nethttp-middleware v1.2.0
 	github.com/panjf2000/ants/v2 v2.12.1
@@ -20,7 +20,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.7
 	github.com/yuin/gopher-lua v1.1.2
 	go.uber.org/zap v1.28.0
-	google.golang.org/grpc v1.83.1
+	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
@@ -58,5 +58,5 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 // indirect
 )
