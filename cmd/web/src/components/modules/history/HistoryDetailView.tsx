@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
-import { historyApi, showApiError } from '@/services';
+import { historyApi, isAbortError, showApiError } from '@/services';
 import type {
   CleanupStatus,
   HistoryAgentReport,
@@ -80,12 +80,17 @@ export function HistoryDetailView({
   const [stagesExpanded, setStagesExpanded] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const init = { signal: controller.signal };
     setLoading(true);
+    setDetail(null);
+    setTimeseries(null);
     Promise.all([
-      historyApi.getHistory(id, stageIndex),
-      historyApi.getHistoryTimeseries(id, 1200, stageIndex),
+      historyApi.getHistory(id, stageIndex, init),
+      historyApi.getHistoryTimeseries(id, 1200, stageIndex, init),
     ])
       .then(([d, t]) => {
+        if (controller.signal.aborted) return;
         setDetail(d);
         setTimeseries({
           points: t?.points ?? [],
@@ -98,17 +103,27 @@ export function HistoryDetailView({
         setDraggingTagIndex(null);
         setDragOverTagIndex(null);
       })
-      .catch(showApiError)
-      .finally(() => setLoading(false));
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || isAbortError(err)) return;
+        showApiError(err);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
   }, [id, stageIndex]);
 
   useEffect(() => {
+    const controller = new AbortController();
     setConfigInfo(null);
     setStagesExpanded(false);
     historyApi
-      .getHistoryConfig(id)
-      .then(setConfigInfo)
+      .getHistoryConfig(id, { signal: controller.signal })
+      .then((config) => {
+        if (!controller.signal.aborted) setConfigInfo(config);
+      })
       .catch(() => {});
+    return () => controller.abort();
   }, [id]);
 
   const persistMeta = async (nextNote: string, nextTags: string[]) => {

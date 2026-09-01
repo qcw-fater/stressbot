@@ -714,6 +714,19 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     timingBreakdownFields,
   ]);
 
+  const horizontalScrollWidth = useMemo(
+    () =>
+      Math.max(
+        1,
+        columns.reduce(
+          (total, column) => total + (typeof column.width === 'number' ? column.width : 0),
+          0,
+        ),
+      ),
+    [columns],
+  );
+  const virtual = scrollY !== undefined;
+
   return (
     <div
       className="action-metrics-table"
@@ -777,9 +790,9 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
           dataSource={dataSource}
           columns={columns}
           pagination={false}
-          // 大流程的动作行可达数百行且每 5s 轮询整体换新数组；虚拟滚动固定渲染窗口内的行
-          virtual
-          scroll={{ x: 'max-content', y: scrollY }}
+          // rc-table 的虚拟模式要求 x/y 都是像素数值；字符串宽度会被内部降级为 1。
+          virtual={virtual}
+          scroll={{ x: horizontalScrollWidth, ...(virtual ? { y: scrollY } : {}) }}
         />
       </div>
     </div>

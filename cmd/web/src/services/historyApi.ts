@@ -25,8 +25,15 @@ export function listHistory(
   );
 }
 
-export function getHistory(id: string, stageIndex?: number): Promise<HistoryDetail> {
-  return getJson<HistoryDetail>(`/history/${encodeURIComponent(id)}${buildQuery({ stageIndex })}`);
+export function getHistory(
+  id: string,
+  stageIndex?: number,
+  init?: RequestInit,
+): Promise<HistoryDetail> {
+  return getJson<HistoryDetail>(
+    `/history/${encodeURIComponent(id)}${buildQuery({ stageIndex })}`,
+    init,
+  );
 }
 
 export function updateHistory(
@@ -46,14 +53,16 @@ export function getHistoryTimeseries(
   id: string,
   maxPoints?: number,
   stageIndex?: number,
+  init?: RequestInit,
 ): Promise<TimeseriesResponse> {
   return getJson<TimeseriesResponse>(
     `/history/${encodeURIComponent(id)}/timeseries${buildQuery({ maxPoints, stageIndex })}`,
+    init,
   );
 }
 
-export function getHistoryConfig(id: string): Promise<HistoryConfigSummary> {
-  return getJson<HistoryConfigSummary>(`/history/${encodeURIComponent(id)}/config`);
+export function getHistoryConfig(id: string, init?: RequestInit): Promise<HistoryConfigSummary> {
+  return getJson<HistoryConfigSummary>(`/history/${encodeURIComponent(id)}/config`, init);
 }
 
 export function getHistoryConfigArchive(id: string): Promise<HistoryConfigArchive> {
@@ -67,7 +76,10 @@ export function cloneHistory(id: string, req: HistoryCloneRequest = {}): Promise
 /** 对比目标：整体（仅 id）或阶段段落（id + stageIndex）。 */
 export type CompareTarget = string | { id: string; stageIndex?: number };
 
-export function compareHistory(targets: CompareTarget[]): Promise<HistoryCompareResponse> {
+export function compareHistory(
+  targets: CompareTarget[],
+  init?: RequestInit,
+): Promise<HistoryCompareResponse> {
   if (targets.length < 2 || targets.length > 5) {
     return Promise.reject(new Error('对比记录数量必须在 2~5 之间'));
   }
@@ -77,8 +89,11 @@ export function compareHistory(targets: CompareTarget[]): Promise<HistoryCompare
     const encoded = targets
       .map((t) => (typeof t === 'string' ? `${t}:-1` : `${t.id}:${t.stageIndex ?? -1}`))
       .join(',');
-    return getJson<HistoryCompareResponse>('/history/compare' + buildQuery({ targets: encoded }));
+    return getJson<HistoryCompareResponse>(
+      '/history/compare' + buildQuery({ targets: encoded }),
+      init,
+    );
   }
   const ids = targets.map((t) => (typeof t === 'string' ? t : t.id)).join(',');
-  return getJson<HistoryCompareResponse>('/history/compare' + buildQuery({ ids }));
+  return getJson<HistoryCompareResponse>('/history/compare' + buildQuery({ ids }), init);
 }

@@ -27,6 +27,11 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
+async function fetchStringArray(url: string): Promise<string[] | null> {
+  const data = await fetchJson<unknown>(url);
+  return Array.isArray(data) && data.every((item) => typeof item === 'string') ? data : null;
+}
+
 /** 获取基线 flow.json */
 export async function fetchBaselineFlow<T = unknown>(): Promise<T | null> {
   return fetchJson<T>(`${BASELINE_PREFIX}/flow/flow.json`);
@@ -39,7 +44,7 @@ export async function fetchBaselineFlow<T = unknown>(): Promise<T | null> {
  * 区分二者是为了让上层同步逻辑在失败时中止删除对账，而不是把空清单当作「服务器删光了」。
  */
 export async function fetchBaselineScriptIndex(): Promise<string[] | null> {
-  return fetchJson<string[]>(`${BASELINE_PREFIX}/scripts/index.json`);
+  return fetchStringArray(`${BASELINE_PREFIX}/scripts/index.json`);
 }
 
 /** 获取基线中指定脚本内容 */
@@ -54,7 +59,7 @@ export async function fetchBaselineScript(name: string): Promise<string | null> 
  * 上层同步逻辑据此在失败时中止删除对账，避免空清单被误判为「服务器删光了」。
  */
 export async function fetchBaselineProtoIndex(): Promise<string[] | null> {
-  return fetchJson<string[]>(`${BASELINE_PREFIX}/proto/index.json`);
+  return fetchStringArray(`${BASELINE_PREFIX}/proto/index.json`);
 }
 
 /** 获取基线中指定 proto 文件内容 */
@@ -75,7 +80,7 @@ export async function fetchBaselineProtoContent(name: string): Promise<string | 
  * 上层同步逻辑据此在失败时中止删除对账，避免空清单被误判为「服务器删光了」。
  */
 export async function fetchBaselineCodecIndex(): Promise<string[] | null> {
-  return fetchJson<string[]>(`${BASELINE_PREFIX}/adapter/index.json`);
+  return fetchStringArray(`${BASELINE_PREFIX}/adapter/index.json`);
 }
 
 /** 基线单份 codec/errors 文件内容（name = tcp_logic_codec.json / errors.json）。 */

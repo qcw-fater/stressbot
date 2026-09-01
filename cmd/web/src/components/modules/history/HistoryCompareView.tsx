@@ -11,7 +11,7 @@ import { Empty, Spin, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
-import { historyApi, showApiError } from '@/services';
+import { historyApi, isAbortError, showApiError } from '@/services';
 import type { CompareTarget } from '@/services/historyApi';
 import type { HistoryCompareTask } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
@@ -80,12 +80,22 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
   );
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
+    setData(null);
     historyApi
-      .compareHistory(targets)
-      .then((r) => setData(r.tasks))
-      .catch(showApiError)
-      .finally(() => setLoading(false));
+      .compareHistory(targets, { signal: controller.signal })
+      .then((r) => {
+        if (!controller.signal.aborted) setData(r.tasks);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || isAbortError(err)) return;
+        showApiError(err);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetsKey]);
 

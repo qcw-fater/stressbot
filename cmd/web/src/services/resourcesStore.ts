@@ -14,8 +14,14 @@
  */
 
 import { clear, createStore, del, delMany, get, keys, set, setMany } from 'idb-keyval';
-import { BASELINE_PREFIX } from './env';
-import { fetchBaselineCodecIndex, fetchBaselineCodec } from './baselineApi';
+import {
+  fetchBaselineCodec,
+  fetchBaselineCodecIndex,
+  fetchBaselineProtoContent,
+  fetchBaselineProtoIndex,
+  fetchBaselineScript,
+  fetchBaselineScriptIndex,
+} from './baselineApi';
 import { validateCodecStructure } from './schemaValidator';
 import type { CodecSchema } from '@/types/codec';
 import type {
@@ -54,6 +60,8 @@ export interface ResourceFile {
   /** 上次确认同步到的服务器内容 hash；null 表示确认时服务器没有该资源。 */
   baseHash?: string | null;
 }
+
+export type ResourceType = 'proto' | 'script' | 'adapter';
 
 const ADAPTER_DB = 'stressbot-resources-adapter';
 
@@ -128,8 +136,7 @@ export async function addProto(name: string, content: string): Promise<ResourceF
 }
 
 export async function addProtoFromBaseline(name: string, content: string): Promise<ResourceFile> {
-  const file = await serverResourceFile(name, content);
-  await set(name, file, protoStore);
+  const file = await storeBaselineResource('proto', name, content);
   notify();
   return file;
 }
@@ -188,8 +195,7 @@ export async function addScript(name: string, content: string): Promise<Resource
 }
 
 export async function addScriptFromBaseline(name: string, content: string): Promise<ResourceFile> {
-  const file = await serverResourceFile(name, content);
-  await set(name, file, scriptStore);
+  const file = await storeBaselineResource('script', name, content);
   notify();
   return file;
 }
@@ -272,9 +278,7 @@ export async function setCodecSchemaFromBaseline(
   name: string,
   content: string,
 ): Promise<ResourceFile> {
-  assertCodecFileName(name);
-  const file = await serverResourceFile(name, content);
-  await set(name, file, adapterStore);
+  const file = await storeBaselineResource('adapter', name, content);
   notify();
   return file;
 }
@@ -320,8 +324,7 @@ export async function setErrorMap(content: string): Promise<ResourceFile> {
 }
 
 export async function setErrorMapFromBaseline(content: string): Promise<ResourceFile> {
-  const file = await serverResourceFile(ERRORS_JSON_KEY, content);
-  await set(ERRORS_JSON_KEY, file, adapterStore);
+  const file = await storeBaselineResource('adapter', ERRORS_JSON_KEY, content);
   notify();
   return file;
 }
@@ -1025,8 +1028,6 @@ function saveLastBaseline(index: LastBaselineIndex): void {
   }
 }
 
-export type ResourceType = 'proto' | 'script' | 'adapter';
-
 export interface SyncDiff {
   type: ResourceType;
   name: string;
@@ -1128,23 +1129,21 @@ async function writeBaselineResource(
   type: ResourceType,
   name: string,
   content: string,
+  shouldNotify = true,
 ): Promise<void> {
-  if (type === 'proto') {
-    await addProtoFromBaseline(name, content);
-  } else if (type === 'script') {
-    await addScriptFromBaseline(name, content);
-  } else if (name === ERRORS_JSON_KEY) {
-    await setErrorMapFromBaseline(content);
-  } else {
-    await setCodecSchemaFromBaseline(name, content);
-  }
+  await storeBaselineResource(type, name, content);
+  if (shouldNotify) notify();
 }
 
-async function deleteResource(type: ResourceType, name: string): Promise<void> {
+async function deleteResource(
+  type: ResourceType,
+  name: string,
+  shouldNotify = true,
+): Promise<void> {
   if (type === 'proto') await del(name, protoStore);
   else if (type === 'script') await del(name, scriptStore);
   else await del(name, adapterStore);
-  notify();
+  if (shouldNotify) notify();
 }
 
 async function setResourceBaseHash(
@@ -1166,27 +1165,31 @@ export async function reconcileResourceWithServer(
   name: string,
   local: ResourceFile,
   serverContent: string | null,
-): Promise<void> {
+  shouldNotify = true,
+): Promise<boolean> {
   const decision = await compareResourceThreeWay(local, serverContent);
   switch (decision.kind) {
     case 'unchanged':
       result.unchanged.push({ type, name });
-      return;
+      return false;
     case 'legacyRepair':
       await setResourceBaseHash(type, name, decision.serverHash);
       result.unchanged.push({ type, name });
-      return;
+      return false;
     case 'localOnlyChanged':
-      return;
+      return false;
     case 'serverOnlyChanged':
-      if (serverContent !== null) await writeBaselineResource(type, name, serverContent);
-      return;
+      if (serverContent !== null) {
+        await writeBaselineResource(type, name, serverContent, shouldNotify);
+        return true;
+      }
+      return false;
     case 'serverRemovedOnly':
-      await deleteResource(type, name);
-      return;
+      await deleteResource(type, name, shouldNotify);
+      return true;
     case 'removedConflict':
       result.removed.push({ type, name, localContent: local.content, baselineContent: '' });
-      return;
+      return false;
     case 'conflict':
       result.conflicts.push({
         type,
@@ -1194,7 +1197,7 @@ export async function reconcileResourceWithServer(
         localContent: local.content,
         baselineContent: serverContent ?? '',
       });
-      return;
+      return false;
   }
 }
 
@@ -1247,8 +1250,8 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
 
   // 并行拉取各资源组基线索引。null 表示该组请求失败——直接中止，不做任何删除对账。
   const [protoIndex, scriptIndex, codecIndex] = await Promise.all([
-    fetchIndex(`${BASELINE_PREFIX}/proto/index.json`),
-    fetchIndex(`${BASELINE_PREFIX}/scripts/index.json`),
+    fetchBaselineProtoIndex(),
+    fetchBaselineScriptIndex(),
     fetchBaselineCodecIndex(),
   ]);
   if (protoIndex === null || scriptIndex === null || codecIndex === null) {
@@ -1256,13 +1259,23 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
   }
 
   // --- Proto ---
-  await syncFileGroup(protoIndex, 'proto', protoStore, `${BASELINE_PREFIX}/proto/`, result);
+  let changed = await syncFileGroup(
+    protoIndex,
+    'proto',
+    protoStore,
+    fetchBaselineProtoContent,
+    result,
+  );
 
   // --- Scripts ---
-  await syncFileGroup(scriptIndex, 'script', scriptStore, `${BASELINE_PREFIX}/scripts/`, result);
+  if (await syncFileGroup(scriptIndex, 'script', scriptStore, fetchBaselineScript, result)) {
+    changed = true;
+  }
 
   // --- Adapter（多 codec + errors.json，与 proto/scripts 同款走 syncFileGroup）---
-  await syncFileGroup(codecIndex, 'adapter', adapterStore, `${BASELINE_PREFIX}/adapter/`, result);
+  if (await syncFileGroup(codecIndex, 'adapter', adapterStore, fetchBaselineCodec, result)) {
+    changed = true;
+  }
 
   // 同步完成后保存当前基线快照
   saveLastBaseline({
@@ -1270,6 +1283,8 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
     script: scriptIndex,
     adapter: codecIndex,
   });
+
+  if (changed) notify();
 
   return result;
 }
@@ -1296,9 +1311,9 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
         baseline === null ? null : await hashResourceContent(baseline),
       );
     } else if (baseline !== null) {
-      await writeBaselineResource(d.type, d.name, baseline);
+      await writeBaselineResource(d.type, d.name, baseline, false);
     } else {
-      await deleteResource(d.type, d.name);
+      await deleteResource(d.type, d.name, false);
     }
     changed = true;
   }
@@ -1307,107 +1322,78 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
 
 // --- 内部辅助 ---
 
-/**
- * 拉取基线索引清单。
- *
- * 返回 null 表示请求失败（断网 / 非 2xx / 解析异常）；返回 string[] 表示服务器权威清单（含空清单）。
- * 上层 syncResourcesFromBaseline 据此在失败时中止删除对账，绝不能把空清单当作「服务器删光了」。
- */
-async function fetchIndex(url: string): Promise<string[] | null> {
-  try {
-    const resp = await fetch(url, { cache: 'no-cache' });
-    if (!resp.ok) {
-      console.warn(`[baseline] fetchIndex ${url} returned ${resp.status}`);
-      return null;
-    }
-    const data = await resp.json();
-    if (!Array.isArray(data)) {
-      console.warn(`[baseline] fetchIndex ${url} returned non-array`);
-      return null;
-    }
-    return data as string[];
-  } catch (e) {
-    console.warn(`[baseline] fetchIndex ${url} failed:`, e);
-    return null;
-  }
-}
-
-async function fetchFileText(url: string): Promise<string | null> {
-  try {
-    const resp = await fetch(url, { cache: 'no-cache' });
-    if (!resp.ok) return null;
-    return await resp.text();
-  } catch {
-    return null;
-  }
-}
-
 async function fetchResourceBaseline(type: ResourceType, name: string): Promise<string | null> {
-  if (type === 'proto')
-    return fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(name)}`);
-  if (type === 'script')
-    return fetchFileText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(name)}`);
+  if (type === 'proto') return fetchBaselineProtoContent(name);
+  if (type === 'script') return fetchBaselineScript(name);
   return fetchBaselineCodec(name);
+}
+
+async function storeBaselineResource(
+  type: ResourceType,
+  name: string,
+  content: string,
+): Promise<ResourceFile> {
+  if (type === 'adapter' && name !== ERRORS_JSON_KEY) assertCodecFileName(name);
+  const file = await serverResourceFile(name, content);
+  if (type === 'proto') await set(name, file, protoStore);
+  else if (type === 'script') await set(name, file, scriptStore);
+  else await set(name, file, adapterStore);
+  return file;
 }
 
 async function syncFileGroup(
   baselineNames: string[],
   type: ResourceType,
   store: ReturnType<typeof createStore>,
-  urlPrefix: string,
+  fetchBaseline: (name: string) => Promise<string | null>,
   result: BaselineSyncResult,
-): Promise<void> {
+): Promise<boolean> {
   // 收集本地存储中已有的所有 key
-  const idbKeys = new Set(((await keys(store)) as IDBValidKey[]).map(String));
+  const idbKeys = ((await keys(store)) as IDBValidKey[]).map(String);
+  const localEntries = await Promise.all(
+    idbKeys.map(async (name) => [name, await get<ResourceFile>(name, store)] as const),
+  );
+  const localByName = new Map(localEntries);
   const baselineSet = new Set(baselineNames);
-
-  // 基线有 → 对比
-  const toFetch: string[] = [];
-  for (const name of baselineNames) {
-    const existing = await get<ResourceFile>(name, store);
-    if (!existing) {
-      toFetch.push(name); // 本地存储没有，后面批量 fetch 再写入
-    } else if (existing.content === '') {
-      // 无法区分"内容就是空"和"元数据损坏"，fetch 基线对比
-      toFetch.push(name);
-    } else {
-      // 需要基线内容来对比
-      toFetch.push(name);
-    }
-  }
 
   // 批量 fetch 基线内容
   const baselineContents = new Map<string, string>();
   await Promise.all(
-    toFetch.map(async (name) => {
-      const text = await fetchFileText(urlPrefix + encodeURIComponent(name));
+    baselineNames.map(async (name) => {
+      const text = await fetchBaseline(name);
       if (text !== null) baselineContents.set(name, text);
     }),
   );
 
+  let changed = false;
   for (const name of baselineNames) {
     const baseline = baselineContents.get(name);
     if (baseline === undefined) continue; // fetch 失败，跳过
 
-    const existing = await get<ResourceFile>(name, store);
+    const existing = localByName.get(name);
     if (!existing) {
-      await writeBaselineResource(type, name, baseline);
+      await writeBaselineResource(type, name, baseline, false);
       result.added.push({ type, name });
+      changed = true;
     } else {
-      await reconcileResourceWithServer(result, type, name, existing, baseline);
+      if (await reconcileResourceWithServer(result, type, name, existing, baseline, false)) {
+        changed = true;
+      }
     }
   }
 
   // 服务器没有、本地有：由 baseHash 判断是本地新增、服务器删除，还是旧数据未知历史。
   for (const key of idbKeys) {
     if (baselineSet.has(key)) continue;
-    const existing = await get<ResourceFile>(key, store);
+    const existing = localByName.get(key);
     if (existing) {
-      await reconcileResourceWithServer(result, type, key, existing, null);
+      if (await reconcileResourceWithServer(result, type, key, existing, null, false)) {
+        changed = true;
+      }
     }
   }
 
-  if (result.added.length > 0) notify();
+  return changed;
 }
 
 // === 变更订阅 ===
