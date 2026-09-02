@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const stores = new Map<unknown, Map<unknown, unknown>>();
 const storageOperations: string[] = [];
+const readOperations: string[] = [];
 const templateServer = vi.hoisted(() => ({
   actions: [] as Array<Record<string, unknown>>,
   listens: [] as Array<Record<string, unknown>>,
@@ -51,7 +52,15 @@ vi.mock('idb-keyval', () => {
 
   return {
     createStore: vi.fn((db: string, store: string) => ({ db, store })),
-    get: vi.fn(async (key: unknown, store: unknown) => storeMap(store).get(key)),
+    get: vi.fn(async (key: unknown, store: unknown) => {
+      readOperations.push('get');
+      return storeMap(store).get(key);
+    }),
+    getMany: vi.fn(async (keys: unknown[], store: unknown) => {
+      readOperations.push('getMany');
+      const values = storeMap(store);
+      return keys.map((key) => values.get(key));
+    }),
     set: vi.fn(async (key: unknown, value: unknown, store: unknown) => {
       storeMap(store).set(key, value);
     }),
@@ -124,6 +133,7 @@ function resource(name: string, content: string, baseHash: string): ResourceFile
 beforeEach(() => {
   stores.clear();
   storageOperations.length = 0;
+  readOperations.length = 0;
   templateServer.actions = [];
   templateServer.listens = [];
   templateServer.actionRevision = 0;
@@ -136,6 +146,28 @@ afterEach(() => {
 });
 
 describe('resource snapshots', () => {
+  it('lists each resource section with one batch value read', async () => {
+    const protos = [resource('z.proto', 'z', 'sha256:z'), resource('a.proto', 'a', 'sha256:a')];
+    const scripts = [resource('main.lua', 'return true', 'sha256:script')];
+    const codecs = [resource('tcp_logic_codec.json', '{}', 'sha256:codec')];
+    await replaceProtoFiles(protos);
+    await replaceScriptFiles(scripts);
+    await replaceCodecFiles(codecs);
+    readOperations.length = 0;
+
+    const [listedProtos, listedScripts, listedCodecs] = await Promise.all([
+      listProto(),
+      listScript(),
+      listCodecFiles(),
+    ]);
+
+    expect(listedProtos.map((file) => file.name)).toEqual(['a.proto', 'z.proto']);
+    expect(listedScripts.map((file) => file.name)).toEqual(['main.lua']);
+    expect(listedCodecs.map((file) => file.name)).toEqual(['tcp_logic_codec.json']);
+    expect(readOperations.filter((operation) => operation === 'getMany')).toHaveLength(3);
+    expect(readOperations).not.toContain('get');
+  });
+
   it('replaces Proto and script files without regenerating metadata', async () => {
     const proto = resource('login.proto', 'syntax="proto3";', 'sha256:proto');
     const script = resource('login.lua', 'return true', 'sha256:script');

@@ -13,7 +13,7 @@
  * 基线同步：本地/基线/服务器三方比较，只有双方都修改且内容不同时才需要用户处理冲突。
  */
 
-import { clear, createStore, del, delMany, get, keys, set, setMany } from 'idb-keyval';
+import { clear, createStore, del, delMany, get, getMany, keys, set, setMany } from 'idb-keyval';
 import {
   fetchBaselineCodec,
   fetchBaselineCodecIndex,
@@ -68,6 +68,19 @@ const ADAPTER_DB = 'stressbot-resources-adapter';
 const protoStore = createStore(PROTO_DB, 'data');
 const scriptStore = createStore(SCRIPT_DB, 'data');
 const adapterStore = createStore(ADAPTER_DB, 'data');
+
+async function listResourceStore(
+  store: ReturnType<typeof createStore>,
+  includeKey: (key: IDBValidKey) => boolean = () => true,
+): Promise<ResourceFile[]> {
+  const selectedKeys = ((await keys(store)) as IDBValidKey[]).filter(includeKey);
+  if (selectedKeys.length === 0) return [];
+  const items = (await getMany<ResourceFile | undefined>(selectedKeys, store)).filter(
+    (item): item is ResourceFile => Boolean(item),
+  );
+  items.sort((a, b) => a.name.localeCompare(b.name));
+  return items;
+}
 
 async function replaceResourceStore(
   store: ReturnType<typeof createStore>,
@@ -159,14 +172,7 @@ export async function getProto(name: string): Promise<ResourceFile | undefined> 
 }
 
 export async function listProto(): Promise<ResourceFile[]> {
-  const allKeys = (await keys(protoStore)) as IDBValidKey[];
-  const items: ResourceFile[] = [];
-  for (const k of allKeys) {
-    const v = await get<ResourceFile>(k, protoStore);
-    if (v) items.push(v);
-  }
-  items.sort((a, b) => a.name.localeCompare(b.name));
-  return items;
+  return listResourceStore(protoStore);
 }
 
 export async function removeProto(name: string): Promise<void> {
@@ -218,14 +224,7 @@ export async function getScript(name: string): Promise<ResourceFile | undefined>
 }
 
 export async function listScript(): Promise<ResourceFile[]> {
-  const allKeys = (await keys(scriptStore)) as IDBValidKey[];
-  const items: ResourceFile[] = [];
-  for (const k of allKeys) {
-    const v = await get<ResourceFile>(k, scriptStore);
-    if (v) items.push(v);
-  }
-  items.sort((a, b) => a.name.localeCompare(b.name));
-  return items;
+  return listResourceStore(scriptStore);
 }
 
 export async function removeScript(name: string): Promise<void> {
@@ -291,16 +290,7 @@ export async function clearCodecSchema(name: string): Promise<void> {
 
 /** 列出所有 *_codec.json（不含 errors.json），按 name 排序。 */
 export async function listCodecFiles(): Promise<ResourceFile[]> {
-  const allKeys = (await keys(adapterStore)) as IDBValidKey[];
-  const items: ResourceFile[] = [];
-  for (const k of allKeys) {
-    const name = String(k);
-    if (!name.endsWith(CODEC_FILE_SUFFIX)) continue;
-    const v = await get<ResourceFile>(k, adapterStore);
-    if (v) items.push(v);
-  }
-  items.sort((a, b) => a.name.localeCompare(b.name));
-  return items;
+  return listResourceStore(adapterStore, (key) => String(key).endsWith(CODEC_FILE_SUFFIX));
 }
 
 export async function replaceCodecFiles(files: readonly ResourceFile[]): Promise<void> {

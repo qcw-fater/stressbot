@@ -30,6 +30,8 @@ vi.mock('idb-keyval', () => ({
     for (const key of keys) storage.database(store).delete(key);
   },
   get: async (key: IDBValidKey, store: string) => storage.database(store).get(key),
+  getMany: async (keys: IDBValidKey[], store: string) =>
+    keys.map((key) => storage.database(store).get(key)),
   keys: async (store: string) => Array.from(storage.database(store).keys()),
   set: async (key: IDBValidKey, value: unknown, store: string) => {
     storage.database(store).set(key, value);

@@ -22,6 +22,10 @@ vi.mock('idb-keyval', () => {
   return {
     createStore: vi.fn((db: string, _store: string) => ({ db, store: _store })),
     get: vi.fn(async (key: unknown, store: unknown) => storeMap(store).get(key)),
+    getMany: vi.fn(async (keys: unknown[], store: unknown) => {
+      const m = storeMap(store);
+      return keys.map((key) => m.get(key));
+    }),
     set: vi.fn(async (key: unknown, value: unknown, store: unknown) => {
       storeMap(store).set(key, value);
     }),
