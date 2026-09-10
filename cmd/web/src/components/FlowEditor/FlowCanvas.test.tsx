@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import type * as XYFlow from '@xyflow/react';
 import type { PropsWithChildren } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,6 +50,7 @@ vi.mock('./library/templateStore', () => ({
 }));
 
 import { FlowCanvas } from './FlowCanvas';
+import { useEditorStore } from './store/editorStore';
 import { useFlowStore } from './store/flowStore';
 
 describe('FlowCanvas subscriptions', () => {
@@ -62,6 +63,7 @@ describe('FlowCanvas subscriptions', () => {
       rfEdges: [],
       needsFitView: false,
     });
+    useEditorStore.setState({ clipboard: null });
   });
 
   it('does not render the canvas when only the semantic node map reference changes', () => {
@@ -78,6 +80,90 @@ describe('FlowCanvas subscriptions', () => {
     });
 
     expect(mocks.reactFlowRenderCount).toBe(initialRenderCount);
+    view.unmount();
+  });
+
+  it('does not paste a node when Ctrl+V originates outside the canvas', () => {
+    useEditorStore.setState({
+      clipboard: {
+        kind: 'node',
+        nodeId: 'copied',
+        node: { type: 'wait', waitMs: 100 },
+      },
+    });
+    const view = render(<FlowCanvas />);
+    const canvas = view.container.firstElementChild as HTMLElement;
+    fireEvent.mouseMove(canvas, { clientX: 120, clientY: 80 });
+
+    const editorSurface = document.createElement('div');
+    document.body.appendChild(editorSurface);
+    fireEvent.keyDown(editorSurface, { key: 'v', ctrlKey: true });
+
+    expect(Object.keys(useFlowStore.getState().nodes)).toEqual(['main']);
+    editorSurface.remove();
+    view.unmount();
+  });
+
+  it('focuses the canvas when the user presses it', () => {
+    const view = render(<FlowCanvas />);
+    const canvas = view.container.firstElementChild as HTMLElement;
+
+    fireEvent.mouseDown(canvas);
+
+    expect(document.activeElement).toBe(canvas);
+    view.unmount();
+  });
+
+  it('leaves text paste to the browser even when a node was copied', () => {
+    useEditorStore.setState({
+      clipboard: {
+        kind: 'node',
+        nodeId: 'copied',
+        node: { type: 'wait', waitMs: 100 },
+      },
+    });
+    const view = render(<FlowCanvas />);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    const event = new KeyboardEvent('keydown', {
+      key: 'v',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    input.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(Object.keys(useFlowStore.getState().nodes)).toEqual(['main']);
+    input.remove();
+    view.unmount();
+  });
+
+  it('pastes the structured clipboard when Ctrl+V originates from the canvas', () => {
+    useEditorStore.setState({
+      clipboard: {
+        kind: 'node',
+        nodeId: 'copied',
+        node: { type: 'wait', waitMs: 100 },
+      },
+    });
+    const view = render(<FlowCanvas />);
+    const canvas = view.container.firstElementChild as HTMLElement;
+    fireEvent.mouseMove(canvas, { clientX: 120, clientY: 80 });
+    fireEvent.mouseDown(canvas);
+    const event = new KeyboardEvent('keydown', {
+      key: 'v',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    canvas.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(Object.keys(useFlowStore.getState().nodes)).toHaveLength(2);
     view.unmount();
   });
 });

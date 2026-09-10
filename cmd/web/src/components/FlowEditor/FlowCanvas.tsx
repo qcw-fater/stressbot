@@ -745,14 +745,11 @@ function FlowCanvasInner() {
   // 关键约束：
   //   - 在 input/textarea/contentEditable 中触发时让浏览器原生处理（不抢复制粘贴）
   //   - 用户当前选中了文本时让出（getSelection().toString()）
-  //   - 仅当前焦点在画布内或 body 时才处理（避免抢其他面板的快捷键）
+  //   - 仅键盘事件确实来自画布内部时处理；编辑窗口及其空白区域都不能落入画布逻辑
   //   - 没有可复制的对象时不触发任何提示
   useEffect(() => {
-    const inCanvas = () => {
-      const ae = document.activeElement;
-      if (!ae || ae === document.body) return true;
-      return wrapperRef.current?.contains(ae as Node) ?? false;
-    };
+    const inCanvas = (target: EventTarget | null) =>
+      target instanceof Node && (wrapperRef.current?.contains(target) ?? false);
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (
@@ -760,7 +757,7 @@ function FlowCanvasInner() {
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       )
         return;
-      if (!inCanvas()) return;
+      if (!inCanvas(e.target)) return;
       // 只读模式（运行 / 查看运行 / 终态报告）下，所有写操作快捷键全部失效：
       // ReactFlow props 与右键菜单的 readOnly 保护覆盖不到全局键盘（F1~F10 / Ctrl+X / Ctrl+V）。
       if (readOnly) return;
@@ -867,7 +864,10 @@ function FlowCanvasInner() {
   return (
     <div
       ref={wrapperRef}
+      tabIndex={-1}
       style={{ width: '100%', height: '100%', position: 'relative' }}
+      // 显式建立画布焦点，避免再用 document.body 猜测最近一次交互区域。
+      onMouseDownCapture={() => wrapperRef.current?.focus({ preventScroll: true })}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onMouseMove={(e) => {
