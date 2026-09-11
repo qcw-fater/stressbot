@@ -6,18 +6,18 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/DataDog/sketches-go v1.4.8
 	github.com/bufbuild/protocompile v0.14.1
-	github.com/bytedance/sonic v1.15.3
+	github.com/bytedance/sonic v1.15.4
 	github.com/cenkalti/backoff/v4 v4.3.0
-	github.com/fluxcd/pkg/envsubst v1.7.0
+	github.com/fluxcd/pkg/envsubst v1.8.0
 	github.com/getkin/kin-openapi v0.149.0
-	github.com/go-sql-driver/mysql v1.10.0
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/oapi-codegen/nethttp-middleware v1.2.0
 	github.com/panjf2000/ants/v2 v2.12.1
 	github.com/panjf2000/gnet/v2 v2.10.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
-	github.com/shirou/gopsutil/v4 v4.26.7
+	github.com/shirou/gopsutil/v4 v4.26.8
 	github.com/yuin/gopher-lua v1.1.2
 	go.uber.org/zap v1.28.0
 	google.golang.org/grpc v1.83.2
@@ -36,7 +36,7 @@ require (
 	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/go-openapi/jsonpointer v1.0.0 // indirect
+	github.com/go-openapi/jsonpointer v1.0.1 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260802145828-341c2f0c90b5 // indirect
@@ -53,10 +53,10 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/arch v0.30.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 // indirect
+	golang.org/x/arch v0.31.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260908043556-f8649ddbbfe6 // indirect
 )
