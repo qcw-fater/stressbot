@@ -2,13 +2,16 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"stressbot/agent/metrics"
 	"stressbot/agent/session"
 	controlpb "stressbot/controlplane/pb"
+	"stressbot/internal/stresslog"
 	"stressbot/internal/workpool"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -44,6 +47,12 @@ func (a *Agent) runConnection(parent context.Context, conn *grpc.ClientConn) err
 	if welcome == nil || welcome.ProtocolVersion != session.ProtocolVersion {
 		return status.Error(codes.FailedPrecondition, "Admin 未返回有效 Welcome")
 	}
+	stresslog.Info("[AGENT] gRPC 控制会话已建立",
+		zap.String("agentID", a.id),
+		zap.String("adminAddress", a.cfg.AdminAddress),
+		zap.Uint64("generation", welcome.Generation),
+		zap.Duration("heartbeatInterval", time.Duration(welcome.HeartbeatIntervalNanos)),
+		zap.Duration("leaseDuration", time.Duration(welcome.LeaseDurationNanos)))
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	a.leaseDeadline.Store(time.Now().Add(time.Duration(welcome.LeaseDurationNanos)).UnixNano())
@@ -54,27 +63,34 @@ func (a *Agent) runConnection(parent context.Context, conn *grpc.ClientConn) err
 	metricsClient := controlpb.NewAgentMetricsServiceClient(conn)
 	sendDone, recvDone, metricsDone := make(chan error, 1), make(chan error, 1), make(chan error, 1)
 	if err := workpool.Default().Submit(func() { sendDone <- a.sessionSendLoop(ctx, sender, stream) }); err != nil {
-		return err
+		return fmt.Errorf("启动控制事件发送循环失败: %w", err)
 	}
 	if err := workpool.Default().Submit(func() { recvDone <- a.sessionRecvLoop(ctx, stream, bundleClient, welcome.Generation) }); err != nil {
-		return err
+		return fmt.Errorf("启动控制事件接收循环失败: %w", err)
 	}
 	if err := workpool.Default().Submit(func() { metricsDone <- a.metrics.SendLoop(ctx, metricsClient, a.id, welcome.Generation) }); err != nil {
-		return err
+		return fmt.Errorf("启动指标上报循环失败: %w", err)
 	}
 	if err := workpool.Default().Submit(func() { a.heartbeatProducer(ctx, sender, welcome) }); err != nil {
-		return err
+		return fmt.Errorf("启动心跳生成循环失败: %w", err)
 	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-sendDone:
-		return err
+		return sessionLoopError("控制事件发送", err)
 	case err := <-recvDone:
-		return err
+		return sessionLoopError("控制事件接收", err)
 	case err := <-metricsDone:
-		return err
+		return sessionLoopError("指标上报", err)
 	}
+}
+
+func sessionLoopError(name string, err error) error {
+	if err == nil {
+		return fmt.Errorf("%s循环意外结束", name)
+	}
+	return fmt.Errorf("%s循环结束: %w", name, err)
 }
 
 func (a *Agent) sessionSendLoop(ctx context.Context, sender *session.Sender, stream controlpb.AgentControlService_SessionClient) error {

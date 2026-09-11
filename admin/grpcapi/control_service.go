@@ -18,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -57,29 +58,57 @@ func commandContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Second)
 }
 
-func (svc *grpcControlService) Session(stream controlpb.AgentControlService_SessionServer) error {
+func (svc *grpcControlService) Session(stream controlpb.AgentControlService_SessionServer) (sessionErr error) {
+	remoteAddress := ""
+	if remote, ok := peer.FromContext(stream.Context()); ok {
+		remoteAddress = remote.Addr.String()
+	}
 	first, err := stream.Recv()
 	if err != nil {
-		return err
+		return logControlHandshakeFailure(remoteAddress, "", err)
 	}
 	hello := first.GetHello()
 	if hello == nil {
-		return status.Error(codes.FailedPrecondition, "Session 第一帧必须是 Hello")
+		return logControlHandshakeFailure(remoteAddress, "", status.Error(codes.FailedPrecondition, "Session 第一帧必须是 Hello"))
 	}
 	if hello.ProtocolVersion != controlProtocolVersion {
-		return status.Errorf(codes.FailedPrecondition, "不支持的协议版本 %d", hello.ProtocolVersion)
+		return logControlHandshakeFailure(remoteAddress, hello.AgentId,
+			status.Errorf(codes.FailedPrecondition, "不支持的协议版本 %d", hello.ProtocolVersion))
 	}
 	if err := requireAgentID(hello.AgentId); err != nil {
-		return status.Error(codes.InvalidArgument, err.Error())
+		return logControlHandshakeFailure(remoteAddress, hello.AgentId, status.Error(codes.InvalidArgument, err.Error()))
 	}
 	session, err := svc.deps.Sessions.Attach(stream.Context(), hello.AgentId)
 	if err != nil {
+		stresslog.Debug("[ADMIN] gRPC 控制会话握手未完成",
+			zap.String("agentID", hello.AgentId),
+			zap.String("remoteAddress", remoteAddress),
+			zap.Error(err))
 		return status.Error(codes.Unavailable, "服务器正在关闭")
 	}
+	startedAt := time.Now()
+	established := false
 	defer func() {
 		session.Cancel()
 		svc.deps.Sessions.Detach(session.AgentID(), session.Generation())
 		svc.deps.Metrics.DropGeneration(session.AgentID(), session.Generation())
+		fields := []zap.Field{
+			zap.String("agentID", session.AgentID()),
+			zap.Uint64("generation", session.Generation()),
+			zap.String("remoteAddress", remoteAddress),
+			zap.Duration("duration", time.Since(startedAt)),
+		}
+		if sessionErr != nil {
+			fields = append(fields, zap.Error(sessionErr))
+		}
+		switch {
+		case !established:
+			stresslog.Warn("[ADMIN] gRPC 控制会话建立失败", fields...)
+		case sessionErr != nil:
+			stresslog.Warn("[ADMIN] gRPC 控制会话异常结束", fields...)
+		default:
+			stresslog.Info("[ADMIN] gRPC 控制会话已关闭", fields...)
+		}
 	}()
 	if err := svc.deps.Sessions.WithCurrent(session.AgentID(), session.Generation(), func() error {
 		if err := svc.deps.Agents.Register(agentNodeFromHello(hello)); err != nil {
@@ -108,19 +137,47 @@ func (svc *grpcControlService) Session(stream controlpb.AgentControlService_Sess
 	}}}); err != nil {
 		return err
 	}
+	established = true
+	stresslog.Info("[ADMIN] gRPC 控制会话已建立",
+		zap.String("agentID", session.AgentID()),
+		zap.String("agentName", hello.Name),
+		zap.String("appVersion", hello.AppVersion),
+		zap.String("remoteAddress", remoteAddress),
+		zap.Uint64("generation", session.Generation()),
+		zap.String("status", runtimeStatusString(hello.Status)),
+		zap.String("currentTaskID", hello.CurrentTaskId))
 	if err := svc.deps.Commands.Replay(session.Context(), session); err != nil {
 		return status.Error(codes.Unavailable, err.Error())
 	}
-	if err := workpool.Default().Submit(func() {
-		if sendErr := svc.sendLoop(session, stream); sendErr != nil {
-			stresslog.Debug("[ADMIN] gRPC 会话发送循环结束", zap.String("agentID", session.AgentID()), zap.Error(sendErr))
-			session.Cancel()
-		}
-	}); err != nil {
+	if err := workpool.Default().Submit(func() { svc.runSendLoop(session, stream) }); err != nil {
 		return status.Error(codes.ResourceExhausted, "无法启动会话发送循环")
 	}
 	// gRPC already owns this handler goroutine; it is the sole Recv owner.
 	return normalizeSessionError(svc.recvLoop(session, stream))
+}
+
+func (svc *grpcControlService) runSendLoop(session *Session, stream controlpb.AgentControlService_SessionServer) {
+	sendErr := svc.sendLoop(session, stream)
+	if sendErr != nil && !isExpectedSessionEnd(sendErr) {
+		stresslog.Warn("[ADMIN] gRPC 控制会话发送中断",
+			zap.String("agentID", session.AgentID()),
+			zap.Uint64("generation", session.Generation()),
+			zap.Error(sendErr))
+	}
+	session.Cancel()
+}
+
+func logControlHandshakeFailure(remoteAddress, agentID string, err error) error {
+	fields := []zap.Field{zap.String("remoteAddress", remoteAddress), zap.Error(err)}
+	if agentID != "" {
+		fields = append(fields, zap.String("agentID", agentID))
+	}
+	if isExpectedSessionEnd(err) {
+		stresslog.Debug("[ADMIN] gRPC 控制会话握手未完成", fields...)
+		return err
+	}
+	stresslog.Warn("[ADMIN] gRPC 控制会话握手失败", fields...)
+	return err
 }
 
 func (svc *grpcControlService) sendLoop(session *Session, stream controlpb.AgentControlService_SessionServer) error {
@@ -229,6 +286,7 @@ func (svc *grpcControlService) handleEvent(session *Session, event *controlpb.Ag
 			return status.Error(codes.InvalidArgument, err.Error())
 		}
 		session.MarkCommandAcknowledged(ack.CommandId)
+		logCommandAcknowledgement(session.AgentID(), command, ack)
 		if ack.Status == controlpb.CommandAckStatus_COMMAND_ACK_STATUS_APPLIED && command.GetStartTask() != nil {
 			if svc.deps.OwnsActiveTask(session.AgentID(), command.TaskId) {
 				assignment := command.GetStartTask().GetAssignment()
@@ -292,6 +350,54 @@ func (svc *grpcControlService) handleEvent(session *Session, event *controlpb.Ag
 	return nil
 }
 
+func logCommandAcknowledgement(agentID string, command *controlpb.Command, ack *controlpb.CommandAck) {
+	fields := []zap.Field{
+		zap.String("agentID", agentID),
+		zap.String("commandID", ack.CommandId),
+		zap.String("commandType", controlCommandType(command)),
+		zap.String("taskID", ack.TaskId),
+		zap.Uint64("sequence", ack.Sequence),
+		zap.String("status", controlCommandAckStatus(ack.Status)),
+	}
+	if ack.Reason != "" {
+		fields = append(fields, zap.String("reason", ack.Reason))
+	}
+	if ack.Status == controlpb.CommandAckStatus_COMMAND_ACK_STATUS_REJECTED {
+		stresslog.Warn("[ADMIN] 节点拒绝控制命令", fields...)
+		return
+	}
+	stresslog.Info("[ADMIN] 节点控制命令已确认", fields...)
+}
+
+func controlCommandType(command *controlpb.Command) string {
+	if command == nil {
+		return "unknown"
+	}
+	switch command.GetBody().(type) {
+	case *controlpb.Command_StartTask:
+		return "startTask"
+	case *controlpb.Command_StopTask:
+		return "stopTask"
+	case *controlpb.Command_Shutdown:
+		return "shutdown"
+	default:
+		return "unknown"
+	}
+}
+
+func controlCommandAckStatus(statusValue controlpb.CommandAckStatus) string {
+	switch statusValue {
+	case controlpb.CommandAckStatus_COMMAND_ACK_STATUS_APPLIED:
+		return "applied"
+	case controlpb.CommandAckStatus_COMMAND_ACK_STATUS_DUPLICATE:
+		return "duplicate"
+	case controlpb.CommandAckStatus_COMMAND_ACK_STATUS_REJECTED:
+		return "rejected"
+	default:
+		return "unspecified"
+	}
+}
+
 func agentNodeFromHello(hello *controlpb.Hello) *agent.Node {
 	return &agent.Node{ID: hello.AgentId, Name: hello.Name, AppVersion: hello.AppVersion, MaxBots: int(hello.MaxBots),
 		StressInterval: time.Duration(hello.MetricsIntervalNanos).String(), SystemInterval: time.Duration(hello.MetricsIntervalNanos).String(),
@@ -314,14 +420,25 @@ func runtimeStatusString(statusValue controlpb.AgentRuntimeStatus) string {
 }
 
 func normalizeSessionError(err error) error {
-	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+	if isExpectedSessionEnd(err) {
 		return nil
 	}
 	if _, ok := status.FromError(err); ok {
 		return err
 	}
-	stresslog.Debug("[ADMIN] gRPC 会话结束", zap.Error(err))
 	return fmt.Errorf("会话结束: %w", err)
+}
+
+func isExpectedSessionEnd(err error) bool {
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Canceled, codes.Aborted:
+		return true
+	default:
+		return false
+	}
 }
 
 type permanentReportError struct{ err error }

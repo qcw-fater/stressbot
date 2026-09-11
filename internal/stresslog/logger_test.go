@@ -105,6 +105,17 @@ func TestInitLogReturnsIdempotentCloser(t *testing.T) {
 	}
 }
 
+func TestReplaceLoggerCanRestoreUninitializedState(t *testing.T) {
+	original := GetLogger()
+	ReplaceLogger(zap.NewNop())
+	t.Cleanup(func() { ReplaceLogger(original) })
+
+	ReplaceLogger(nil)
+	if GetLogger() != nil {
+		t.Fatal("ReplaceLogger(nil) 未恢复未初始化状态")
+	}
+}
+
 func TestErrorAndDPanicLogsFlushImmediately(t *testing.T) {
 	tests := []struct {
 		name string

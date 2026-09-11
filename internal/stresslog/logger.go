@@ -211,6 +211,10 @@ func GetLogger() *zap.Logger {
 // ReplaceLogger 为测试提供无输出 logger 注入能力。
 func ReplaceLogger(replacement *zap.Logger) {
 	logger = replacement
+	if replacement == nil {
+		sugarLogger = nil
+		return
+	}
 	sugarLogger = replacement.Sugar()
 }
 

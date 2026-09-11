@@ -229,6 +229,55 @@ func (e *Executor) finish(request commandRequest, ack *controlpb.CommandAck) {
 		e.host.CancelControlPlane()
 		return
 	}
+	logCommandOutcome(request.cmd, ack)
+}
+
+func logCommandOutcome(command *controlpb.Command, ack *controlpb.CommandAck) {
+	fields := []zap.Field{
+		zap.String("agentID", ack.AgentId),
+		zap.String("commandID", ack.CommandId),
+		zap.String("commandType", commandType(command)),
+		zap.String("taskID", ack.TaskId),
+		zap.Uint64("sequence", ack.Sequence),
+		zap.String("status", commandAckStatus(ack.Status)),
+	}
+	if ack.Reason != "" {
+		fields = append(fields, zap.String("reason", ack.Reason))
+	}
+	if ack.Status == controlpb.CommandAckStatus_COMMAND_ACK_STATUS_REJECTED {
+		stresslog.Warn("[AGENT] 控制命令执行被拒绝", fields...)
+		return
+	}
+	stresslog.Info("[AGENT] 控制命令执行完成", fields...)
+}
+
+func commandType(command *controlpb.Command) string {
+	if command == nil {
+		return "unknown"
+	}
+	switch command.GetBody().(type) {
+	case *controlpb.Command_StartTask:
+		return "startTask"
+	case *controlpb.Command_StopTask:
+		return "stopTask"
+	case *controlpb.Command_Shutdown:
+		return "shutdown"
+	default:
+		return "unknown"
+	}
+}
+
+func commandAckStatus(statusValue controlpb.CommandAckStatus) string {
+	switch statusValue {
+	case controlpb.CommandAckStatus_COMMAND_ACK_STATUS_APPLIED:
+		return "applied"
+	case controlpb.CommandAckStatus_COMMAND_ACK_STATUS_DUPLICATE:
+		return "duplicate"
+	case controlpb.CommandAckStatus_COMMAND_ACK_STATUS_REJECTED:
+		return "rejected"
+	default:
+		return "unspecified"
+	}
 }
 
 // Outcomes 返回命令结果的待确认 outbox，供控制会话读取快照、接收通知与确认。

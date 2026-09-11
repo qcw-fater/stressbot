@@ -95,7 +95,7 @@ func (r *Registry) Register(node *Node) error {
 	onRestart := r.onRestart
 
 	if exists {
-		stresslog.Warn("agent 重新注册",
+		stresslog.Info("agent 重新注册",
 			zap.String("agentID", node.ID),
 			zap.String("agentName", node.Name),
 			zap.String("addr", node.Address),
