@@ -42,3 +42,56 @@ services:
       - D:/Gitee/stressbot/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - D:/Gitee/stressbot/deploy/stressbot-v0.1.0-windows-amd64/dist:/data/stressbot/web/dist:ro
 
+  # Agent 日志观测栈：Vector 采集 log/agent.log → Loki 存储 → Grafana 查询。
+  loki:
+    image: grafana/loki:latest
+    container_name: stressbot-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - D:/Gitee/stressbot/deploy/loki/config.yaml:/etc/loki/config.yml:ro
+      - D:/docker/volumes/stressbot-loki:/loki
+    command: ["-config.file=/etc/loki/config.yml"]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: stressbot-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - D:/docker/volumes/stressbot-grafana:/var/lib/grafana
+      - D:/Gitee/stressbot/deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - loki
+
+  vector:
+    image: timberio/vector:latest-alpine
+    container_name: stressbot-vector
+    restart: unless-stopped
+    environment:
+      # 节点身份，与 conf/agent.toml 的 agent.id 对应；多台 Agent 各自改此值。
+      AGENT_ID: agent-001
+    volumes:
+      - D:/Gitee/stressbot/deploy/vector/vector-agent.toml:/etc/vector/vector-agent.toml:ro
+      # 只读挂载日志目录，Vector 仅采集其中的 agent.log。
+      - D:/Gitee/stressbot/log:/var/log/stressbot:ro
+      # checkpoint 与 sink 磁盘缓冲。必须用 named volume（Docker 原生文件系统）：
+      # 挂 Windows 宿主机目录时磁盘缓冲读写会触发 ENODATA（os error 61）使 Vector 崩溃循环。
+      - vector-data:/var/lib/vector
+    command: ["--config", "/etc/vector/vector-agent.toml"]
+    depends_on:
+      - loki
+
+volumes:
+  vector-data:
+
