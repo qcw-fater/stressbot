@@ -47,9 +47,15 @@ listenHost = "127.0.0.1"
 heartbeatInterval = "10s"
 
 # unhealthyAfter 心跳超时阈值。超过此时间未收到 Agent 心跳则标记为 unhealthy。
-# 同时作为任务租约时长：Admin 认为此时间内 Agent 应完成或续约任务。
 # 必须 > heartbeatInterval 且 < offlineAfter。
 unhealthyAfter = "30s"
+
+# leaseDuration 任务租约时长。Agent 与 Admin 失联（断连后无法续租）超过
+# 此时长才取消当前压测任务；期间 Agent 会持续重连，恢复后任务无感继续。
+# 必须明显大于 Agent 重连最坏耗时（agent.reconnect.maxInterval 的 2 倍抖动
+# 上界 + 拨号握手），且 < offlineAfter——由 Agent 侧租约先接管任务生死，
+# 而不是 Admin 的离线清理。
+leaseDuration = "45s"
 
 # offlineAfter 离线判定阈值。超过此时间仍无心跳则标记为 offline 并从注册表删除。
 # 删除后该 Agent ID 可被重新注册。

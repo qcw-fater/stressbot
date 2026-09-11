@@ -34,7 +34,11 @@ type ServerConfig struct {
 //
 // 联动约束（与 Agent 心跳和租约）：
 //   - HeartbeatInterval 是期望的 Agent 心报间隔，下发给 Agent
-//   - UnhealthyAfter 同时作为任务租约时长，必须明显大于 HeartbeatInterval
+//   - LeaseDuration 是任务租约时长：Agent 与 Admin 失联超过该时长才取消任务。
+//     必须明显大于 Agent 重连最坏耗时（reconnect.maxInterval 的 2 倍抖动上界
+//     加拨号握手），且小于 OfflineAfter——让 Agent 侧租约先于 Admin 离线
+//     清理接管任务生死，避免两套判定窗口重叠
+//   - UnhealthyAfter 是心跳超时标记 unhealthy 的阈值，必须明显大于 HeartbeatInterval
 //   - OfflineAfter 必须 > UnhealthyAfter
 //
 // 否则会出现「Admin 已把节点标 unhealthy/删除，但 Agent 任务还在跑」的状态错乱。
@@ -42,7 +46,8 @@ type ControlPlaneConfig struct {
 	ListenHost        string `toml:"listenHost"        json:"listenHost"`        // gRPC 监听地址（默认 127.0.0.1）
 	Port              int    `toml:"port"              json:"port"`              // gRPC 监听端口（默认 7720）
 	HeartbeatInterval string `toml:"heartbeatInterval" json:"heartbeatInterval"` // 期望 Agent 心跳间隔（默认 10s）
-	UnhealthyAfter    string `toml:"unhealthyAfter"    json:"unhealthyAfter"`    // 心跳超时后标记 unhealthy（默认 30s，同时=任务租约时长）
+	UnhealthyAfter    string `toml:"unhealthyAfter"    json:"unhealthyAfter"`    // 心跳超时后标记 unhealthy（默认 30s）
+	LeaseDuration     string `toml:"leaseDuration"     json:"leaseDuration"`     // 任务租约时长：Agent 断连超过此时长取消任务（默认 45s）
 	OfflineAfter      string `toml:"offlineAfter"      json:"offlineAfter"`      // 超过此时间标记 offline 并删除（默认 60s）
 }
 
@@ -106,6 +111,7 @@ func Defaults() Config {
 			Port:              7720,
 			HeartbeatInterval: "10s",
 			UnhealthyAfter:    "30s",
+			LeaseDuration:     "45s",
 			OfflineAfter:      "60s",
 		},
 		MySQL: &MySQLConfig{
@@ -162,19 +168,29 @@ func validateConfig(cfg *Config) error {
 	if heartbeat <= 0 {
 		return errors.New("controlPlane.heartbeatInterval must be > 0")
 	}
-	lease, err := time.ParseDuration(cfg.ControlPlane.UnhealthyAfter)
+	unhealthy, err := time.ParseDuration(cfg.ControlPlane.UnhealthyAfter)
 	if err != nil {
 		return fmt.Errorf("invalid controlPlane.unhealthyAfter: %w", err)
 	}
-	if lease <= heartbeat {
+	if unhealthy <= heartbeat {
 		return errors.New("controlPlane.unhealthyAfter 必须大于 controlPlane.heartbeatInterval")
+	}
+	lease, err := time.ParseDuration(cfg.ControlPlane.LeaseDuration)
+	if err != nil {
+		return fmt.Errorf("invalid controlPlane.leaseDuration: %w", err)
+	}
+	if lease <= heartbeat {
+		return errors.New("controlPlane.leaseDuration 必须大于 controlPlane.heartbeatInterval")
 	}
 	offline, err := time.ParseDuration(cfg.ControlPlane.OfflineAfter)
 	if err != nil {
 		return fmt.Errorf("invalid controlPlane.offlineAfter: %w", err)
 	}
-	if offline <= lease {
+	if offline <= unhealthy {
 		return errors.New("controlPlane.offlineAfter 必须大于 controlPlane.unhealthyAfter")
+	}
+	if lease >= offline {
+		return errors.New("controlPlane.leaseDuration 必须小于 controlPlane.offlineAfter")
 	}
 	if cfg.RedisEnabled() {
 		if _, err := cfg.Redis.Resolve(); err != nil {

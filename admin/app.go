@@ -248,7 +248,7 @@ func (s *Server) Run(ctx context.Context) error {
 		Bundles:                s.bundles,
 		Metrics:                s.metricsIngestor,
 		HeartbeatInterval:      config.ParseDurationDefault(s.cfg.ControlPlane.HeartbeatInterval, 10*time.Second, "controlPlane.heartbeatInterval"),
-		LeaseDuration:          config.ParseDurationDefault(s.cfg.ControlPlane.UnhealthyAfter, 30*time.Second, "controlPlane.unhealthyAfter"),
+		LeaseDuration:          config.ParseDurationDefault(s.cfg.ControlPlane.LeaseDuration, 45*time.Second, "controlPlane.leaseDuration"),
 		OwnsActiveTask:         s.completion.OwnsActiveTask,
 		ScheduleStop:           s.commandDispatch.ScheduleStop,
 		AcceptTaskReport:       s.completion.Accept,
@@ -601,11 +601,26 @@ func (s *Server) synthesizeOfflineReports(taskID string) bool {
 // 导致 Agent 实际指标快照被丢弃。当前设为 60s 提供充足缓冲。
 const stopWaitTimeout = 60 * time.Second
 
+// waitStopGuard 阻塞等待停止安全网超时；stopCh 关闭（进程关闭）时立即返回 false，
+// 避免裸 Sleep 占住协程导致 workpool 关闭超时。
+func waitStopGuard(stopCh <-chan struct{}, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-stopCh:
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 // startStopTimeout 启动停止超时安全网。
 // stopWaitTimeout 后如果任务仍在 stopping，为剩余未上报节点合成 report 并转 stopped。
 func (s *Server) startStopTimeout(taskID string) {
-	workpool.Default().Go(func() {
-		time.Sleep(stopWaitTimeout)
+	workpool.Default().GoWithStop(func(stopCh <-chan struct{}) {
+		if !waitStopGuard(stopCh, stopWaitTimeout) {
+			return
+		}
 		task, ok := s.tasks.Get(taskID)
 		if !ok || task.State != admintask.Stopping {
 			return

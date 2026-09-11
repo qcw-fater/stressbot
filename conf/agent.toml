@@ -113,6 +113,10 @@ taskWorkDir = ""
   initialInterval = "5s"
 
   # maxInterval 指数退避的上限。重连间隔从 initialInterval 倍增到此值后封顶。
+  # 实际等待值在此值基础上做 [0, 2×maxInterval] 抖动。断连后成功建立的会话
+  # 存活超过此值时，退避与重试计数会重置回 initialInterval。
+  # 必须让 maxInterval 的 2 倍抖动上界 + 拨号握手耗时明显小于 Admin 的
+  # controlPlane.leaseDuration，否则断连重连期间任务会因租约过期被取消。
   maxInterval = "30s"
 
   # taskReportTimeout 任务结束后最终报告的确认超时。

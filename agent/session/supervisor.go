@@ -2,9 +2,7 @@ package session
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"time"
 
 	"stressbot/internal/retry"
@@ -43,13 +41,20 @@ func RunSupervisor(ctx context.Context, cfg SupervisorConfig, runConnection func
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 2 * time.Minute, Timeout: 20 * time.Second, PermitWithoutStream: true}),
 		)
 		if err == nil {
+			connectedAt := time.Now()
 			err = runConnection(ctx, conn)
+			healthy := time.Since(connectedAt) >= cfg.ReconnectMaxInterval
 			_ = conn.Close()
-		}
-		if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-			if ctx.Err() != nil {
-				return nil
+			// 存活超过一个最大退避间隔的会话视为健康连接：其断线是新一次
+			// 偶发故障的第一次失败，重置退避与重试计数，让重连始终从初始
+			// 间隔起步；更短的存活可能是握手级失败，继续按既有退避升级。
+			if healthy {
+				policy.Reset()
+				attempts = 0
 			}
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 		code := status.Code(err)
 		if code == codes.Unauthenticated || code == codes.PermissionDenied || code == codes.FailedPrecondition {
@@ -63,7 +68,11 @@ func RunSupervisor(ctx context.Context, cfg SupervisorConfig, runConnection func
 		if delay == backoff.Stop {
 			delay = cfg.ReconnectMaxInterval
 		}
-		stresslog.Warn("[AGENT] gRPC 控制面断开，准备重连", zap.Duration("backoff", delay), zap.Error(err))
+		stresslog.Warn("[AGENT] gRPC 控制面不可用，准备重连",
+			zap.String("adminAddress", cfg.Address),
+			zap.Int("retryAttempt", attempts),
+			zap.Duration("backoff", delay),
+			zap.Error(err))
 		timer := timerpool.GetTimer(delay)
 		select {
 		case <-ctx.Done():
