@@ -77,7 +77,8 @@ function execute(r)
     robot.set("session", resp.session)
 
     -- 存储 lastZoneId
-    local zoneId = resp.lastZoneId or 1
+    zoneList = robot.get("zoneList")
+    local zoneId = zoneList[1].id
     robot.set("zoneId", zoneId)
 
     -- 存储角色列表（roles 数组，每个元素有 playerId/name/server 等字段）

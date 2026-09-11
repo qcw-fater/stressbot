@@ -17,7 +17,7 @@ end
 function execute(r)
     local account = robot.get("account")
     local session = robot.get("session")
-    local zoneId  = robot.get("zoneId") or 1
+    local zoneId  = robot.get("zoneId")
     local version = robot.get("version") or "1.0.0"
     local channel = robot.get("channel") or "test"
 

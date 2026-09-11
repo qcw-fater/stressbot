@@ -43,5 +43,33 @@ function execute(r)
             .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
+    local ok, resp = pcall(json.decode, body)
+    if not ok or not resp then
+        log.error("RequestZoneList JSON 解析失败: account=" .. tostring(account)
+            .. " url=" .. tostring(url)            .. " body=" .. body_preview(body))
+        return robot.error(54, "RequestZoneList JSON 解析失败: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
+    end
+
+    -- 检查错误码（error=0 表示成功）
+    if resp.error and resp.error ~= 0 then
+        log.error("RequestZoneList 失败: account=" .. tostring(account)
+            .. " error=" .. tostring(resp.error)            .. " body=" .. body_preview(body))
+        return robot.error(resp.error, "RequestZoneList 业务失败: account=" .. tostring(account)
+            .. " error=" .. tostring(resp.error)
+            .. " body=" .. body_preview(body))  -- 透传服务端业务错误码（≥100）
+    end
+
+    -- 提取 zoneList
+    if not resp.areas or resp.areas == "" or #resp.areas == 0 then
+        log.error("RequestZoneList 响应缺少 areas: account=" .. tostring(account) .. " body=" .. body_preview(body))
+        return robot.error(54, "RequestZoneList 响应缺少 areas: account=" .. tostring(account)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
+    end
+    robot.set("zoneList", resp.areas)
+
+    log.info("RequestZoneList 成功: account=" .. tostring(account) .. " 区服数=" .. tostring(#resp.areas))
+
     return nil
 end
