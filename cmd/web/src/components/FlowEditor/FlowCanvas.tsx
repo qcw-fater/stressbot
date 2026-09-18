@@ -47,6 +47,48 @@ import { classifyListen } from '@/types/listen';
 import { normalizeOnError } from './utils/onError';
 import { CanvasContextMenu, QUICK_NODE_TYPES, type ContextMenu } from './CanvasContextMenu';
 
+const MINIMAP_COLOR_TOKENS: Record<string, string> = {
+  sequence: '--node-sequence',
+  action: '--node-action',
+  loop: '--node-loop',
+  boolean: '--node-boolean',
+  switch: '--node-switch',
+  weighted: '--node-weighted',
+  wait: '--node-wait',
+  break: '--node-break',
+  continue: '--node-continue',
+  listenCard: '--node-listen',
+};
+
+const MINIMAP_FALLBACK_COLOR = '#999';
+
+/**
+ * MiniMap 每个节点一次回调，平移画布时每帧都会重跑一遍全图。
+ * getComputedStyle 会强制样式解析，逐节点现读在大图上能顶到几百次/帧，
+ * 所以按主题缓存：主题写在 documentElement 的 data-theme 上，切主题时 key 变化自然失效，
+ * 不需要重挂载画布。
+ */
+const minimapColorCache = new Map<string, Record<string, string>>();
+
+function minimapColorOf(nodeType: string | undefined): string {
+  const token = MINIMAP_COLOR_TOKENS[nodeType ?? 'sequence'];
+  if (!token) return MINIMAP_FALLBACK_COLOR;
+  const theme = document.documentElement.getAttribute('data-theme') ?? '';
+  let colors = minimapColorCache.get(theme);
+  if (!colors) {
+    colors = {};
+    minimapColorCache.set(theme, colors);
+  }
+  let color = colors[token];
+  if (color === undefined) {
+    color =
+      getComputedStyle(document.documentElement).getPropertyValue(token).trim() ||
+      MINIMAP_FALLBACK_COLOR;
+    colors[token] = color;
+  }
+  return color;
+}
+
 function FlowCanvasInner() {
   const { message } = AntApp.useApp();
   const readOnly = useFlowReadOnly();
@@ -795,8 +837,11 @@ function FlowCanvasInner() {
       if ((window.getSelection()?.toString().length ?? 0) > 0) return;
 
       const key = e.key.toLowerCase();
+      // 选中节点在按键那一刻现取，不从渲染闭包里带：闭包里带会把 rfNodes 拖进依赖，
+      // 于是每次拖动、每次改字段都要摘挂一遍 window keydown 监听。
+      const selectedRfNode = () => useFlowStore.getState().rfNodes.find((n) => n.selected);
       if (key === 'c') {
-        const selected = rfNodes.find((n) => n.selected);
+        const selected = selectedRfNode();
         if (!selected) return; // 没选中节点 → 让浏览器处理
         const cb = copyRfNode(selected);
         if (!cb) return;
@@ -804,7 +849,7 @@ function FlowCanvasInner() {
         setClipboard(cb);
         message.success('已复制（在画布空白处右键 → 粘贴，或 Ctrl+V）');
       } else if (key === 'x') {
-        const selected = rfNodes.find((n) => n.selected);
+        const selected = selectedRfNode();
         if (!selected) return;
         const cb = copyRfNode(selected);
         if (!cb) return;
@@ -834,7 +879,6 @@ function FlowCanvasInner() {
     message,
     pasteAt,
     readOnly,
-    rfNodes,
     screenToFlowPosition,
     setClipboard,
     setNodePositions,
@@ -842,24 +886,7 @@ function FlowCanvasInner() {
   ]);
 
   // MiniMap 节点色：直接读 CSS token，确保与节点本体配色 / 主题切换保持完全一致。
-  // 注意：每次回调实时读取 getComputedStyle，不缓存（dark/light 切换不需要重 mount）。
-  const minimapNodeColor = useCallback((n: RFNode) => {
-    const tokenMap: Record<string, string> = {
-      sequence: '--node-sequence',
-      action: '--node-action',
-      loop: '--node-loop',
-      boolean: '--node-boolean',
-      switch: '--node-switch',
-      weighted: '--node-weighted',
-      wait: '--node-wait',
-      break: '--node-break',
-      continue: '--node-continue',
-      listenCard: '--node-listen',
-    };
-    const cssVar = tokenMap[n.type ?? 'sequence'];
-    if (!cssVar) return '#999';
-    return getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim() || '#999';
-  }, []);
+  const minimapNodeColor = useCallback((n: RFNode) => minimapColorOf(n.type), []);
 
   return (
     <div

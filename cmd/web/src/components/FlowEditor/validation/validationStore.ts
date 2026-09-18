@@ -49,6 +49,9 @@ export function groupIssuesByNode(
   flow: Pick<TaskFlow, 'nodes'>,
 ): Record<string, ValidationIssue[]> {
   const grouped: Record<string, ValidationIssue[]> = {};
+  // action → 引用它的节点。按需建一次索引：同一个 action 上可以挂很多条问题
+  // （每条字段绑定都可能报），逐条去全量扫节点表会变成 O(问题数 × 节点数)。
+  let nodesByAction: Map<string, string[]> | null = null;
   for (const issue of [...report.errors, ...report.warnings]) {
     const location = issue.location;
     if (!location) continue;
@@ -60,10 +63,17 @@ export function groupIssuesByNode(
       (grouped[`__cb__${location.id}`] ??= []).push(issue);
       continue;
     }
-    for (const [nodeId, node] of Object.entries(flow.nodes)) {
-      if (node.type === 'action' && node.action === location.id) {
-        (grouped[nodeId] ??= []).push(issue);
+    if (!nodesByAction) {
+      nodesByAction = new Map();
+      for (const [nodeId, node] of Object.entries(flow.nodes)) {
+        if (node.type !== 'action' || !node.action) continue;
+        const bucket = nodesByAction.get(node.action);
+        if (bucket) bucket.push(nodeId);
+        else nodesByAction.set(node.action, [nodeId]);
       }
+    }
+    for (const nodeId of nodesByAction.get(location.id) ?? []) {
+      (grouped[nodeId] ??= []).push(issue);
     }
   }
   return grouped;

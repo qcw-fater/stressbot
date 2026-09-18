@@ -3,13 +3,13 @@
  *
  * 设计要点：
  * - mode 是单向状态机，由方法（startTask/attachToActive/onTaskFinished/detachFromActive/reset）驱动；
- * - latestStress / latestSystem 由 HomeShell 的 TanStack Query 适配层写入，store 仅维护数据结构与滑窗；
- * - stressHistory / systemHistory 默认保留 60 个点（5s × 60 = 5min），上限可调；
+ * - latestStress / latestSystem 由 EditorPage 的 TanStack Query 适配层写入，store 只保留最新一份：
+ *   实时面板展示的是当前值，趋势图在历史面板里读后端归档的时序数据，前端不留时间序列；
  * - 状态机只保存运行态与监控快照；启动/挂载任务的业务编排在 taskActions 中完成。
  *
  * 持久化（partialize）：仅缓存"启动表单字段"到 localStorage：
  *   taskName / totalBots / robotConfig / deadline。
- * 运行态字段（mode / activeTask / latestStress / agents / history / connectionLost）
+ * 运行态字段（mode / activeTask / latestStress / agents / connectionLost）
  * **不持久化**：刷新页面应当重新查询服务器拿到最新真实状态，而不是恢复旧 mode。
  */
 
@@ -26,9 +26,6 @@ import type {
 } from '@/types/api';
 
 export type RuntimeMode = 'edit' | 'viewActive' | 'running' | 'finalReport';
-
-/** 历史滑窗最大长度（60 点 × 5s ≈ 5 分钟） */
-const HISTORY_WINDOW = 60;
 
 export interface RuntimeState {
   mode: RuntimeMode;
@@ -58,10 +55,6 @@ export interface RuntimeState {
    * 前者不能显示成权威的「在线 0 · 总容量 0」（刷新后端未起时会先假显示再变红牌）。
    */
   agentsLoaded: boolean;
-
-  /** 历史滑窗，时间正序（最新在末尾） */
-  stressHistory: StressSnapshot[];
-  systemHistory: ClusterSystemSnapshot[];
 
   /** 连接服务器失败 banner（连续查询失败触发） */
   connectionLost: boolean;
@@ -99,7 +92,7 @@ export interface RuntimeState {
   /** 任务结束钩子：mode 切到 finalReport，停止后续历史写入 */
   onTaskFinished: () => void;
   /**
-   * 清空所有监控数据（latestStress/latestSystem/stressHistory/systemHistory）。
+   * 清空所有监控数据（latestStress / latestSystem）。
    * 用于"启动新任务"前清掉上一次的残留 —— 否则 mode=running 切换瞬间，UI 已经
    * 在渲染上一次 finalReport 留下的 latestStress（如动作面板/连接数），
    * 直到下一拍 polling 回包才覆盖，会出现"短暂展示上次数据"的视觉残留。
@@ -119,8 +112,6 @@ export interface RuntimeState {
   detachFromActive: () => void;
   /** 完整重置（新建任务） */
   reset: () => void;
-  /** 从后端时序数据回补 stressHistory / systemHistory（页面刷新后恢复趋势图） */
-  backfillHistory: (stress: StressSnapshot[], system: ClusterSystemSnapshot[]) => void;
 }
 
 import { ENV_ROBOT_DEFAULTS } from './env';
@@ -154,8 +145,6 @@ const initialState = {
   latestSystem: null as ClusterSystemSnapshot | null,
   agents: [] as AgentBrief[],
   agentsLoaded: false,
-  stressHistory: [] as StressSnapshot[],
-  systemHistory: [] as ClusterSystemSnapshot[],
   connectionLost: false,
   agentEvents: [] as AgentEvent[],
   reportingAgents: 0,
@@ -163,12 +152,6 @@ const initialState = {
   offlineAgents: 0,
   assignedAgents: 0,
 };
-
-function pushWithLimit<T>(arr: T[], item: T, limit = HISTORY_WINDOW): T[] {
-  const next = arr.length >= limit ? arr.slice(arr.length - limit + 1) : arr.slice();
-  next.push(item);
-  return next;
-}
 
 export const useRuntimeStore = create<RuntimeState>()(
   persist(
@@ -207,20 +190,14 @@ export const useRuntimeStore = create<RuntimeState>()(
             (!snap.actions || snap.actions.length === 0) &&
             (!snap.uptimeSeconds || snap.uptimeSeconds <= 0);
           if (isEmpty) return {};
-          return {
-            latestStress: snap,
-            stressHistory: pushWithLimit(s.stressHistory, snap),
-          };
+          return { latestStress: snap };
         }),
       pushSystem: (snap) =>
         set((s) => {
           // edit 模式 polling 是开的（10s 拉一次集群系统），不能拒绝；
           // 仅 finalReport 期间拒，避免覆盖最后一份。
           if (s.mode === 'finalReport') return {};
-          return {
-            latestSystem: snap,
-            systemHistory: pushWithLimit(s.systemHistory, snap),
-          };
+          return { latestSystem: snap };
         }),
       setAgents: (items) => set({ agents: items, agentsLoaded: true }),
       setConnectionLost: (lost) => set({ connectionLost: lost }),
@@ -249,7 +226,7 @@ export const useRuntimeStore = create<RuntimeState>()(
       onTaskFinished: () =>
         set({
           mode: 'finalReport',
-          // 保留 latestStress / latestSystem / history 给最终报告使用
+          // 保留 latestStress / latestSystem 给最终报告使用
         }),
 
       // clearMonitorData 只清"任务级监控数据"，**不动 agents 列表**：
@@ -263,8 +240,6 @@ export const useRuntimeStore = create<RuntimeState>()(
         set({
           latestStress: null,
           latestSystem: null,
-          stressHistory: [],
-          systemHistory: [],
           agentEvents: [],
           reportingAgents: 0,
           totalAgents: 0,
@@ -278,7 +253,7 @@ export const useRuntimeStore = create<RuntimeState>()(
           activeTask: null,
           detachedActiveTask: s.activeTask ?? s.detachedActiveTask,
           // 保留 ownedTaskId：自己启动的任务稍后重新进入监控时仍按 running 处理。
-          // 保留 latestStress / latestSystem / history，任务继续运行但 edit 模式不展示 MonitorDock。
+          // 保留 latestStress / latestSystem，任务继续运行但 edit 模式不展示 MonitorDock。
         })),
 
       detachFromActive: () =>
@@ -287,22 +262,10 @@ export const useRuntimeStore = create<RuntimeState>()(
           activeTask: null,
           detachedActiveTask: null,
           ownedTaskId: null,
-          // 保留 latestStress / latestSystem / history：用于终态返回后短暂参考末次快照。
+          // 保留 latestStress / latestSystem：用于终态返回后短暂参考末次快照。
         }),
 
       reset: () => set({ ...initialState, robotConfig: { ...DEFAULT_ROBOT_CONFIG } }),
-
-      backfillHistory: (stress, system) =>
-        set((s) => {
-          // 直接用后端权威数据覆盖；polling 新到的点可能与末尾几个点重叠，
-          // 但 pushWithLimit 会自然追加，对趋势图无影响
-          return {
-            stressHistory: stress.slice(-HISTORY_WINDOW),
-            systemHistory: system.slice(-HISTORY_WINDOW),
-            latestStress: s.latestStress ?? stress[stress.length - 1] ?? null,
-            latestSystem: s.latestSystem ?? system[system.length - 1] ?? null,
-          };
-        }),
     }),
     {
       name: 'stressbot:runtime-form',

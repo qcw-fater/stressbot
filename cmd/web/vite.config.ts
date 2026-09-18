@@ -9,6 +9,12 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // 默认 5s 对本仓库的组件测试不够：单跑都是几百毫秒，但全量并行时 jsdom 环境准备 +
+    // antd/monaco 模块导入会把 userEvent 的交互链拖过阈值，于是 SetStateEditor、
+    // ListenRefsTable、Toolbar.configBackup 这类测试在满负载下偶发超时（断言本身没问题）。
+    // 放宽到 20s：真正挂死的测试仍会被拦住，机器负载不再伪造失败。
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
   resolve: {
     alias: {
