@@ -41,12 +41,13 @@ afterEach(() => {
 });
 
 function buildFlow(opts: {
-  actions?: Record<string, { script?: string }>;
+  nodes?: Record<string, unknown>;
+  actions?: Record<string, unknown>;
   listens?: Record<string, { script?: string }>;
 }): FlowJson {
   return {
     defaultDelayMs: 1000,
-    nodes: {},
+    nodes: (opts.nodes ?? {}) as FlowJson['nodes'],
     actions: (opts.actions ?? {}) as FlowJson['actions'],
     listens: (opts.listens ?? {}) as FlowJson['listens'],
   };
@@ -68,6 +69,63 @@ describe('collectFlowScriptNames', () => {
       },
     });
     expect(collectFlowScriptNames(flow)).toEqual(['bar.lua', 'cb.lua', 'foo.lua']);
+  });
+
+  it('扫描节点条件：loop/boolean 的 condition 与 breakCondition', () => {
+    const flow = buildFlow({
+      nodes: {
+        n1: { type: 'boolean', condition: 'lua:check.lua' },
+        n2: { type: 'loop', condition: 'state:hp > 0', breakCondition: ' lua: done.lua ' },
+      },
+    });
+    expect(collectFlowScriptNames(flow)).toEqual(['check.lua', 'done.lua']);
+  });
+
+  it('扫描 switch 分支条件：Go 端 cases[].condition 同样接受 lua: 前缀', () => {
+    const flow = buildFlow({
+      nodes: {
+        sw: {
+          type: 'switch',
+          cases: [
+            { condition: 'lua:has_guild.lua', next: 'a' },
+            { condition: 'state:level >= 10', next: 'b' },
+          ],
+          defaultNext: 'c',
+        },
+      },
+    });
+    expect(collectFlowScriptNames(flow)).toEqual(['has_guild.lua']);
+  });
+
+  it('扫描字段绑定条件，含 map entries 的嵌套 binding', () => {
+    const flow = buildFlow({
+      actions: {
+        a1: {
+          pattern: 'tcpRequest',
+          bindings: [
+            { field: 'x', type: 'fixed', value: 1, condition: 'lua:need_x.lua' },
+            {
+              field: 'm',
+              type: 'map',
+              entries: [
+                { key: 'k', value: { type: 'fixed', value: 2, condition: 'lua:need_k.lua' } },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    expect(collectFlowScriptNames(flow)).toEqual(['need_k.lua', 'need_x.lua']);
+  });
+
+  it('非 lua: 前缀的条件不产生脚本引用', () => {
+    const flow = buildFlow({
+      nodes: { n1: { type: 'boolean', condition: 'state:ready == true' } },
+      actions: {
+        a1: { pattern: 'tcpSend', bindings: [{ type: 'fixed', condition: 'state:ready' }] },
+      },
+    });
+    expect(collectFlowScriptNames(flow)).toEqual([]);
   });
 
   it('flow 没有任何脚本引用时返回空数组', () => {

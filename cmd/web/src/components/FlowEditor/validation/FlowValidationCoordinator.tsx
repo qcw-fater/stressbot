@@ -26,7 +26,7 @@ export function FlowValidationCoordinator() {
   // 加载纯竞态，导致 proto 相关检查（C2S/S2C 查找、字段路径）偶现漏检或基于残缺注册表误报。
   const protoStatus = useProtoStore((s) => s.status);
   const protoHash = useProtoStore((s) => s.hash);
-  const { keys: stateKeys, ready: stateKeysReady } = useStateKeyOptions();
+  const { keys: stateKeys, ready: stateKeysReady, missingScripts } = useStateKeyOptions();
   const schedulerRef = useRef<ValidationScheduler | null>(null);
   if (schedulerRef.current === null) {
     schedulerRef.current = createValidationScheduler(validateAndPublish, 150);
@@ -35,9 +35,17 @@ export function FlowValidationCoordinator() {
   useEffect(() => {
     const scheduler = schedulerRef.current;
     if (!scheduler) return;
-    scheduler.schedule(flow, { stateKeys, stateKeysReady });
+    scheduler.schedule(flow, { stateKeys, stateKeysReady, missingScripts });
     return () => scheduler.cancel();
-  }, [flow, routeKeyTemplatesVersion, stateKeys, stateKeysReady, protoStatus, protoHash]);
+  }, [
+    flow,
+    routeKeyTemplatesVersion,
+    stateKeys,
+    stateKeysReady,
+    missingScripts,
+    protoStatus,
+    protoHash,
+  ]);
 
   return null;
 }

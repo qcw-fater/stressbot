@@ -15,6 +15,13 @@ export interface ValidationReportDrawerProps {
   onClose: () => void;
 }
 
+/** 严重级别的中文名。issue.code、location.kind 是配置词汇，保持原样不翻译。 */
+const SEVERITY_LABEL: Record<ValidationIssue['severity'], string> = {
+  error: '错误',
+  warning: '警告',
+  info: '提示',
+};
+
 export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawerProps) {
   const nodes = useFlowStore((state) => state.nodes);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
@@ -56,7 +63,7 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
     <List
       size="small"
       dataSource={items}
-      locale={{ emptyText: <Empty description={`无 ${severity}`} /> }}
+      locale={{ emptyText: <Empty description={`无${SEVERITY_LABEL[severity]}`} /> }}
       renderItem={(it) => (
         <List.Item
           actions={
@@ -128,17 +135,17 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
           items={[
             {
               key: 'errors',
-              label: `Errors (${report.errors.length})`,
+              label: `${SEVERITY_LABEL.error} (${report.errors.length})`,
               children: renderList(report.errors, 'error'),
             },
             {
               key: 'warnings',
-              label: `Warnings (${report.warnings.length})`,
+              label: `${SEVERITY_LABEL.warning} (${report.warnings.length})`,
               children: renderList(report.warnings, 'warning'),
             },
             {
               key: 'infos',
-              label: `Infos (${report.infos.length})`,
+              label: `${SEVERITY_LABEL.info} (${report.infos.length})`,
               children: renderList(report.infos, 'info'),
             },
           ]}

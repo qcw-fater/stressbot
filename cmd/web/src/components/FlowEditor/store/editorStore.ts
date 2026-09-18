@@ -112,8 +112,9 @@ interface EditorState {
   /** MonitorDock 是否展开；编辑态默认关，运行态默认开（首次切换由 MonitorDock 内部按 mode 切换） */
   monitorDockOpen: boolean;
   /**
-   * 调试模式：开启后启动表单一键装填为最小压测配置（1 个机器人 / 并发 1），
-   * 同时 startTask 走 skipCapacityCheck=true，便于本地快速验证流程。
+   * 调试模式：开启后启动表单一键装填为最小压测配置（1 个机器人 / 并发 1 / 日志 debug），
+   * 服务端侧优先把这一个机器人分到单个节点，便于本地快速验证流程。
+   * 容量预检照常执行（1 台的需求本来也不会撞容量）。
    * 持久化到 localStorage，刷新页面保留。
    */
   debugMode: boolean;

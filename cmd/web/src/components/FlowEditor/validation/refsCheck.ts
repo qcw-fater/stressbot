@@ -14,6 +14,8 @@ import { resolveRouteKeyForServer } from '../listens/routeKeyResolver';
 import { resolveRandomStringCharset } from '../editors/ActionEditor/randomStringCharset';
 import { isBuiltinStateKey, type StateKeyInfo } from '../editors/ActionEditor/stateRegistry';
 import { validateFlowStructure } from '@/services/schemaValidator';
+import { checkConditionSyntax } from '@/services/conditionSyntax';
+import { forEachFlowScriptRef } from '@/services/flowScriptRefs';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -99,6 +101,31 @@ const VALID_FILTER_MODES = new Set(['any', 'all', 'none']);
 
 const VALID_BINDING_TYPE_SET = new Set<string>(ALL_BINDING_TYPES);
 
+/**
+ * 条件表达式语法检查，语法不合法时产出一条 error。
+ *
+ * 定 error 而不是 warning：后端 `PrepareTaskFlow` 编译条件失败会让**整份流程**加载不了，
+ * 任务根本起不来，不存在「带着这个问题也能跑」的情形。
+ *
+ * 检查面必须与 Go 端的编译点一一对应（`flow/prepare.go`：节点 condition / breakCondition /
+ * cases[].condition / 各 FieldBind.condition）。少查一处，用户就只能在启动任务时拿到一条
+ * 没有画布定位的加载失败。
+ */
+function conditionIssue(
+  where: string,
+  raw: string | undefined,
+  location: ValidationIssue['location'],
+): ValidationIssue | null {
+  const syntax = checkConditionSyntax(raw);
+  if (!syntax) return null;
+  return {
+    severity: 'error',
+    code: 'CONDITION_SYNTAX',
+    message: `${where} 条件表达式语法错误：${syntax.message}`,
+    location,
+  };
+}
+
 // ── 主入口 ──────────────────────────────────────────────────
 
 /**
@@ -109,6 +136,11 @@ const VALID_BINDING_TYPE_SET = new Set<string>(ALL_BINDING_TYPES);
 export interface FlowValidationContext {
   stateKeys?: StateKeyInfo[];
   stateKeysReady?: boolean;
+  /**
+   * flow 引用、但本地资源里没有的脚本名。同样由脚本异步加载产出，未 ready 时不要传，
+   * 否则加载途中每个脚本都会被当成缺失。
+   */
+  missingScripts?: string[];
 }
 
 export function validateFlow(
@@ -183,6 +215,21 @@ export function validateFlow(
         location: { kind: 'node', id },
       });
       continue;
+    }
+
+    // 条件语法：后端对所有节点一视同仁地编译 condition / breakCondition / cases[]，
+    // 不按节点类型区分，这里同样不区分——写在 sequence 上的条件后端也会编译，
+    // 语法错了照样整份流程加载失败。
+    const nodeLoc = { kind: 'node', id } as const;
+    const conditionIssues = [
+      conditionIssue(`节点 "${id}" condition`, node.condition, nodeLoc),
+      conditionIssue(`节点 "${id}" breakCondition`, node.breakCondition, nodeLoc),
+      ...(node.cases ?? []).map((c, i) =>
+        conditionIssue(`节点 "${id}" cases[${i}]`, c?.condition, nodeLoc),
+      ),
+    ];
+    for (const issue of conditionIssues) {
+      if (issue) issues.push(issue);
     }
 
     if (node.type === 'sequence') {
@@ -570,6 +617,22 @@ export function validateFlow(
         location: { kind: 'action', id: actionName },
       });
     }
+  }
+
+  // 引用了本地没有的 lua 脚本。定 warning 而不是 error：本地资源缺一份不等于服务器没有，
+  // 启动任务时还会从基线 gap-fill 一次；真正的拦截在那一步（缺到最后任务起不来）。
+  // 这里的价值是把「哪个节点引的」指出来——启动时那条错误只有脚本名。
+  const missingScripts = new Set(context.missingScripts ?? []);
+  if (missingScripts.size > 0) {
+    forEachFlowScriptRef(flow, (ref) => {
+      if (!missingScripts.has(ref.name)) return;
+      issues.push({
+        severity: 'warning',
+        code: 'LUA_SCRIPT_NOT_FOUND',
+        message: `${ref.where}引用了本地没有的脚本 "${ref.name}"，请在资源管理中上传或从服务器拉取`,
+        location: ref.location,
+      });
+    });
   }
 
   return categorize(issues);
@@ -989,6 +1052,11 @@ function checkBindings(
         });
       }
     }
+    // 绑定条件与节点条件走同一个编译器（flow/prepare.go 的 prepareBinding），
+    // map entry 里的子绑定也会被递归编译——本函数对 entries 递归调用自身，一并覆盖。
+    const condIssue = conditionIssue(label, b.condition, loc);
+    if (condIssue) issues.push(condIssue);
+
     // required 与 optional 互斥：Go 在缺值时 optional 优先（静默跳过），二者同开会让 UI 的 required 承诺失效。
     if (b.required && b.optional) {
       issues.push({

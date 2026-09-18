@@ -46,7 +46,7 @@ const DEFAULT_KEYS: StateKeyInfo[] = [
 
 describe('ClearStateEditor', () => {
   beforeEach(() => {
-    mocked.mockReturnValue({ keys: DEFAULT_KEYS, ready: true });
+    mocked.mockReturnValue({ keys: DEFAULT_KEYS, ready: true, missingScripts: [] });
   });
 
   /** 受控多选 Harness：用 state 回写 value，同时把每次 onChange 透传给 spy 便于断言顺序。 */
@@ -115,7 +115,7 @@ describe('ClearStateEditor', () => {
   });
 
   it('ready=false 时不标记未知并提示加载中', () => {
-    mocked.mockReturnValue({ keys: DEFAULT_KEYS, ready: false });
+    mocked.mockReturnValue({ keys: DEFAULT_KEYS, ready: false, missingScripts: [] });
     render(<ClearStateEditor value={['legacyBattle']} onChange={vi.fn()} />);
     expect(screen.getByText('legacyBattle')).toBeTruthy();
     // 脚本尚未加载完，不应急于标记未知
@@ -131,6 +131,7 @@ describe('ClearStateEditor', () => {
         { key: 'account', sourceType: 'builtin', sourceName: '内置', builtinType: 'string' },
       ],
       ready: true,
+      missingScripts: [],
     });
     render(<ClearStateEditor value={[]} onChange={vi.fn()} />);
     expect(screen.getByText('当前流程没有可清除的状态')).toBeTruthy();

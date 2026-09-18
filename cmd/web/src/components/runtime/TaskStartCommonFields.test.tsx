@@ -9,7 +9,7 @@ describe('TaskStartCommonFields', () => {
       <Form layout="vertical">
         <TaskStartCommonFields
           totalBots={100}
-          totalCapacity={500}
+          capacity={500}
           rampUpEnabled={false}
           rampUpSum={0}
           robotConfig={{
@@ -28,7 +28,7 @@ describe('TaskStartCommonFields', () => {
     const accountRow = view.getByTestId('task-start-account-row');
 
     expect(within(scaleRow).getByText('机器人数')).toBeTruthy();
-    expect(within(scaleRow).getByText('集群总容量 500')).toBeTruthy();
+    expect(within(scaleRow).getByText('可分配容量 500（仅空闲节点）')).toBeTruthy();
     expect(within(scaleRow).getByText('并发')).toBeTruthy();
     expect(within(scaleRow).getByText('每秒新建机器人数')).toBeTruthy();
     expect(within(accountRow).getByText('账号前缀')).toBeTruthy();

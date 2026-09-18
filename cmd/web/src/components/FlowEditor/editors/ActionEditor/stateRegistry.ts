@@ -18,6 +18,7 @@ import type { ActionDef, FieldBind } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import type { FlowNode } from '@/types/flow';
 import type { ProtoField } from '@/types/proto';
+import { collectFlowScriptNames } from '@/services/flowScriptRefs';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export type StateKeySourceType =
@@ -223,31 +224,19 @@ export function collectStateKeys(
   return Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
 }
 
-/** 从 flow graph 中提取实际引用的 Lua 脚本名称集合 */
+/**
+ * 从 flow graph 中提取实际引用的 Lua 脚本名称集合。
+ *
+ * 直接复用 `collectFlowScriptNames`：脚本引用点（action.script / listen.script /
+ * 节点条件 / switch case 条件 / binding 条件）只能有一份清单，否则补全提示与
+ * 任务上传会各扫一半，出现"编辑器认得这个脚本但启动时没上传"之类的偏斜。
+ */
 export function collectUsedScriptNames(
-  actions: Record<string, { pattern?: string; script?: string }>,
-  listens: Record<string, { script?: string }>,
+  actions: Record<string, ActionDef>,
+  listens: Record<string, ListenDef>,
   nodes: Record<string, FlowNode> | undefined,
 ): Set<string> {
-  const names = new Set<string>();
-  for (const def of Object.values(actions)) {
-    if (def.pattern === 'lua' && def.script) names.add(def.script);
-  }
-  for (const def of Object.values(listens)) {
-    if (def.script) names.add(def.script);
-  }
-  // boolean / loop 节点的 condition / breakCondition 可以引用 lua: 脚本
-  if (nodes) {
-    for (const node of Object.values(nodes)) {
-      for (const cond of [node.condition, node.breakCondition]) {
-        if (cond?.startsWith('lua:')) {
-          const name = cond.slice(4).trim();
-          if (name) names.add(name);
-        }
-      }
-    }
-  }
-  return names;
+  return new Set(collectFlowScriptNames({ actions, listens, nodes }));
 }
 
 /**

@@ -3,7 +3,8 @@ import type { RobotConfig } from '@/types/api';
 
 interface TaskStartCommonFieldsProps {
   totalBots: number;
-  totalCapacity: number;
+  /** 可分配容量（仅空闲节点，口径见 services/taskCapacity.ts） */
+  capacity: number;
   rampUpEnabled: boolean;
   rampUpSum: number;
   robotConfig: RobotConfig;
@@ -13,29 +14,30 @@ interface TaskStartCommonFieldsProps {
 
 export function TaskStartCommonFields({
   totalBots,
-  totalCapacity,
+  capacity,
   rampUpEnabled,
   rampUpSum,
   robotConfig,
   onTotalBotsChange,
   onRobotConfigChange,
 }: TaskStartCommonFieldsProps) {
+  const capacityHint = `可分配容量 ${capacity}（仅空闲节点）`;
   return (
     <>
       <Row gutter={16} data-testid="task-start-scale-row">
         <Col xs={24} sm={12}>
           {!rampUpEnabled ? (
-            <Form.Item label="机器人数" required extra={`集群总容量 ${totalCapacity}`}>
+            <Form.Item label="机器人数" required extra={capacityHint}>
               <InputNumber
                 min={1}
-                max={totalCapacity}
+                max={capacity}
                 value={totalBots}
                 onChange={(value) => onTotalBotsChange(typeof value === 'number' ? value : 0)}
                 style={{ width: '100%' }}
               />
             </Form.Item>
           ) : (
-            <Form.Item label="机器人数" extra={`集群总容量 ${totalCapacity}`}>
+            <Form.Item label="机器人数" extra={capacityHint}>
               <Typography.Text strong>{rampUpSum}</Typography.Text>
               <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
                 由各阶段机器人数自动累加

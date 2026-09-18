@@ -16,6 +16,7 @@ import type { BindingType, FieldBind } from '@/types/action';
 import type { ProtoField } from '@/types/proto';
 import { ProtoPathInput } from './ProtoPathInput';
 import { BindingTypeForm } from './BindingTypeForm';
+import { changeBindingType } from './stateActionEditorModel';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 import { StateExprInput } from '../shared/StateExprInput';
 
@@ -226,7 +227,10 @@ function BindingRow({ binding, allBindings, messageFullName, onChange }: Binding
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>type</span>
         <Select
           value={binding.type}
-          onChange={(v) => set({ type: v as BindingType })}
+          // 必须走 changeBindingType 而不是 set({ type })：后者会把旧类型的专属参数
+          // （min/max/values/entries/source/filters…）留在 binding 上，导出的 flow.json
+          // 会带着与当前类型无关的字段，与 SetStateEditor 的行为也不一致。
+          onChange={(v) => onChange(changeBindingType(binding, v as BindingType))}
           options={BINDING_TYPE_OPTIONS.map((g) => ({
             label: g.label,
             options: g.options.map((o) => ({

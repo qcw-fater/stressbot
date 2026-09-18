@@ -23,16 +23,20 @@ type LuaScript = { name: string; content: string };
 export interface StateKeyOptionsResult {
   keys: StateKeyInfo[];
   ready: boolean;
+  /** flow 引用、但本地资源里没有的脚本名（仅 ready 后有意义） */
+  missingScripts: string[];
 }
 
 interface LoadedScripts {
   scripts: LuaScript[];
   ready: boolean;
+  missing: string[];
 }
 
 interface SharedStateKeys {
   keys: StateKeyInfo[];
   ready: boolean;
+  missing: string[];
 }
 
 const EMPTY_ACTIONS = {};
@@ -73,11 +77,13 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
     [scriptNameSignature],
   );
   const [scripts, setScripts] = useState<LuaScript[]>([]);
+  const [missing, setMissing] = useState<string[]>([]);
   const [ready, setReady] = useState(!enabled || scriptNames.length === 0);
 
   useEffect(() => {
     if (!enabled) {
       setScripts([]);
+      setMissing([]);
       setReady(true);
       return;
     }
@@ -85,6 +91,7 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
     setReady(scriptNames.length === 0);
     if (scriptNames.length === 0) {
       setScripts([]);
+      setMissing([]);
       return () => {
         cancelled = true;
       };
@@ -93,14 +100,17 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
       scriptNames.map(async (name) => {
         try {
           const file = await getScript(name);
-          return file ? { name: file.name, content: file.content } : null;
+          // 读到了 undefined 是「本地确实没有这个脚本」，抛异常是「本地存储读失败」。
+          // 两者必须分开：后者报成「脚本缺失」会让用户去补一个其实存在的文件。
+          return file ? { script: { name: file.name, content: file.content } } : { absent: name };
         } catch {
-          return null;
+          return {};
         }
       }),
     ).then((loaded) => {
       if (cancelled) return;
-      setScripts(loaded.filter((it): it is LuaScript => it !== null));
+      setScripts(loaded.map((it) => it.script).filter((it): it is LuaScript => it !== undefined));
+      setMissing(loaded.map((it) => it.absent).filter((it): it is string => it !== undefined));
       setReady(true);
     });
     return () => {
@@ -108,7 +118,7 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
     };
   }, [enabled, scriptNameSignature, scriptNames, resourceVersion]);
 
-  return { scripts, ready };
+  return { scripts, ready, missing };
 }
 
 /** FlowEditor 顶层挂载一次，共享脚本加载结果。 */
@@ -125,7 +135,10 @@ export function StateKeyOptionsProvider({ children }: StateKeyOptionsProviderPro
     () => collectStateKeys(actions, listens, stateExtra, undefined, loaded.scripts),
     [actions, listens, stateExtra, loaded.scripts],
   );
-  const value = useMemo(() => ({ keys, ready: loaded.ready }), [keys, loaded.ready]);
+  const value = useMemo(
+    () => ({ keys, ready: loaded.ready, missing: loaded.missing }),
+    [keys, loaded.ready, loaded.missing],
+  );
   return (
     <StateKeyOptionsContext.Provider value={value}>{children}</StateKeyOptionsContext.Provider>
   );
@@ -140,6 +153,7 @@ export function useStateKeyOptions(currentBindings?: FieldBind[]): StateKeyOptio
   const ctx = useContext(StateKeyOptionsContext);
   const local = useLoadedStateKeyScripts(ctx === null);
   const ready = ctx ? ctx.ready : local.ready;
+  const missingScripts = ctx ? ctx.missing : local.missing;
 
   const actions = useFlowStore((state) => (ctx ? EMPTY_ACTIONS : state.actions));
   const listens = useFlowStore((state) => (ctx ? EMPTY_LISTENS : state.listens));
@@ -153,7 +167,7 @@ export function useStateKeyOptions(currentBindings?: FieldBind[]): StateKeyOptio
         : collectStateKeys(actions, listens, stateExtra, currentBindings, local.scripts),
     [actions, listens, stateExtra, currentBindings, ctx, local.scripts],
   );
-  return { keys, ready };
+  return { keys, ready, missingScripts };
 }
 
 function mergeCurrentBindingKeys(

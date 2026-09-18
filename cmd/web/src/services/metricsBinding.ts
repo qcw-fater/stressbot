@@ -74,11 +74,21 @@ export function makeMetricsProvider(map: NodeMetricsMap) {
 export type ApdexLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'danger' | 'unknown';
 export type { ActionLatencyMode } from '@/components/monitoring/shared/ActionMetricsTable';
 
+/**
+ * 各等级下界。图表画阈值参考线时引用这里，避免参考线与染色阈值各写一份数字后悄悄分叉。
+ */
+export const APDEX_THRESHOLDS = {
+  excellent: 0.94,
+  good: 0.85,
+  fair: 0.7,
+  poor: 0.5,
+} as const;
+
 export function classifyApdex(apdex: number | undefined): ApdexLevel {
   if (apdex === undefined || Number.isNaN(apdex)) return 'unknown';
-  if (apdex >= 0.94) return 'excellent';
-  if (apdex >= 0.85) return 'good';
-  if (apdex >= 0.7) return 'fair';
-  if (apdex >= 0.5) return 'poor';
+  if (apdex >= APDEX_THRESHOLDS.excellent) return 'excellent';
+  if (apdex >= APDEX_THRESHOLDS.good) return 'good';
+  if (apdex >= APDEX_THRESHOLDS.fair) return 'fair';
+  if (apdex >= APDEX_THRESHOLDS.poor) return 'poor';
   return 'danger';
 }

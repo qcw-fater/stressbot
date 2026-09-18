@@ -3,8 +3,10 @@
  *
  * 展现策略：
  *   - 顶部 N 列玻璃摘要卡片：任务名 / hero 指标行（时长/机器人/动作）
- *   - 下方对比表格（glass 包裹）：每行一个动作，N 列 sampleCount/p99/apdex；
+ *   - 下方对比表格（glass 包裹）：每行一个动作，N 列 sampleCount/主指标 p99/apdex；
  *     best/worst 单元格着色高亮
+ *   - 主指标口径（RTT / 等待 / 执行）按动作类别定，与实时动作表、节点徽章共用
+ *     `monitoring/shared/actionKind` 的选取逻辑
  */
 
 import { Empty, Spin, Table, Tag } from 'antd';
@@ -15,7 +17,12 @@ import { historyApi, isAbortError, showApiError } from '@/services';
 import type { CompareTarget } from '@/services/historyApi';
 import type { HistoryCompareTask } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
-import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
+import {
+  PRIMARY_METRIC_LABEL,
+  primaryMetricOfKind,
+  resolveKind,
+  strongestKind,
+} from '@/components/monitoring/shared/actionKind';
 import { formatStageLabel } from './stageLabel';
 import './HistoryPanel.css';
 
@@ -38,6 +45,16 @@ interface ActionRow {
   samples: (number | undefined)[];
   apdexes: (number | undefined)[];
   p99s: (number | undefined)[];
+  /** 主指标口径标签（RTT / 等待 / 执行），整行一致，见 rows 的注释 */
+  p99Label: string;
+  /** 行内 best/worst 高亮集合，按行算一次而不是每个单元格重算 */
+  p99Highlight: BestWorst;
+  apdexHighlight: BestWorst;
+}
+
+interface BestWorst {
+  best: Set<number>;
+  worst: Set<number>;
 }
 
 function shortName(name: string): string {
@@ -50,10 +67,7 @@ function formatDuration(sec: number): string {
   return `${(sec / 3600).toFixed(1)}h`;
 }
 
-function bestWorst(
-  values: (number | undefined)[],
-  higherIsBetter: boolean,
-): { best: Set<number>; worst: Set<number> } {
+function bestWorst(values: (number | undefined)[], higherIsBetter: boolean): BestWorst {
   const defined = values
     .map((v, i) => ({ v, i }))
     .filter((x): x is { v: number; i: number } => x.v !== undefined);
@@ -107,17 +121,35 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
     }
     const out: ActionRow[] = [];
     for (const name of allActions) {
+      const found = data.map((d) => d.finalSnapshot.actions.find((x) => x.name === name));
+      const present = found.filter((a): a is NonNullable<typeof a> => !!a);
+      // 主指标口径按整行定一次（取各次运行中语义最强的类别），而不是逐列各自推断：
+      // 监听/发送/本地类原来一律读 rtt，整行显示 —，和实时动作表、节点徽章对不上；
+      // 逐列推断又会让「这一次没留下 RTT 样本」的列悄悄换成另一个直方图去比。
+      const kind = strongestKind(present) ?? 'local';
       const samples: (number | undefined)[] = [];
       const apdexes: (number | undefined)[] = [];
       const p99s: (number | undefined)[] = [];
-      for (const d of data) {
-        const a = d.finalSnapshot.actions.find((x) => x.name === name);
+      for (const a of found) {
         samples.push(a?.sampleCount);
         // 只有往返类有 Apdex；其余类别留空，避免 0 分被读成「很差」。
         apdexes.push(a && resolveKind(a) === 'networked' ? a.rttApdex : undefined);
-        p99s.push(a?.rtt?.p99Ms ?? undefined);
+        if (!a) {
+          p99s.push(undefined);
+          continue;
+        }
+        const primary = primaryMetricOfKind(a, kind);
+        p99s.push(primary.sampleCount > 0 ? (primary.histogram?.p99Ms ?? undefined) : undefined);
       }
-      out.push({ name, samples, apdexes, p99s });
+      out.push({
+        name,
+        samples,
+        apdexes,
+        p99s,
+        p99Label: PRIMARY_METRIC_LABEL[kind],
+        p99Highlight: bestWorst(p99s, false),
+        apdexHighlight: bestWorst(apdexes, true),
+      });
     }
     out.sort(
       (a, b) =>
@@ -154,25 +186,21 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
       title: <code>{shortName(data[i].name)}</code>,
       key: `t${i}`,
       width: 180,
-      render: (_, r) => {
-        const p99Bw = bestWorst(r.p99s, false);
-        const apdexBw = bestWorst(r.apdexes, true);
-        return (
-          <div style={{ fontSize: 11, lineHeight: 1.6 }}>
-            <div className="hp-compare-cell">样本: {r.samples[i] ?? '—'}</div>
-            <div
-              className={`hp-compare-cell${p99Bw.best.has(i) ? ' hp-compare-cell--best' : ''}${p99Bw.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
-            >
-              p99: {r.p99s[i] !== undefined ? `${r.p99s[i]!.toFixed(0)}ms` : '—'}
-            </div>
-            <div
-              className={`hp-compare-cell${apdexBw.best.has(i) ? ' hp-compare-cell--best' : ''}${apdexBw.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
-            >
-              Apdex: <ApdexCell value={r.apdexes[i]} />
-            </div>
+      render: (_, r) => (
+        <div style={{ fontSize: 11, lineHeight: 1.6 }}>
+          <div className="hp-compare-cell">样本: {r.samples[i] ?? '—'}</div>
+          <div
+            className={`hp-compare-cell${r.p99Highlight.best.has(i) ? ' hp-compare-cell--best' : ''}${r.p99Highlight.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
+          >
+            {r.p99Label} p99: {r.p99s[i] !== undefined ? `${r.p99s[i]!.toFixed(0)}ms` : '—'}
           </div>
-        );
-      },
+          <div
+            className={`hp-compare-cell${r.apdexHighlight.best.has(i) ? ' hp-compare-cell--best' : ''}${r.apdexHighlight.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
+          >
+            Apdex: <ApdexCell value={r.apdexes[i]} />
+          </div>
+        </div>
+      ),
     });
   }
 

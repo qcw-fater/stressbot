@@ -18,6 +18,12 @@ import {
 } from '@ant-design/icons';
 import type { HeartbeatField, HeartbeatFieldType, HeartbeatFieldSource } from '@/types/action';
 import { ALL_HEARTBEAT_FIELD_TYPES } from '@/types/action';
+import {
+  changeHeartbeatFieldSource,
+  changeHeartbeatFieldType,
+  isFloatHeartbeatType,
+  isSourceAllowedForType,
+} from './heartbeatFieldModel';
 
 export interface HeartbeatFieldsProps {
   value?: HeartbeatField[];
@@ -35,10 +41,23 @@ const SOURCE_GROUPS: { label: string; sources: HeartbeatFieldSource[] }[] = [
   { label: '随机', sources: ['randomInt'] },
 ];
 
-const SOURCE_OPTIONS = SOURCE_GROUPS.map((g) => ({
-  label: g.label,
-  options: g.sources.map((s) => ({ value: s, label: s })),
-}));
+/**
+ * 浮点类型下不支持的 source 置灰而不是从列表里去掉：去掉会让人以为自己记错了，
+ * 置灰 + 说明能直接告诉他为什么这条不能选。
+ */
+function sourceOptionsFor(type: HeartbeatFieldType) {
+  return SOURCE_GROUPS.map((g) => ({
+    label: g.label,
+    options: g.sources.map((s) => {
+      const allowed = isSourceAllowedForType(s, type);
+      return {
+        value: s,
+        disabled: !allowed,
+        label: allowed ? s : `${s}（${type} 不支持）`,
+      };
+    }),
+  }));
+}
 
 function emptyField(): HeartbeatField {
   return { type: 'u16', source: 'fixed', value: 0 };
@@ -50,6 +69,12 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
   const update = (i: number, partial: Partial<HeartbeatField>) => {
     const next = [...list];
     next[i] = { ...next[i], ...partial };
+    set(next);
+  };
+  /** 换 type / source 要按新组合裁掉旧参数，不能像改参数那样直接合并。 */
+  const replace = (i: number, field: HeartbeatField) => {
+    const next = [...list];
+    next[i] = field;
     set(next);
   };
 
@@ -86,7 +111,10 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
               <Select
                 size="small"
                 value={r.type}
-                onChange={(v: HeartbeatFieldType) => update(r._i, { type: v })}
+                // 传 list[r._i] 而不是 r：r 是表格行，带着渲染用的 _i，写回去会进 codec JSON
+                onChange={(v: HeartbeatFieldType) =>
+                  replace(r._i, changeHeartbeatFieldType(list[r._i], v))
+                }
                 options={TYPE_OPTIONS}
                 style={{ width: 80 }}
               />
@@ -100,8 +128,10 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
               <Select
                 size="small"
                 value={r.source}
-                onChange={(v: HeartbeatFieldSource) => update(r._i, { source: v })}
-                options={SOURCE_OPTIONS}
+                onChange={(v: HeartbeatFieldSource) =>
+                  replace(r._i, changeHeartbeatFieldSource(list[r._i], v))
+                }
+                options={sourceOptionsFor(r.type)}
                 style={{ width: 130 }}
                 showSearch
                 optionFilterProp="value"
@@ -156,10 +186,16 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
       />
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
         字段按顺序以小端字节序拼接。source=fixed 填 value（f32/f64 填
-        floatValue）；state/stateCounter 填 key；randomInt 填 min/max。
+        floatValue）；state/stateCounter 填 key；randomInt 填 min/max。f32/f64
+        只能用 fixed 或 state：计数器、时间戳、随机整数对浮点没有意义，引擎会拒绝。
       </div>
     </div>
   );
+}
+
+/** min/max 都填了才谈得上大小关系；缺值由引擎按「缺 min/max」单独报错。 */
+function hasRange(field: HeartbeatField): boolean {
+  return typeof field.min === 'number' && typeof field.max === 'number';
 }
 
 /** 按 source 动态展示配套字段。 */
@@ -172,7 +208,7 @@ function SourceParams({ field, onChange }: SourceParamsProps) {
   switch (field.source) {
     case 'fixed': {
       // f32/f64 走 floatValue（支持小数）；整型走 value。两者同属 source=fixed，按 type 切换绑定字段。
-      const isFloat = field.type === 'f32' || field.type === 'f64';
+      const isFloat = isFloatHeartbeatType(field.type);
       return (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
@@ -189,6 +225,8 @@ function SourceParams({ field, onChange }: SourceParamsProps) {
               )
             }
             step={isFloat ? 0.1 : 1}
+            // 整型槽在 Go 端是 *int64，小数会让 codec 配置反序列化失败（schema 也按 integer 卡）
+            precision={isFloat ? undefined : 0}
             style={{ width: 140 }}
           />
         </span>
@@ -216,6 +254,8 @@ function SourceParams({ field, onChange }: SourceParamsProps) {
             size="small"
             value={field.min}
             onChange={(v) => onChange({ min: (v as number) ?? undefined })}
+            precision={0}
+            status={hasRange(field) && field.min! > field.max! ? 'error' : undefined}
             style={{ width: 100 }}
           />
           <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>max</span>
@@ -223,6 +263,8 @@ function SourceParams({ field, onChange }: SourceParamsProps) {
             size="small"
             value={field.max}
             onChange={(v) => onChange({ max: (v as number) ?? undefined })}
+            precision={0}
+            status={hasRange(field) && field.min! > field.max! ? 'error' : undefined}
             style={{ width: 100 }}
           />
         </span>
@@ -236,6 +278,7 @@ function SourceParams({ field, onChange }: SourceParamsProps) {
             value={field.start}
             onChange={(v) => onChange({ start: (v as number) ?? undefined })}
             placeholder="0"
+            precision={0}
             style={{ width: 90 }}
           />
           <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>step</span>
@@ -244,6 +287,7 @@ function SourceParams({ field, onChange }: SourceParamsProps) {
             value={field.step}
             onChange={(v) => onChange({ step: (v as number) ?? undefined })}
             placeholder="1"
+            precision={0}
             style={{ width: 90 }}
           />
         </span>

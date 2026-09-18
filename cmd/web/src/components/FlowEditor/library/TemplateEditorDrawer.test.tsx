@@ -1,5 +1,5 @@
 import { App as AntApp } from 'antd';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TemplateEditorDrawer } from './TemplateEditorDrawer';
@@ -56,7 +56,13 @@ vi.mock('../panels/FloatingWindow', () => ({
       </div>
     ) : null,
 }));
-vi.mock('../editors/ActionEditor/PatternSelector', () => ({ PatternSelector: () => null }));
+// 桩件暴露一个按钮来触发 pattern 切换：真的去点 antd Select 要摸它的内部类名，
+// 而这里要验的只是「切换后 def 怎么写回」，与下拉自身的渲染无关。
+vi.mock('../editors/ActionEditor/PatternSelector', () => ({
+  PatternSelector: ({ onChange }: { onChange: (p: string) => void }) => (
+    <button onClick={() => onChange('clearState')}>切到 clearState</button>
+  ),
+}));
 vi.mock('../editors/ActionEditor/DeclarativeForm', () => ({
   DeclarativeForm: () => <div>动作内容</div>,
 }));
@@ -116,5 +122,37 @@ describe('TemplateEditorDrawer', () => {
     await waitFor(() => expect(mocks.showApiError).toHaveBeenCalledWith(failure));
     expect(screen.getByDisplayValue('新登录')).toBeTruthy();
     expect(mocks.closePanel).not.toHaveBeenCalled();
+  });
+
+  it('切换 pattern 时清掉旧 pattern 的专属字段', async () => {
+    mocks.getAction.mockResolvedValue({
+      ...template,
+      pattern: 'tcpRequest',
+      data: {
+        pattern: 'tcpRequest',
+        service: 'logic',
+        route: { cmd: 1 },
+        c2sProto: 'LoginC2S',
+        s2cProto: 'LoginS2C',
+        timeout: 5,
+        bindings: [{ type: 'fixed', field: 'id', value: 1 }],
+      },
+    });
+    mocks.updateAction.mockResolvedValue(undefined);
+    render(
+      <AntApp>
+        <TemplateEditorDrawer />
+      </AntApp>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '切到 clearState' }));
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }));
+
+    // clearState 只允许 pattern + keys，tcpRequest 的连接/协议/绑定字段都不该留下。
+    // data 必须用 toEqual 精确比对：toMatchObject 是子集匹配，残留字段照样能通过。
+    await waitFor(() => expect(mocks.updateAction).toHaveBeenCalled());
+    const saved = mocks.updateAction.mock.calls[0][0];
+    expect(saved.pattern).toBe('clearState');
+    expect(saved.data).toEqual({ pattern: 'clearState' });
   });
 });

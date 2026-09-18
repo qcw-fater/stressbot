@@ -119,6 +119,105 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'BOOLEAN_NO_CONDITION')).toBeTruthy();
   });
 
+  // ── 条件表达式语法 ──
+  // 逐条文法在 services/__tests__/conditionSyntax.test.ts 里对着 Go 用例表验，
+  // 这里只确认每个后端会编译的位置都接到了检查上、报错带得上定位。
+
+  it('CONDITION_SYNTAX：boolean condition 语法错误报错并定位到节点', () => {
+    const r = validateFlow(
+      baseFlow({
+        nodes: {
+          main: { type: 'boolean', condition: 'state:hp >', trueNext: 'x' },
+          x: { type: 'sequence' },
+        },
+      }),
+    );
+    const issue = r.errors.find((e) => e.code === 'CONDITION_SYNTAX');
+    expect(issue?.location).toEqual({ kind: 'node', id: 'main' });
+  });
+
+  it('CONDITION_SYNTAX：覆盖 breakCondition 与 switch case', () => {
+    const r = validateFlow(
+      baseFlow({
+        nodes: {
+          main: { type: 'sequence', next: ['lp', 'sw'] },
+          lp: { type: 'loop', body: 'x', breakCondition: 'state:(hp > 0' },
+          sw: { type: 'switch', cases: [{ condition: 'state:a | b', next: 'x' }], defaultNext: 'x' },
+          x: { type: 'sequence' },
+        },
+      }),
+    );
+    expect(r.errors.filter((e) => e.code === 'CONDITION_SYNTAX')).toHaveLength(2);
+  });
+
+  it('CONDITION_SYNTAX：字段绑定条件（含 map entry 内的子绑定）', () => {
+    const r = validateFlow(
+      baseFlow({
+        actions: {
+          A1: {
+            pattern: 'tcpSend',
+            service: 'logic',
+            route: { cmd: 1, act: 1 },
+            c2sProto: 'X.Foo',
+            bindings: [
+              { field: 'a', type: 'fixed', value: 1, condition: 'hp > 0' },
+              {
+                field: 'm',
+                type: 'map',
+                entries: [
+                  { key: 'k', value: { type: 'fixed', value: 1, condition: 'state:x ==' } },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const found = r.errors.filter((e) => e.code === 'CONDITION_SYNTAX');
+    expect(found).toHaveLength(2);
+    // 缺前缀后端是硬报错，不会按 state 兜底，所以它也算语法错误
+    expect(found[0].message).toContain('缺少前缀');
+    expect(found.every((e) => e.location?.kind === 'action')).toBe(true);
+  });
+
+  it('合法条件不产生 CONDITION_SYNTAX', () => {
+    const r = validateFlow(
+      baseFlow({
+        nodes: {
+          main: { type: 'boolean', condition: 'state:hp > 0 && !(lvl < 3)', trueNext: 'x' },
+          x: { type: 'sequence' },
+        },
+      }),
+    );
+    expect(r.errors.find((e) => e.code === 'CONDITION_SYNTAX')).toBeUndefined();
+  });
+
+  // ── 脚本存在性 ──
+
+  it('LUA_SCRIPT_NOT_FOUND：逐处指出引用了本地没有的脚本', () => {
+    const flow = baseFlow({
+      nodes: {
+        main: { type: 'sequence', next: ['b', 'act1'] },
+        b: { type: 'boolean', condition: 'lua:check.lua', trueNext: 'act1' },
+        act1: { type: 'action', action: 'A1' },
+      },
+      actions: { A1: { pattern: 'lua', script: 'run.lua' } },
+    });
+    const r = validateFlow(flow, { missingScripts: ['check.lua'] });
+    const found = r.warnings.filter((e) => e.code === 'LUA_SCRIPT_NOT_FOUND');
+    expect(found).toHaveLength(1);
+    expect(found[0].location).toEqual({ kind: 'node', id: 'b' });
+    // run.lua 不在缺失名单里，不应被牵连
+    expect(found[0].message).toContain('check.lua');
+  });
+
+  it('未传缺失名单时不报脚本缺失（脚本还没加载完不能当成缺失）', () => {
+    const flow = baseFlow({
+      actions: { A1: { pattern: 'lua', script: 'run.lua' } },
+    });
+    expect(validateFlow(flow).warnings.find((e) => e.code === 'LUA_SCRIPT_NOT_FOUND')).toBeUndefined();
+  });
+
   it('WEIGHTED_ALL_ZERO：所有权重为 0 报错', () => {
     const r = validateFlow(
       baseFlow({

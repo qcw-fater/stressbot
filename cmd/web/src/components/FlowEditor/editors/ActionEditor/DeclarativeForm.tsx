@@ -76,8 +76,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             options={[
               { value: 'GET', label: 'GET' },
               { value: 'POST', label: 'POST' },
-              { value: 'PUT', label: 'PUT' },
-              { value: 'DELETE', label: 'DELETE' },
             ]}
             style={{ width: 200 }}
           />

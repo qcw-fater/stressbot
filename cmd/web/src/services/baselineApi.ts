@@ -7,14 +7,57 @@
 
 import { BASELINE_PREFIX } from './env';
 
-async function fetchText(url: string): Promise<string | null> {
+/**
+ * 单文件读取结果的三态。
+ *
+ * 把「服务器说没有」和「请求失败」折叠成 null，对 gap-fill 类调用方（拉不到就进
+ * missing 列表）无害，但对**删除对账**是致命的：把一次网络抖动读成「服务器已删除该
+ * 文件」，就会连带删掉本地已同步的资源。因此凡是会据此删本地文件的调用方，必须走这个
+ * 三态接口，只在 `missing` 上执行删除。
+ */
+export type BaselineFetchResult =
+  | { status: 'ok'; content: string }
+  /** 服务器权威答复「无此文件」（404） */
+  | { status: 'missing' }
+  /** 请求失败（断网 / 5xx / 解析异常），服务器上到底有没有这个文件是未知的 */
+  | { status: 'error' };
+
+async function fetchTextResult(url: string): Promise<BaselineFetchResult> {
   try {
     const r = await fetch(url, { cache: 'no-cache' });
-    if (!r.ok) return null;
-    return await r.text();
+    if (r.status === 404) return { status: 'missing' };
+    if (!r.ok) return { status: 'error' };
+    return { status: 'ok', content: await r.text() };
   } catch {
-    return null;
+    return { status: 'error' };
   }
+}
+
+/** 基线资源分组，与 resourcesStore 的 ResourceType 取值一致。 */
+export type BaselineResourceKind = 'proto' | 'script' | 'adapter';
+
+const BASELINE_RESOURCE_DIR: Record<BaselineResourceKind, string> = {
+  proto: 'proto',
+  script: 'scripts',
+  adapter: 'adapter',
+};
+
+/** 按资源分组读取基线单文件，区分「不存在」与「拉取失败」。 */
+export function fetchBaselineResource(
+  kind: BaselineResourceKind,
+  name: string,
+): Promise<BaselineFetchResult> {
+  const dir = BASELINE_RESOURCE_DIR[kind];
+  return fetchTextResult(`${BASELINE_PREFIX}/${dir}/${encodeURIComponent(name)}`);
+}
+
+/** 两态便捷读取：拉不到就当没有，仅供「缺了就补」的调用方使用。 */
+async function fetchBaselineResourceText(
+  kind: BaselineResourceKind,
+  name: string,
+): Promise<string | null> {
+  const r = await fetchBaselineResource(kind, name);
+  return r.status === 'ok' ? r.content : null;
 }
 
 async function fetchJson<T>(url: string): Promise<T | null> {
@@ -47,9 +90,9 @@ export async function fetchBaselineScriptIndex(): Promise<string[] | null> {
   return fetchStringArray(`${BASELINE_PREFIX}/scripts/index.json`);
 }
 
-/** 获取基线中指定脚本内容 */
+/** 获取基线中指定脚本内容；拉取失败与不存在都返回 null（不可用于删除对账）。 */
 export async function fetchBaselineScript(name: string): Promise<string | null> {
-  return fetchText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(name)}`);
+  return fetchBaselineResourceText('script', name);
 }
 
 /**
@@ -62,9 +105,9 @@ export async function fetchBaselineProtoIndex(): Promise<string[] | null> {
   return fetchStringArray(`${BASELINE_PREFIX}/proto/index.json`);
 }
 
-/** 获取基线中指定 proto 文件内容 */
+/** 获取基线中指定 proto 文件内容；拉取失败与不存在都返回 null（不可用于删除对账）。 */
 export async function fetchBaselineProtoContent(name: string): Promise<string | null> {
-  return fetchText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(name)}`);
+  return fetchBaselineResourceText('proto', name);
 }
 
 // === T3 声明式 codec：基线 adapter 多文件读取（codec.json + errors.json）===
@@ -83,7 +126,11 @@ export async function fetchBaselineCodecIndex(): Promise<string[] | null> {
   return fetchStringArray(`${BASELINE_PREFIX}/adapter/index.json`);
 }
 
-/** 基线单份 codec/errors 文件内容（name = tcp_logic_codec.json / errors.json）。 */
+/**
+ * 基线单份 codec/errors 文件内容（name = tcp_logic_codec.json / errors.json）。
+ *
+ * 拉取失败与不存在都返回 null（不可用于删除对账）。
+ */
 export async function fetchBaselineCodec(name: string): Promise<string | null> {
-  return fetchText(`${BASELINE_PREFIX}/adapter/${encodeURIComponent(name)}`);
+  return fetchBaselineResourceText('adapter', name);
 }

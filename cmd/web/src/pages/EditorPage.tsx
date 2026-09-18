@@ -129,17 +129,25 @@ function HomeShellInner() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const { mode, activeTask, ownedTaskId, latestStress, setDetachedActiveTask, setConnectionLost } =
-    useRuntimeStore(
-      useShallow((s) => ({
-        mode: s.mode,
-        activeTask: s.activeTask,
-        ownedTaskId: s.ownedTaskId,
-        latestStress: s.latestStress,
-        setDetachedActiveTask: s.setDetachedActiveTask,
-        setConnectionLost: s.setConnectionLost,
-      })),
-    );
+  const {
+    mode,
+    activeTask,
+    detachedActiveTask,
+    ownedTaskId,
+    latestStress,
+    setDetachedActiveTask,
+    setConnectionLost,
+  } = useRuntimeStore(
+    useShallow((s) => ({
+      mode: s.mode,
+      activeTask: s.activeTask,
+      detachedActiveTask: s.detachedActiveTask,
+      ownedTaskId: s.ownedTaskId,
+      latestStress: s.latestStress,
+      setDetachedActiveTask: s.setDetachedActiveTask,
+      setConnectionLost: s.setConnectionLost,
+    })),
+  );
 
   // 业务侧 flow（节点 / actions / listens）+ 最新 stress snapshot → nodeId → ActionMetric
   // 这里订阅整个 flowStore 字段会触发频繁 re-render；用 useShallow 压平，仅在数据真变时触发。
@@ -252,6 +260,7 @@ function HomeShellInner() {
   useRuntimeQueries({
     mode,
     taskId,
+    detachedTaskId: detachedActiveTask?.id,
     reportConnectionHealth,
     onTerminal: handleTaskTerminal,
   });

@@ -311,7 +311,15 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
           nodes[nid] = { ...n, ...partial };
         }
       }
-      return { nodes, actions };
+      // 位置表按节点 ID 存，ID 又是用户自己起的名字：不清掉的话，删了 "login" 再建一个同名节点，
+      // 新节点会瞬移到旧节点的坐标而不是落在拖放处。残留项还会一路进草稿持久化与配置导出。
+      let layout = s.layout;
+      if (layout.nodePositions[id]) {
+        const nodePositions = { ...layout.nodePositions };
+        delete nodePositions[id];
+        layout = { ...layout, nodePositions };
+      }
+      return { nodes, actions, layout };
     });
     get().syncDerived();
   },

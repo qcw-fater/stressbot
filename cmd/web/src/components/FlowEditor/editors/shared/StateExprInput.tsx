@@ -20,6 +20,7 @@ import { STATE_SOURCE_LABEL } from '../ActionEditor/stateKeyPresentation';
 import type { ProtoField } from '@/types/proto';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 import { renderExprWithHighlights } from './conditionExprUtils';
+import { checkConditionSyntax } from '@/services/conditionSyntax';
 
 export interface StateExprInputProps {
   /** 表达式值（含或不含 state: 前缀均可） */
@@ -93,6 +94,14 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
     return renderExprWithHighlights(tail, allKeys);
   }, [tail, allKeys]);
 
+  // 语法错误当场标红：同样的表达式在启动任务时会让后端整份流程加载失败，
+  // 拖到那时才报，用户只拿得到一条不带画布定位的错误。输入途中（如刚打完 `hp >`）
+  // 会短暂标红，这是表达式输入框的常态，不拦截输入。
+  const syntaxIssue = useMemo(
+    () => (tail.trim() ? checkConditionSyntax(`state:${tail}`) : null),
+    [tail],
+  );
+
   const browseContent = (
     <div style={{ width: 340, maxHeight: 400, overflowY: 'auto' }}>
       <Input
@@ -128,6 +137,7 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
           value={tail}
           onChange={(e) => setTail(e.target.value)}
           placeholder={placeholder ?? '如 hp > 0 && index % 2 == 0'}
+          status={syntaxIssue ? 'error' : undefined}
           style={{ flex: 1 }}
         />
         <Popover
@@ -143,6 +153,11 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
           </Tooltip>
         </Popover>
       </div>
+      {syntaxIssue && (
+        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--color-error)', lineHeight: 1.5 }}>
+          {syntaxIssue.message}
+        </div>
+      )}
       <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
         示例：<code>alive</code>（布尔字段）、<code>hp &gt; 0</code>（比较）、
         <code>index % 2 == 0</code>（算术）、<code>role == "member"</code>（文字值需加双引号）；
@@ -369,7 +384,9 @@ function FieldRow({ field, pathPrefix, expanded, onToggleExpand, onInsert, depth
             {field.name}
             {field.repeated ? '[]' : ''}
           </code>
-          <span style={{ fontSize: 10, color: 'var(--text-terti)' }}>{shortFieldType(field)}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+            {shortFieldType(field)}
+          </span>
         </span>
       </div>
       {/* 展开的子字段 */}

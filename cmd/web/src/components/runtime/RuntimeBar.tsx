@@ -174,8 +174,8 @@ export function RuntimeBar({
   const modeText = debugMode ? '调试' : '测试';
   const modeColor = debugMode ? 'var(--mode-debug-color)' : 'var(--mode-test-color)';
   const modeTip = debugMode
-    ? '调试模式：启动跳过容量预检 + 自动装填 1 个机器人 / 并发 1 + 日志级别 debug。点击"设置"可切换到测试模式'
-    : '测试模式：使用你填写的完整配置，启用容量预检与默认日志级别。点击"设置"可切换到调试模式';
+    ? '调试模式：自动装填 1 个机器人 / 并发 1 / 日志级别 debug，尽量分配到单个节点。点击"设置"可切换到测试模式'
+    : '测试模式：使用你填写的完整配置与默认日志级别。点击"设置"可切换到调试模式';
   const modeTagStyle = {
     margin: 0,
     color: modeColor,
@@ -265,8 +265,9 @@ export function RuntimeBar({
         动作节点与监听之间的虚线
       </Typography.Text>
       {/* 运行模式：测试 ↔ 调试 二选一。
-          - 测试（默认）：用户填写的完整配置 + 启用容量预检 + 默认日志级别；
-          - 调试：自动装填 1 个机器人/并发 1 + 跳过容量预检 + log=debug。
+          - 测试（默认）：用户填写的完整配置 + 默认日志级别；
+          - 调试：自动装填 1 个机器人/并发 1 + log=debug + 单节点分配。
+          两种模式都走容量预检（口径见 services/taskCapacity.ts）。
           颜色与 RuntimeBar 状态徽章 / TaskStartModal 中的提示一致：
           调试=紫色（BugOutlined），测试=蓝色（CheckCircleOutlined）。 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -316,8 +317,8 @@ export function RuntimeBar({
         />
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {debugMode
-            ? '调试：自动装填 1 个机器人 / 并发 1，跳过容量预检，日志级别 debug'
-            : '测试：使用你填写的完整配置，启用容量预检与默认日志级别'}
+            ? '调试：自动装填 1 个机器人 / 并发 1，日志级别 debug，尽量分配到单个节点'
+            : '测试：使用你填写的完整配置与默认日志级别'}
         </Typography.Text>
       </div>
     </Space>

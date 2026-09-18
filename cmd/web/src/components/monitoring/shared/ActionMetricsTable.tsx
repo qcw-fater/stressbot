@@ -5,6 +5,13 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ErrorEntry, TimingDetailLevel } from '@/types/api';
 import { ApdexCell } from './ApdexCell';
 import { fmtBytes, fmtMs, NUMERIC_STYLE } from './formats';
+import {
+  resolveKind,
+  selectPrimaryMetric,
+  type ActionHistogramLike,
+  type ActionKindLike,
+  type SelectedLatencyMetric,
+} from './actionKind';
 
 /**
  * primary=按动作类别显示它的主指标（往返类看 RTT、监听类看等待时长、其余看执行耗时）；
@@ -15,16 +22,7 @@ import { fmtBytes, fmtMs, NUMERIC_STYLE } from './formats';
  */
 export type ActionLatencyMode = 'primary' | 'totalDuration';
 
-/** 动作的网络语义分类，由后端按运行期实际行为判定。 */
-export type ActionKindLike = 'networked' | 'listen' | 'send' | 'local';
-
-export interface ActionHistogramLike {
-  maxMs: number | null;
-  avgMs: number | null;
-  p50Ms: number | null;
-  p95Ms: number | null;
-  p99Ms: number | null;
-}
+export type { ActionHistogramLike, ActionKindLike, SelectedLatencyMetric } from './actionKind';
 
 export interface ActionMetricsTableRow {
   name: string;
@@ -135,13 +133,6 @@ const TIMING_FIELD_META: Record<
   parseStoreAvgMs: { title: 'parse/store(ms)', hint: '响应解析与状态写入平均耗时。', width: 120 },
 };
 
-interface SelectedLatencyMetric {
-  histogram?: ActionHistogramLike;
-  sampleCount: number;
-  /** 该指标的口径标签，用于列头与 CSV 表头 */
-  label: string;
-}
-
 /**
  * 类别不单独占一列，而是给动作名染色——色板沿用流程编辑器 pattern 徽章的语义分组
  * （tcpRequest 金黄 / tcpListen 橙 / tcpSend 蓝 / setState 青），两处对同一个动作同色。
@@ -169,26 +160,6 @@ const KIND_META: Record<ActionKindLike, { label: string; color: string; hint: st
   },
 };
 
-/**
- * 取行的类别。kind 是后端新增字段，改造之前归档的历史快照里没有，
- * 缺失时按与后端 classifyActionKind 相同的判据就地推断——否则老报告会整表退化成
- * 无色 + 主指标一律显示 wallClock，连本来有 RTT 的往返动作也看不到 RTT。
- */
-export function resolveKind(row: {
-  kind?: ActionKindLike;
-  rttSampleCount?: number;
-  rttApdexSampleCount?: number;
-  listenWaitSampleCount?: number;
-  avgSendBytes: number;
-}): ActionKindLike {
-  if (row.kind) return row.kind;
-  if ((row.rttApdexSampleCount ?? 0) > 0) return 'networked';
-  if ((row.rttSampleCount ?? 0) > 0) return 'networked';
-  if ((row.listenWaitSampleCount ?? 0) > 0) return 'listen';
-  if (row.avgSendBytes > 0) return 'send';
-  return 'local';
-}
-
 /** 动作名的 tooltip：名字 + 该类别的口径说明（监听类补上超时率）。 */
 function kindHint(row: ActionMetricsTableRow): string {
   const kind = resolveKind(row);
@@ -196,26 +167,6 @@ function kindHint(row: ActionMetricsTableRow): string {
   return kind === 'listen' && row.listenTimeoutRate != null
     ? `${meta.hint} 超时率 ${(row.listenTimeoutRate * 100).toFixed(1)}%。`
     : meta.hint;
-}
-
-/** 按动作类别取它的主指标口径。 */
-function selectPrimaryMetric(row: ActionMetricsTableRow): SelectedLatencyMetric {
-  switch (resolveKind(row)) {
-    case 'networked':
-      return { histogram: row.rtt, sampleCount: row.rttSampleCount ?? 0, label: 'RTT' };
-    case 'listen':
-      return {
-        histogram: row.listenWait,
-        sampleCount: row.listenWaitSampleCount ?? 0,
-        label: '等待',
-      };
-    default:
-      return {
-        histogram: row.totalDuration,
-        sampleCount: row.totalDurationSampleCount ?? 0,
-        label: '执行',
-      };
-  }
 }
 
 function selectLatencyMetric(

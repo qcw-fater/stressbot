@@ -5,8 +5,8 @@
  * - 这层是 stress test 的"事务边界"：失败回滚（mode 不切，ownedTaskId 不写）；
  * - 与 React 渲染解耦，纯 async 函数 + 错误抛出，由 RuntimeBar 调用 + showApiError 接住；
  * - 本地稿 stash：进入 viewActive 时把当前 flowStore 内容存到 LocalStorage，detach 时还原；
- * - 容量预检：在 startTask 入口先按在线 agents 的 maxBots 总量校验 totalBots，避免无谓提交；
- *   服务端仍是单一权威，前端预检只为体验。
+ * - 容量预检：在 startTask 入口先按空闲 agents 的 maxBots 总量校验 totalBots，避免无谓提交；
+ *   口径与服务端分配一致（见 taskCapacity.ts），服务端仍是单一权威。
  *
  * 单一事实源：plan §4.1 / §4.2 / §4.7。
  */
@@ -27,6 +27,7 @@ import {
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
 import { syncProtosToIdb, missingProtoImports } from './protoSync';
 import { collectFlowCodecConnections, findMissingCodecConnections } from './taskResourceDiff';
+import { assignableCapacity, capacityExceededMessage } from './taskCapacity';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
 import type { RobotConfig, TaskBrief, TaskDetail } from '@/types/api';
@@ -103,7 +104,7 @@ export interface StartTaskOptions {
  *   1. flowStore.toTaskFlow() + validateFlow() → 有 error 直接拒绝；
  *   2. syncFlowScriptsToIdb：把 flow 引用、本地存储缺失的脚本从基线拉回本地存储（保护已编辑稿）；
  *      仍缺失则抛错。listProto / listScript 拉资源；
- *   3. 容量预检：在线节点 maxBots 之和 >= totalBots；
+ *   3. 容量预检：空闲节点 maxBots 之和 >= totalBots；
  *   4. tasksApi.createTask → 拿 taskId；
  *   5. tasksApi.startTask → 拿 assignments；
  *   6. 写入 runtimeStore：mode='running', ownedTaskId=id, activeTask, robotConfig...
@@ -232,7 +233,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     }
   }
 
-  // 3. 容量预检
+  // 3. 容量预检（口径见 taskCapacity.ts，须与服务端分配逻辑一致）
   {
     const agents = useRuntimeStore.getState().agents ?? [];
     if (agents.length === 0) {
@@ -241,15 +242,14 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
         400,
       );
     }
-    const totalCapacity = agents
-      .filter((a) => a.status !== 'offline')
-      .reduce((sum, a) => sum + a.maxBots, 0);
-    if (totalCapacity < opts.totalBots) {
+    // opts.totalBots 已是调用方算好的提交值（渐进加压下为各阶段之和）。
+    const { capacity } = assignableCapacity(agents);
+    if (capacity < opts.totalBots) {
       throw new ApiError(
         {
           code: 'CAPACITY_EXCEEDED',
-          message: `集群总容量 ${totalCapacity}，本次申请 ${opts.totalBots}`,
-          details: { totalCapacity, requestedBots: opts.totalBots },
+          message: capacityExceededMessage(capacity, opts.totalBots),
+          details: { totalCapacity: capacity, requestedBots: opts.totalBots },
         },
         400,
       );

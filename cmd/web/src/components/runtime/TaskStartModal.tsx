@@ -7,9 +7,10 @@
  *   - 容量提示来自 useRuntimeStore.agents。
  *
  * 运行模式（editorStore.debugMode）：测试 ↔ 调试 互斥，顶部 Segmented 控制，持久化到 localStorage。
- *   - 测试（debugMode=false，默认，蓝色）：使用用户填写的全量配置 + 容量预检 + 默认日志级别；
+ *   - 测试（debugMode=false，默认，蓝色）：使用用户填写的全量配置 + 默认日志级别；
  *   - 调试（debugMode=true，紫色）：自动装填 totalBots=1 / concurrency=1 / logLevel=debug，
  *     后端 debugMode=true 时单节点分配 + 历史自动标记 "debug"；
+ *   - 两种模式都做容量预检（口径见 services/taskCapacity.ts，与服务端分配一致）；
  *   - 0 个在线节点时无论哪种模式都 disable 启动按钮（前端最低门槛）；
  *   - 模式切换不回滚已填数值（保留用户偏好）。
  *
@@ -54,9 +55,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
 import {
+  assignableCapacity,
   cancelInactiveQuery,
+  capacityExceededMessage,
   flowListQueryOptions,
   queryKeys,
+  requestedBots,
   showApiError,
   startTask,
   useRuntimeStore,
@@ -293,11 +297,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const totalCapacity = useMemo(() => {
-    return (agents ?? [])
-      .filter((a) => a.status !== 'offline')
-      .reduce((sum, a) => sum + a.maxBots, 0);
-  }, [agents]);
+  const { capacity: totalCapacity } = useMemo(() => assignableCapacity(agents), [agents]);
 
   const onlineAgents = (agents ?? []).filter((a) => a.status !== 'offline').length;
 
@@ -307,29 +307,16 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     [rampUpStages],
   );
 
-  // 渐进式加压：计算峰值并发数（考虑 reset）
-  // reset=true 的阶段开始前会清空已有机器人，所以峰值是各阶段的最大瞬时并发
-  const peakBots = useMemo(() => {
-    if (!rampUpEnabled) return totalBots;
-    let running = 0;
-    let peak = 0;
-    for (const st of rampUpStages) {
-      if (st.reset) {
-        running = 0; // 清空后从零开始
-      }
-      running += st.count || 0;
-      if (running > peak) peak = running;
-    }
-    return peak;
-  }, [rampUpEnabled, rampUpStages, totalBots]);
-
   // 渐进式加压开启时，totalBots 由阶段累加自动推导，只需检查每阶段 count > 0
   const rampUpValid =
     !rampUpEnabled ||
     (rampUpStages.length > 0 && rampUpSum > 0 && rampUpStages.every((st) => st.count > 0));
 
-  // 容量预检：用峰值并发数而非总和，因为 reset 阶段不会叠加
-  const capacityWarn = !debugMode && peakBots > totalCapacity;
+  // 预检与提交必须是同一个数：提交值就是下面 executeStart 里的 totalBots。
+  // 即便 reset 阶段让瞬时并发低于总和，服务端也是按总和校验容量并分配账号编号，
+  // 所以这里不能拿峰值预检——否则弹窗放行、提交被拒。
+  const submitBots = requestedBots({ rampUpEnabled, rampUpStages, totalBots });
+  const capacityWarn = submitBots > totalCapacity;
   const noAgentBlock = onlineAgents === 0; // 无 Agent 在线连调试也跑不起来，仍禁用启动
   const startDisabled =
     capacityWarn ||
@@ -338,7 +325,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     missingProtos.length > 0 ||
     syncing ||
     !taskName.trim() ||
-    peakBots <= 0 ||
+    submitBots <= 0 ||
     !rampUpValid ||
     (flowSource === 'saved' && !selectedFlowId);
   const startModeColor = debugMode ? 'var(--mode-debug-color)' : 'var(--mode-test-color)';
@@ -367,7 +354,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   ) => {
     const id = await startTask({
       name: taskName,
-      totalBots: rampUpEnabled ? rampUpSum : totalBots,
+      totalBots: submitBots,
       robotConfig: {
         ...robotConfig,
         debugMode,
@@ -510,7 +497,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       >
         {/* 模式选择条：测试 ↔ 调试 二选一 Segmented，颜色与 title tag / RuntimeBar 设置面板完全一致。
-          - 测试（默认，蓝色）：使用用户填写的全量配置 + 容量预检 + 默认日志；
+          - 测试（默认，蓝色）：使用用户填写的全量配置 + 默认日志；
           - 调试（紫色）：自动装填 1 机器人 / 并发 1 / 详细日志 / 单节点分配。
           切换调试 → 测试 不会回滚已填值（保留用户偏好），与原 Switch 行为一致。 */}
         <div
@@ -538,7 +525,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {debugMode
                 ? '自动装填 1 个机器人 / 并发 1 / 详细日志 / 单节点分配'
-                : '使用你填写的完整配置，启用容量预检与默认日志级别'}
+                : '使用你填写的完整配置与默认日志级别'}
             </Typography.Text>
           </Space>
           <Tooltip title="切换运行模式（不会回滚已填数值）">
@@ -617,7 +604,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           </Form.Item>
           <TaskStartCommonFields
             totalBots={totalBots}
-            totalCapacity={totalCapacity}
+            capacity={totalCapacity}
             rampUpEnabled={rampUpEnabled}
             rampUpSum={rampUpSum}
             robotConfig={robotConfig}
@@ -1023,8 +1010,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             type="warning"
             showIcon
             style={{ marginTop: 12 }}
-            message={`集群总容量 ${totalCapacity}，本次申请 ${totalBots}`}
-            description="请减少机器人数，或增加压测节点。"
+            message={capacityExceededMessage(totalCapacity, submitBots)}
+            description="请减少机器人数，或增加空闲压测节点。"
           />
         )}
 

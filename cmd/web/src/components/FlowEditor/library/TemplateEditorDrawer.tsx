@@ -16,6 +16,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../store/editorStore';
 import { PatternSelector } from '../editors/ActionEditor/PatternSelector';
 import { DeclarativeForm } from '../editors/ActionEditor/DeclarativeForm';
+import { pruneActionByPattern } from '../editors/ActionEditor/actionPrune';
 import { LuaForm } from '../editors/ActionEditor/LuaForm';
 import { StoreTable } from '../editors/ActionEditor/StoreTable';
 import { ProtoBrowser } from '../proto/ProtoBrowser';
@@ -207,7 +208,11 @@ interface ActionTemplateBodyProps {
 }
 
 function ActionTemplateBody({ def, onChange }: ActionTemplateBodyProps) {
-  const onPatternChange = (p: ActionPattern) => onChange({ ...def, pattern: p });
+  // 与画布上的 ActionEditor 同一条路径：切 pattern 必须过 pruneActionByPattern，
+  // 否则旧 pattern 的专属字段（service/route/s2cProto/bindings…）会留在模板里，
+  // 被拖进画布后带着与当前 pattern 无关的字段。
+  const onPatternChange = (p: ActionPattern) =>
+    onChange(pruneActionByPattern({ ...def, pattern: p }));
   return (
     <div>
       <div style={{ marginBottom: 8 }}>

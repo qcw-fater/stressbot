@@ -61,6 +61,12 @@ export {
   findMissingCodecConnections,
 } from './taskResourceDiff';
 
+export { assignableCapacity, capacityExceededMessage, requestedBots } from './taskCapacity';
+export type { CapacityAgent } from './taskCapacity';
+
+export { checkConditionSyntax } from './conditionSyntax';
+export type { ConditionSyntaxIssue } from './conditionSyntax';
+
 export {
   startTask,
   stopTask,

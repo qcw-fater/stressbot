@@ -19,6 +19,11 @@ type HealthReporter = (source: string, failed: boolean) => void;
 export interface UseRuntimeQueriesOptions {
   mode: RuntimeMode;
   taskId?: string;
+  /**
+   * 编辑态下仍在远端运行、等着用户重新进入监控的任务 ID（runtimeStore.detachedActiveTask）。
+   * 它不在 activeTask 上，因此不走上面那条 taskId 轮询。
+   */
+  detachedTaskId?: string;
   /** 测试可覆盖；生产使用 pollingPolicy 的 5s/10s。 */
   intervalMs?: number;
   reportConnectionHealth: HealthReporter;
@@ -101,6 +106,7 @@ function useApplyData<T>(
 export function useRuntimeQueries({
   mode,
   taskId,
+  detachedTaskId,
   intervalMs: intervalOverride,
   reportConnectionHealth,
   onTerminal,
@@ -109,6 +115,7 @@ export function useRuntimeQueries({
   const policy = useMemo(() => pollingPolicy(mode), [mode]);
   const intervalMs = intervalOverride ?? policy.intervalMs;
   const taskEnabled = policy.pollActiveTask && !!taskId;
+  const detachedEnabled = mode === 'edit' && !!detachedTaskId;
   const stressKey = useMemo(() => queryKeys.metrics.cluster(taskId ?? '__active__'), [taskId]);
 
   const taskQuery = useQuery({
@@ -117,6 +124,16 @@ export function useRuntimeQueries({
     enabled: taskEnabled,
     retry: false,
     refetchInterval: taskEnabled ? intervalMs : false,
+  });
+  // 编辑态下仍要盯着那个「已脱离监控但还在跑」的任务：不盯的话，它在远端结束后
+  // 顶部栏会一直挂着「运行中」，而且「启动」按钮被 detachedActiveTask 挡着出不来——
+  // 用户只能刷新页面才能再起一个任务。按 edit 的 10s 慢频轮询即可。
+  const detachedTaskQuery = useQuery({
+    queryKey: queryKeys.tasks.detail(detachedTaskId ?? '__detached_disabled__'),
+    queryFn: ({ signal }) => tasksApi.getTask(detachedTaskId!, signal),
+    enabled: detachedEnabled,
+    retry: false,
+    refetchInterval: detachedEnabled ? intervalMs : false,
   });
   const stressQuery = useQuery({
     queryKey: stressKey,
@@ -163,6 +180,11 @@ export function useRuntimeQueries({
         queryKey: queryKeys.tasks.detail(taskId ?? '__disabled__'),
         exact: true,
       });
+    if (!detachedEnabled)
+      void client.cancelQueries({
+        queryKey: queryKeys.tasks.detail(detachedTaskId ?? '__detached_disabled__'),
+        exact: true,
+      });
     if (!policy.pollStress) void client.cancelQueries({ queryKey: stressKey, exact: true });
     if (!policy.pollSystem)
       void client.cancelQueries({ queryKey: queryKeys.metrics.system, exact: true });
@@ -170,6 +192,8 @@ export function useRuntimeQueries({
       void client.cancelQueries({ queryKey: queryKeys.agents.all, exact: true });
   }, [
     client,
+    detachedEnabled,
+    detachedTaskId,
     policy.pollAgents,
     policy.pollStress,
     policy.pollSystem,
@@ -194,6 +218,23 @@ export function useRuntimeQueries({
     onTerminalRef.current?.(detail);
   });
 
+  useApplyData<TaskDetail>(
+    detachedTaskQuery,
+    detachedTaskId ?? '__detached_disabled__',
+    (detail) => {
+      const store = useRuntimeStore.getState();
+      if (detail.state !== 'stopped' && detail.state !== 'failed') {
+        store.setDetachedActiveTask(detail);
+        return;
+      }
+      // 任务已在远端结束：清掉引用，顶部栏回到「可启动」。
+      // 不弹终态报告——用户当时选择了返回编辑、本就不在看这个任务，弹窗属于打断；
+      // 要看结果可以去历史归档。
+      store.setDetachedActiveTask(null);
+      if (store.ownedTaskId === detail.id) store.setOwnedTaskId(null);
+    },
+  );
+
   useApplyData<StressAggregate>(stressQuery, taskId ?? '__active__', (aggregate) => {
     const store = useRuntimeStore.getState();
     reportConnectionHealth('boot', false);
@@ -216,5 +257,5 @@ export function useRuntimeQueries({
     useRuntimeStore.getState().setAgents(response.items);
   });
 
-  return { taskQuery, stressQuery, systemQuery, agentsQuery };
+  return { taskQuery, detachedTaskQuery, stressQuery, systemQuery, agentsQuery };
 }

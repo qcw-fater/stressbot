@@ -62,27 +62,43 @@ async function advance(ms = 0): Promise<void> {
   });
 }
 
+interface RuntimeHookProps {
+  nextMode: RuntimeMode;
+  nextTaskId?: string;
+  /** 编辑态下仍在远端运行的任务；不传即没有脱离监控的任务 */
+  nextDetachedTaskId?: string;
+}
+
 function renderRuntimeHook(
   mode: RuntimeMode,
   taskId: string | undefined,
   reportConnectionHealth = vi.fn(),
   onTerminal = vi.fn(),
   intervalMs: number | null = 100,
+  detachedTaskId: string | undefined = undefined,
 ) {
   const client = createTestQueryClient();
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const rendered = renderHook(
-    ({ nextMode, nextTaskId }) =>
+  const rendered = renderHook<ReturnType<typeof useRuntimeQueries>, RuntimeHookProps>(
+    ({ nextMode, nextTaskId, nextDetachedTaskId }) =>
       useRuntimeQueries({
         mode: nextMode,
         taskId: nextTaskId,
+        detachedTaskId: nextDetachedTaskId,
         intervalMs: intervalMs ?? undefined,
         reportConnectionHealth,
         onTerminal,
       }),
-    { wrapper, initialProps: { nextMode: mode, nextTaskId: taskId } },
+    {
+      wrapper,
+      initialProps: {
+        nextMode: mode,
+        nextTaskId: taskId,
+        nextDetachedTaskId: detachedTaskId,
+      },
+    },
   );
   return { ...rendered, client, reportConnectionHealth, onTerminal };
 }
@@ -93,10 +109,10 @@ beforeEach(() => {
   useRuntimeStore.setState({
     mode: 'running',
     activeTask: runningTask,
+    detachedActiveTask: null,
+    ownedTaskId: null,
     latestStress: null,
     latestSystem: null,
-    stressHistory: [],
-    systemHistory: [],
     agents: [],
     agentsLoaded: false,
     connectionLost: false,
@@ -213,26 +229,95 @@ describe('useRuntimeQueries', () => {
       cleanupSummary: { status: 'partial' },
     } as TaskDetail;
     getTaskMock.mockResolvedValue(runningTask);
+    // 数 push 调用次数而不是看 store 末态：同一份回包重复应用会写进同一个快照对象，
+    // 末态上分辨不出来。
+    const pushStress = vi.fn(useRuntimeStore.getState().pushStress);
+    const pushSystem = vi.fn(useRuntimeStore.getState().pushSystem);
+    useRuntimeStore.setState({ pushStress, pushSystem });
     const { onTerminal, rerender } = renderRuntimeHook('running', 'task-a');
 
     await advance();
     expect(onTerminal).not.toHaveBeenCalled();
-    expect(useRuntimeStore.getState().stressHistory).toHaveLength(1);
-    expect(useRuntimeStore.getState().systemHistory).toHaveLength(1);
+    expect(pushStress).toHaveBeenCalledTimes(1);
+    expect(pushSystem).toHaveBeenCalledTimes(1);
+    expect(useRuntimeStore.getState().latestStress).toBe(stress.snapshot);
 
+    // 下一拍任务已转终态，同拍到的指标/系统换成可区分的新回包
     getTaskMock.mockResolvedValue(terminal);
+    getClusterMetricsMock.mockResolvedValue({
+      ...stress,
+      snapshot: { ...stress.snapshot, uptimeSeconds: 2 },
+    } as unknown as StressAggregate);
+    getClusterSystemMock.mockResolvedValue({
+      ...system,
+      timestamp: '2026-08-11T00:00:05Z',
+    } as unknown as ClusterSystemSnapshot);
     await advance(100);
     await advance(1);
     expect(getTaskMock).toHaveBeenCalledTimes(2);
     expect(onTerminal).toHaveBeenCalledTimes(1);
-    expect(useRuntimeStore.getState().stressHistory).toHaveLength(1);
-    expect(useRuntimeStore.getState().systemHistory).toHaveLength(1);
+    // 任务一结束服务器就清 activeID，之后的快照是零值，覆盖上去会让终态报告瞬间变空。
+    // store 在 finalReport 下守门丢弃，这里确认末次运行中数据仍在。
+    expect(useRuntimeStore.getState().latestStress).toBe(stress.snapshot);
+    expect(useRuntimeStore.getState().latestSystem).toBe(system);
 
+    const appliedStress = pushStress.mock.calls.length;
+    const appliedSystem = pushSystem.mock.calls.length;
     rerender({ nextMode: 'running', nextTaskId: 'task-a' });
     await advance();
     expect(onTerminal).toHaveBeenCalledTimes(1);
-    expect(useRuntimeStore.getState().stressHistory).toHaveLength(1);
-    expect(useRuntimeStore.getState().systemHistory).toHaveLength(1);
+    // 重渲染不会把已经处理过的那份回包再应用一遍
+    expect(pushStress).toHaveBeenCalledTimes(appliedStress);
+    expect(pushSystem).toHaveBeenCalledTimes(appliedSystem);
+  });
+
+  // 「返回编辑」后任务仍在远端跑，activeTask 已清空、常规任务轮询关着。
+  // 不单独盯着它的话，顶部栏会永远停在「运行中」，「启动」按钮也一直被挡住。
+
+  it('编辑态下跟踪脱离监控的任务状态', async () => {
+    useRuntimeStore.setState({
+      mode: 'edit',
+      activeTask: null,
+      detachedActiveTask: { ...runningTask },
+    });
+    const stopping = { ...runningTask, state: 'stopping' } as TaskDetail;
+    getTaskMock.mockResolvedValue(stopping);
+    renderRuntimeHook('edit', undefined, vi.fn(), vi.fn(), 100, 'task-a');
+
+    await advance();
+    expect(getTaskMock).toHaveBeenCalledWith('task-a', expect.anything());
+    expect(useRuntimeStore.getState().detachedActiveTask?.state).toBe('stopping');
+  });
+
+  it('脱离监控的任务在远端结束后清掉引用，不弹终态报告', async () => {
+    useRuntimeStore.setState({
+      mode: 'edit',
+      activeTask: null,
+      detachedActiveTask: { ...runningTask },
+      ownedTaskId: 'task-a',
+    });
+    getTaskMock.mockResolvedValue({ ...runningTask, state: 'stopped' } as TaskDetail);
+    const { onTerminal } = renderRuntimeHook('edit', undefined, vi.fn(), vi.fn(), 100, 'task-a');
+
+    await advance();
+    expect(useRuntimeStore.getState().detachedActiveTask).toBeNull();
+    // ownedTaskId 一并清掉，否则下次 attach 会把别人的任务当成自己发起的
+    expect(useRuntimeStore.getState().ownedTaskId).toBeNull();
+    // 用户当时选择了返回编辑，不该被这个任务的终态弹窗打断
+    expect(onTerminal).not.toHaveBeenCalled();
+  });
+
+  it('进入监控（非 edit 模式）后停止脱离任务的轮询', async () => {
+    useRuntimeStore.setState({ mode: 'edit', activeTask: null, detachedActiveTask: runningTask });
+    const { rerender } = renderRuntimeHook('edit', undefined, vi.fn(), vi.fn(), 100, 'task-a');
+    await advance();
+    const callsInEdit = getTaskMock.mock.calls.length;
+
+    rerender({ nextMode: 'running', nextTaskId: 'task-a', nextDetachedTaskId: 'task-a' });
+    await advance();
+    await advance(100);
+    // 切到 running 后由常规任务轮询接手，两条轮询不会同时打同一个任务
+    expect(getTaskMock.mock.calls.length).toBeLessThanOrEqual(callsInEdit + 2);
   });
 
   it('60 秒请求调度与运行模式一致，不产生重复轮询', async () => {

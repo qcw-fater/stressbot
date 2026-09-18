@@ -21,6 +21,7 @@ import { Tooltip } from 'antd';
 import { WarningOutlined } from '@ant-design/icons';
 import type { ActionMetric } from '@/types/api';
 import { classifyApdex, type ApdexLevel } from '@/services/metricsBinding';
+import { selectPrimaryMetric } from '@/components/monitoring/shared/actionKind';
 
 interface MetricsState {
   metrics: ReadonlyMap<string, ActionMetric>;
@@ -95,20 +96,17 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
 
   // 主指标按动作类别选：往返类看 RTT，监听类看等待时长，其余看 wallClock。
   // 同一个徽章位置显示不同口径，所以标签必须跟着变，否则读的人无从判断这个 p99 是什么。
-  const primary =
-    m.kind === 'listen'
-      ? { label: '等待', hist: m.listenWait, count: m.listenWaitSampleCount }
-      : m.kind === 'networked'
-        ? { label: 'RTT', hist: m.rtt, count: m.rttSampleCount }
-        : { label: '耗时', hist: m.totalDuration, count: m.totalDurationSampleCount };
-  const primaryP99 = primary.hist.p99Ms;
+  // 选取与标签走 monitoring/shared/actionKind，与实时动作表、历史对比表同一份口径。
+  const primary = selectPrimaryMetric(m);
+  const hist = primary.histogram;
+  const primaryP99 = hist?.p99Ms;
   const showP99 =
-    primary.count > 0 &&
-    primary.hist.count > 0 &&
-    primary.hist.avgMs != null &&
-    primary.hist.p95Ms != null &&
+    primary.sampleCount > 0 &&
+    hist != null &&
+    hist.avgMs != null &&
+    hist.p95Ms != null &&
     primaryP99 != null &&
-    primary.hist.maxMs != null &&
+    hist.maxMs != null &&
     m.totalDuration.p99Ms != null;
 
   // Apdex 只对往返类打分；其余类别的徽章位置改用成功计数（样式统一，文本诚实）。
@@ -169,7 +167,7 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
     >
       {showP99 && (
         <Tooltip
-          title={`${primary.label} avg ${primary.hist.avgMs!.toFixed(1)} · p95 ${primary.hist.p95Ms!.toFixed(1)} · p99 ${primaryP99!.toFixed(1)} · max ${primary.hist.maxMs!.toFixed(1)} (ms) · 总耗时 p99 ${m.totalDuration.p99Ms!.toFixed(1)}ms`}
+          title={`${primary.label} avg ${hist!.avgMs!.toFixed(1)} · p95 ${hist!.p95Ms!.toFixed(1)} · p99 ${primaryP99!.toFixed(1)} · max ${hist!.maxMs!.toFixed(1)} (ms) · 总耗时 p99 ${m.totalDuration.p99Ms!.toFixed(1)}ms`}
         >
           <span
             className="pattern-badge"

@@ -12,7 +12,7 @@ import type {
   TimingDetailLevel,
 } from '@/types/api';
 import { classifyApdex } from '@/services/metricsBinding';
-import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
+import { resolveKind } from '@/components/monitoring/shared/actionKind';
 import { fmtMs, fmtBytesPlain } from '@/components/monitoring/shared/formats';
 import { formatStageLabel } from '../stageLabel';
 import type { ChartImages } from './reportCharts';
@@ -85,11 +85,11 @@ export function ReportHtml({ detail, charts }: ReportHtmlProps) {
         )}
       </div>
 
-      {/* Section 4: 性能排行 */}
-      <ChartSection title="动作性能排行 (p99)" image={charts.ranking} empty="无动作数据" />
+      {/* Section 4: 性能排行（只含往返类，图里排的是 RTT p99） */}
+      <ChartSection title="动作性能排行 (RTT p99)" image={charts.ranking} empty="无往返类动作数据" />
 
-      {/* Section 5: 延迟分布 */}
-      <ChartSection title="延迟分布" image={charts.rtt} empty="无动作数据" />
+      {/* Section 5: 延迟分布（同样只含往返类） */}
+      <ChartSection title="RTT 延迟分布" image={charts.rtt} empty="无往返类动作数据" />
 
       {/* Section 6: 成功/失败构成 */}
       <div className="report-section">

@@ -835,15 +835,23 @@ interface ProtoStoreState {
 | weighted 至少 1 个 option | 必填 |
 | switch 至少 1 个 case（SWITCH_NO_CASES） | 必填 |
 | switch 的 case 缺少 condition（SWITCH_CASE_NO_CONDITION）或 next（SWITCH_CASE_NO_NEXT） | 必填 |
+| boolean 的 condition 为空（BOOLEAN_NO_CONDITION） | 必填 |
+| 条件表达式语法错误（CONDITION_SYNTAX） | 语法合法性 |
 | declarative listen 的 s2cProto 不在 ProtoRegistry | proto 存在性 |
 | lua listen 的 script 不存在 | 脚本存在性 |
 | pattern=lua 的 action 的 script 必填 | 必填 |
+
+CONDITION_SYNTAX 的检查面与 Go 端 `flow/prepare.go` 的编译点一一对应：节点 `condition`、
+`breakCondition`、`cases[].condition` 与各 `FieldBind.condition`（含 map entry 内的子绑定）。
+判定由 `services/conditionSyntax.ts` 做，它镜像 `flow/condition_tokenizer.go` +
+`flow/condition_compile.go` 的文法——后端加载期只做语法检查（类型在运行期按实际 state 值判定），
+因此前端能给出与后端一致的判定而非近似子集。缺 `state:` / `lua:` 前缀同样算语法错误：后端不按
+state 兜底，而是直接拒绝整份流程。`StateExprInput` 里同一套检查会在输入时当场标红。
 
 **Warning 级别**：
 
 | 规则 | 说明 |
 |---|---|
-| boolean 的 condition 为空 | 可能的逻辑遗漏 |
 | callback 引用计数为 0（孤儿） | 未使用 |
 | 不可达节点（从 start BFS 不到） | 死代码 |
 | loop 至少需要 loopCount > 0 或 condition 或 breakCondition | 必填项至少一项 |
@@ -956,7 +964,10 @@ NodeShell 消费：
 |---|---|---|
 | totalBots / concurrency | 用户填写 | 自动装填 1 / 1 |
 | logLevel | 用户选择 | 自动装填 debug |
-| skipCapacityCheck | false | true |
+| 节点分配 | 按容量比例分配 | 优先单节点承载 |
+
+容量预检两种模式一致：申请数（渐进加压时为各阶段之和）不得超过空闲节点 `maxBots` 之和，
+口径与服务端 `admin/task/assignment.go` 对齐，实现见 `cmd/web/src/services/taskCapacity.ts`。
 
 ### 12.6 ActiveTaskGuardModal — 活动任务守卫
 

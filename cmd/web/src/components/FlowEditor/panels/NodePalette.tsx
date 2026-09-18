@@ -35,19 +35,51 @@ interface NodeMeta {
   type: NodeType | 'listen';
   label: string;
   color: string;
+  /** 这个节点干什么，给不熟悉 flow.json 的人看 */
+  desc: string;
 }
 
+/**
+ * 格子上的标签保持 flow.json 里的类型名（首字母大写），不改中文：画布节点副标题、
+ * 校验报告、导出的 JSON 都是同一套词汇，翻译标签会让人对不上自己拖出来的是什么。
+ * 语义解释放在 tooltip 里。
+ */
 const PALETTE: NodeMeta[] = [
-  { type: 'sequence', label: 'Sequence', color: 'var(--node-sequence)' },
-  { type: 'loop', label: 'Loop', color: 'var(--node-loop)' },
-  { type: 'boolean', label: 'Boolean', color: 'var(--node-boolean)' },
-  { type: 'switch', label: 'Switch', color: 'var(--node-switch)' },
-  { type: 'weighted', label: 'Weighted', color: 'var(--node-weighted)' },
-  { type: 'wait', label: 'Wait', color: 'var(--node-wait)' },
-  { type: 'break', label: 'Break', color: 'var(--node-break)' },
-  { type: 'continue', label: 'Continue', color: 'var(--node-continue)' },
-  { type: 'action', label: 'Action', color: 'var(--node-action)' },
-  { type: 'listen', label: 'Listen', color: 'var(--node-listen)' },
+  { type: 'sequence', label: 'Sequence', color: 'var(--node-sequence)', desc: '顺序执行子节点' },
+  {
+    type: 'loop',
+    label: 'Loop',
+    color: 'var(--node-loop)',
+    desc: '循环执行循环体，支持条件与次数',
+  },
+  {
+    type: 'boolean',
+    label: 'Boolean',
+    color: 'var(--node-boolean)',
+    desc: '条件为真/假走不同分支',
+  },
+  { type: 'switch', label: 'Switch', color: 'var(--node-switch)', desc: '按条件首次匹配单跳' },
+  {
+    type: 'weighted',
+    label: 'Weighted',
+    color: 'var(--node-weighted)',
+    desc: '按权重随机选一个分支',
+  },
+  { type: 'wait', label: 'Wait', color: 'var(--node-wait)', desc: '等待指定时长' },
+  { type: 'break', label: 'Break', color: 'var(--node-break)', desc: '跳出当前循环' },
+  { type: 'continue', label: 'Continue', color: 'var(--node-continue)', desc: '跳过本次循环迭代' },
+  {
+    type: 'action',
+    label: 'Action',
+    color: 'var(--node-action)',
+    desc: '执行一个动作（收发消息等）',
+  },
+  {
+    type: 'listen',
+    label: 'Listen',
+    color: 'var(--node-listen)',
+    desc: '定义一个服务端推送监听',
+  },
 ];
 
 interface ContextMenuState {
@@ -216,7 +248,11 @@ export function NodePalette() {
         <div className="palette-section-title">节点类型</div>
         <div className="palette-grid">
           {PALETTE.map((m) => (
-            <Tooltip key={m.type} title={`拖入画布创建 ${m.label} 节点`} mouseEnterDelay={0.4}>
+            <Tooltip
+              key={m.type}
+              title={`${m.desc} · 拖入画布创建 ${m.label} 节点`}
+              mouseEnterDelay={0.4}
+            >
               <div
                 draggable
                 onDragStart={(e) => onDragStart(e, m.type)}

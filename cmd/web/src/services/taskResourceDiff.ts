@@ -1,5 +1,5 @@
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
-import { fetchBaselineCodec, fetchBaselineProtoContent, fetchBaselineScript } from './baselineApi';
+import { fetchBaselineResource } from './baselineApi';
 import { connNameToCodecFileName, codecFileNameToConnNameStrict } from './codecConnections';
 import { collectFlowScriptNames } from './scriptSync';
 import {
@@ -11,6 +11,7 @@ import {
   listProto,
   reconcileResourceWithServer,
   type BaselineSyncResult,
+  type ResourceFile,
   type ResourceType,
 } from './resourcesStore';
 
@@ -81,24 +82,35 @@ export async function checkTaskResourcesAgainstBaseline(
   const scope = await collectTaskResourceNames(flow);
   const protoMap = new Map((await listProto()).map((f) => [f.name, f]));
 
+  // 拉取失败（断网 / 5xx）时直接跳过该文件：reconcile 对「服务器没有 + 本地未改动」
+  // 的处理是删除本地副本，把一次抖动当成删除信号会让用户的资源凭空消失。
+  // 只有服务器明确答复 404 才继续走对账。
+  const reconcileOne = async (
+    type: ResourceType,
+    name: string,
+    local: ResourceFile,
+  ): Promise<void> => {
+    const baseline = await fetchBaselineResource(type, name);
+    if (baseline.status === 'error') return;
+    const serverContent = baseline.status === 'ok' ? baseline.content : null;
+    await reconcileResourceWithServer(result, type, name, local, serverContent);
+  };
+
   await Promise.all([
     ...scope.scripts.map(async (name) => {
       const local = await getScript(name);
       if (!local) return;
-      const baseline = await fetchBaselineScript(name);
-      await reconcileResourceWithServer(result, 'script', name, local, baseline);
+      await reconcileOne('script', name, local);
     }),
     ...scope.protos.map(async (name) => {
       const local = protoMap.get(name);
       if (!local) return;
-      const baseline = await fetchBaselineProtoContent(name);
-      await reconcileResourceWithServer(result, 'proto', name, local, baseline);
+      await reconcileOne('proto', name, local);
     }),
     ...scope.adapters.map(async (name) => {
       const local = name === ERRORS_JSON_NAME ? await getErrorMap() : await getCodecSchema(name);
       if (!local) return;
-      const baseline = await fetchBaselineCodec(name);
-      await reconcileResourceWithServer(result, 'adapter', name, local, baseline);
+      await reconcileOne('adapter', name, local);
     }),
   ]);
 

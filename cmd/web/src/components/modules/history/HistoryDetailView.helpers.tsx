@@ -8,7 +8,7 @@ import { Empty, Tag, Tooltip } from 'antd';
 import type { ReactNode } from 'react';
 import type { EChartsOption } from 'echarts';
 import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
-import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
+import { resolveKind } from '@/components/monitoring/shared/actionKind';
 import { fmtMs } from '@/components/monitoring/shared/formats';
 import type {
   CleanupStatus,

@@ -109,6 +109,19 @@ describe('flowStore incremental derivation', () => {
     });
   });
 
+  it('drops the layout entry of a removed node', () => {
+    const beforePositions = useFlowStore.getState().layout.nodePositions;
+
+    useFlowStore.getState().removeNode('send');
+
+    const after = useFlowStore.getState();
+    // 节点 ID 是用户起的名字，删完再建同名节点会命中残留坐标瞬移到旧位置
+    expect(after.layout.nodePositions).not.toHaveProperty('send');
+    expect(after.layout.nodePositions.main).toEqual({ x: 10, y: 20 });
+    // 旧对象不可就地改：undo/redo 与草稿快照都持有它
+    expect(beforePositions.send).toEqual({ x: 100, y: 20 });
+  });
+
   it('commits final positions without mutating the previous layout', () => {
     const beforeLayout = useFlowStore.getState().layout;
     const beforePositions = beforeLayout.nodePositions;

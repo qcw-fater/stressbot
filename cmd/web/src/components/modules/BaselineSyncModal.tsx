@@ -18,6 +18,7 @@ import type {
   SyncDiff,
 } from '@/services/resourcesStore';
 import { applyConflictResolution } from '@/services/resourcesStore';
+import { showApiError } from '@/services/errorHandler';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
@@ -125,6 +126,10 @@ export function BaselineSyncModal({
       await applyResolution(decArray);
       onClose();
       await onResolved?.(decArray);
+    } catch (err) {
+      // 基线拉取失败时 applyResolution 会中止，避免把网络抖动当成「服务器已删除」。
+      // 保持弹窗打开，用户网络恢复后可重试。
+      showApiError(err);
     } finally {
       setApplying(false);
     }

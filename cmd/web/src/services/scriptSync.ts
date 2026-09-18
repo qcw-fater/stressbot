@@ -13,7 +13,11 @@
 import { addScriptFromBaseline, getScript } from './resourcesStore';
 import { fetchBaselineScript } from './baselineApi';
 import { BASELINE_PREFIX } from './env';
+import { collectFlowScriptNames } from './flowScriptRefs';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
+
+// 扫描器本身在 flowScriptRefs.ts（纯函数）；这里继续导出，保持历史调用点不变。
+export { collectFlowScriptNames, type ScriptScanSource } from './flowScriptRefs';
 
 export interface ScriptSyncResult {
   /** 这次同步真正写入本地存储的脚本名（之前本地没有，从基线拉回的） */
@@ -22,49 +26,6 @@ export interface ScriptSyncResult {
   skipped: string[];
   /** flow 引用、本地存储没有、基线 `/sbot/baseline/scripts/<name>` 也拉不到 */
   missing: string[];
-}
-
-/**
- * 扫描 flow 中所有被引用的 lua 脚本名。覆盖：
- *   - actions[].script                       动作节点 lua 模式
- *   - listens[].script                     listen 回调 lua 模式
- *   - nodes[].condition (lua: 前缀)          boolean / loop 前置条件
- *   - nodes[].breakCondition (lua: 前缀)     loop 后置条件
- *
- * 为什么仅扫静态字段：
- *   - flow.json 是声明式的，所有"会被引擎执行的脚本"必然在上述字段里出现；
- *   - 脚本内部的 `require('xxx')` / `dofile()` 是动态的，无法静态分析 → 由用户在
- *     「资源管理」中手动上传，或写在主脚本里 inline。
- */
-export function collectFlowScriptNames(flow: FlowJson): string[] {
-  const set = new Set<string>();
-  for (const a of Object.values(flow.actions ?? {})) {
-    if (a?.script) set.add(a.script);
-  }
-  for (const c of Object.values(flow.listens ?? {})) {
-    if (c?.script) set.add(c.script);
-  }
-  for (const n of Object.values(flow.nodes ?? {})) {
-    const cond = parseLuaCondition(n?.condition);
-    if (cond) set.add(cond);
-    const brk = parseLuaCondition(n?.breakCondition);
-    if (brk) set.add(brk);
-  }
-  return Array.from(set).sort();
-}
-
-/**
- * 解析 condition / breakCondition 字段，返回 lua 脚本名；不是 lua 模式则返回 null。
- *
- * 与 robot/robot.go ExecuteBoolean 的协议保持一致：仅 "lua:" 前缀走脚本求值，
- * "state:" / 原文形态都不依赖外部脚本。
- */
-function parseLuaCondition(raw: string | undefined): string | null {
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('lua:')) return null;
-  const name = trimmed.slice(4).trim();
-  return name || null;
 }
 
 /**

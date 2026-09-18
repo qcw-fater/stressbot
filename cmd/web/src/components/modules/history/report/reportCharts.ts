@@ -21,8 +21,8 @@ import type {
   GraphicComponentOption,
 } from 'echarts';
 import type { HistoryActionMetric, HistoryTrendPoint } from '@/types/api';
-import { classifyApdex } from '@/services/metricsBinding';
-import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
+import { APDEX_THRESHOLDS, classifyApdex } from '@/services/metricsBinding';
+import { resolveKind } from '@/components/monitoring/shared/actionKind';
 
 echarts.use([
   BarChart,
@@ -222,7 +222,9 @@ export function buildBwTrendOption(points: HistoryTrendPoint[]): EChartsOption |
   };
 }
 
-/* ── 5. 动作性能排行（p99 水平条形图） ── */
+/* ── 5. 动作性能排行（RTT p99 水平条形图） ──
+ * 只排往返类：筛选条件要求有 RTT 样本，监听/发送/本地类不在此图内，
+ * 因此轴名与标题都必须写明 RTT，不能只说 p99。 */
 
 export function buildRankingOption(actions: HistoryActionMetric[]): EChartsOption | null {
   const top = [...actions]
@@ -241,7 +243,7 @@ export function buildRankingOption(actions: HistoryActionMetric[]): EChartsOptio
     animation: false,
     tooltip: { trigger: 'axis', textStyle: { fontSize: 11 } },
     grid: { left: 160, right: 40, top: 8, bottom: 8 },
-    xAxis: { type: 'value', name: 'p99 (ms)', axisLabel: { fontSize: 10 } },
+    xAxis: { type: 'value', name: 'RTT p99 (ms)', axisLabel: { fontSize: 10 } },
     yAxis: {
       type: 'category',
       data: names,
@@ -419,20 +421,27 @@ export function buildApdexOption(actions: HistoryActionMetric[]): EChartsOption 
           itemStyle: { color: APDEX_COLORS[classifyApdex(a.rttApdex)] },
         })),
         barMaxWidth: 24,
+        // markLine 只有挂在 series 上才生效，放在 option 根上会被 ECharts 静默忽略
+        // （阈值参考线画不出来，图看着正常但少了判读基准）。
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { type: 'dashed' },
+          data: [
+            {
+              yAxis: APDEX_THRESHOLDS.excellent,
+              label: { formatter: 'excellent', fontSize: 9 },
+              lineStyle: { color: APDEX_COLORS.excellent },
+            },
+            {
+              yAxis: APDEX_THRESHOLDS.good,
+              label: { formatter: 'good', fontSize: 9 },
+              lineStyle: { color: APDEX_COLORS.good },
+            },
+          ],
+        },
       },
     ],
-    markLine: {
-      silent: true,
-      lineStyle: { type: 'dashed' },
-      data: [
-        {
-          yAxis: 0.94,
-          label: { formatter: 'excellent', fontSize: 9 },
-          lineStyle: { color: COLORS.green },
-        },
-        { yAxis: 0.85, label: { formatter: 'good', fontSize: 9 }, lineStyle: { color: '#bae637' } },
-      ],
-    },
   };
 }
 

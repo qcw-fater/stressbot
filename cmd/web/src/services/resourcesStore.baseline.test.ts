@@ -20,6 +20,7 @@ const baseline = vi.hoisted(() => ({
   fetchBaselineProtoContent: vi.fn(),
   fetchBaselineScript: vi.fn(),
   fetchBaselineCodec: vi.fn(),
+  fetchBaselineResource: vi.fn(),
 }));
 
 vi.mock('idb-keyval', () => ({

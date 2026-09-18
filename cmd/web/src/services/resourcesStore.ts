@@ -19,6 +19,7 @@ import {
   fetchBaselineCodecIndex,
   fetchBaselineProtoContent,
   fetchBaselineProtoIndex,
+  fetchBaselineResource,
   fetchBaselineScript,
   fetchBaselineScriptIndex,
 } from './baselineApi';
@@ -1287,21 +1288,38 @@ export class BaselineIndexFetchError extends Error {
   }
 }
 
+/** 基线单文件请求失败（同样中止处理，避免把网络抖动当成服务器删除）。 */
+export class BaselineFileFetchError extends Error {
+  constructor(name: string) {
+    super(`资源「${name}」拉取失败，已中止处理以保护本地内容，请稍后重试`);
+    this.name = 'BaselineFileFetchError';
+  }
+}
+
 /**
  * 应用用户的冲突解决决策。
+ *
+ * 逐项拉取服务器版本：拉取失败会立刻抛错中止，因为此时无法判断服务器上到底有没有这个
+ * 文件——「采用服务器」分支会把未知读成删除、「保留本地」分支会把 baseHash 清成 null
+ * 假装已对齐，两条都会造成数据损失。已处理的决策保持生效，用户重试即可续上。
  */
 export async function applyConflictResolution(decisions: ConflictDecision[]): Promise<void> {
   let changed = false;
   for (const d of decisions) {
-    const baseline = await fetchResourceBaseline(d.type, d.name);
+    const baseline = await fetchBaselineResource(d.type, d.name);
+    if (baseline.status === 'error') {
+      if (changed) notify();
+      throw new BaselineFileFetchError(d.name);
+    }
+    const content = baseline.status === 'ok' ? baseline.content : null;
     if (d.keepLocal) {
       await setResourceBaseHash(
         d.type,
         d.name,
-        baseline === null ? null : await hashResourceContent(baseline),
+        content === null ? null : await hashResourceContent(content),
       );
-    } else if (baseline !== null) {
-      await writeBaselineResource(d.type, d.name, baseline, false);
+    } else if (content !== null) {
+      await writeBaselineResource(d.type, d.name, content, false);
     } else {
       await deleteResource(d.type, d.name, false);
     }
@@ -1311,12 +1329,6 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
 }
 
 // --- 内部辅助 ---
-
-async function fetchResourceBaseline(type: ResourceType, name: string): Promise<string | null> {
-  if (type === 'proto') return fetchBaselineProtoContent(name);
-  if (type === 'script') return fetchBaselineScript(name);
-  return fetchBaselineCodec(name);
-}
 
 async function storeBaselineResource(
   type: ResourceType,

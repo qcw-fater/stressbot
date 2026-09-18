@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const runtimeState = {
-  agents: [{ agentId: 'node-1', status: 'online', maxBots: 100 }],
+  agents: [{ agentId: 'node-1', status: 'idle', maxBots: 100 }],
   clearMonitorData: mocks.clearMonitorData,
   setOwnedTaskId: mocks.setOwnedTaskId,
   setMode: mocks.setMode,
@@ -135,6 +135,19 @@ describe('startTask transaction boundary', () => {
     expect(mocks.clearMonitorData).not.toHaveBeenCalled();
     expect(mocks.setMetrics).not.toHaveBeenCalled();
     expect(mocks.loadFromTaskFlow).not.toHaveBeenCalled();
+  });
+
+  // 服务端只把任务分给空闲节点（admin/task/assignment.go），预检口径必须一致，
+  // 否则忙碌节点会被算进容量，弹窗放行而服务端拒绝。
+  it('counts only idle agents toward capacity', async () => {
+    const original = runtimeState.agents;
+    runtimeState.agents = [{ agentId: 'node-1', status: 'busy', maxBots: 100 }];
+    try {
+      await expect(startTask(options)).rejects.toThrow('可分配容量 0（仅空闲节点），本次申请 10');
+    } finally {
+      runtimeState.agents = original;
+    }
+    expect(mocks.createTask).not.toHaveBeenCalled();
   });
 
   it('clears previous data once after the remote start succeeds', async () => {
