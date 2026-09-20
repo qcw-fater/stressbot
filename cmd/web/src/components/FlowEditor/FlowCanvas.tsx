@@ -892,7 +892,8 @@ function FlowCanvasInner() {
     <div
       ref={wrapperRef}
       tabIndex={-1}
-      style={{ width: '100%', height: '100%', position: 'relative' }}
+      // tabindex=-1 不会被 Tab 聚焦，清掉 outline 只影响鼠标点击后的脚本聚焦，无键盘可达性代价
+      style={{ width: '100%', height: '100%', position: 'relative', outline: 'none' }}
       // 显式建立画布焦点，避免再用 document.body 猜测最近一次交互区域。
       onMouseDownCapture={() => wrapperRef.current?.focus({ preventScroll: true })}
       onDragOver={onDragOver}
