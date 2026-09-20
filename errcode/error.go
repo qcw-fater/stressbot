@@ -2,7 +2,7 @@ package errcode
 
 import "fmt"
 
-// ActionError carries the unified framework/business error code and context.
+// ActionError 承载统一的框架/业务错误码及其上下文明细。
 type ActionError struct {
 	Code   ErrorCode
 	Detail string

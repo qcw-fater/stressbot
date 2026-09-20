@@ -35,6 +35,48 @@ func TestStateConfigCodeRegistered(t *testing.T) {
 	}
 }
 
+// 钉住框架码总数：新增/删除错误码时必须同步改 code.go 顶部的分组数量注释。
+func TestAllCodesCountMatchesDoc(t *testing.T) {
+	const documentedCount = 29
+	if got := len(AllCodes()); got != documentedCount {
+		t.Fatalf("框架错误码共 %d 个，与 code.go 注释声明的 %d 个不一致，请同步更新注释", got, documentedCount)
+	}
+}
+
+// 各码段的实际数量必须与 code.go 顶部注释逐段对齐。
+func TestCodeSegmentCountsMatchDoc(t *testing.T) {
+	segments := []struct {
+		name       string
+		low, high  uint64
+		documented int
+	}{
+		{"网络", 1, 10, 5}, // 码 5（CONN_DROPPED）已退役，不得复用
+		{"协议", 11, 20, 2},
+		{"构建", 21, 30, 4},
+		{"监听", 31, 40, 2},
+		{"配置", 41, 50, 10},
+		{"Lua", 51, 60, 4},
+		{"回调", 61, 70, 2},
+	}
+	counted := 0
+	for _, segment := range segments {
+		got := 0
+		for _, code := range AllCodes() {
+			if code.Code >= segment.low && code.Code <= segment.high {
+				got++
+			}
+		}
+		counted += got
+		if got != segment.documented {
+			t.Errorf("%s 段（%d-%d）实际 %d 个，注释声明 %d 个",
+				segment.name, segment.low, segment.high, got, segment.documented)
+		}
+	}
+	if counted != len(AllCodes()) {
+		t.Errorf("有错误码落在已声明码段之外：分段合计 %d，注册表共 %d", counted, len(AllCodes()))
+	}
+}
+
 func TestAllCodesUnique(t *testing.T) {
 	seen := make(map[uint64]string)
 	for _, code := range AllCodes() {

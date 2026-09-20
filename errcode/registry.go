@@ -5,7 +5,6 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrConnClosed), "CONN_CLOSED"},
 	{uint64(ErrSendFailed), "SEND_FAILED"},
 	{uint64(ErrRecvTimeout), "RECV_TIMEOUT"},
-	{uint64(ErrConnDropped), "CONN_DROPPED"},
 	{uint64(ErrActionCanceled), "ACTION_CANCELED"},
 	{uint64(ErrEncodeFailed), "ENCODE_FAILED"},
 	{uint64(ErrParseFailed), "PARSE_FAILED"},

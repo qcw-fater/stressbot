@@ -5,16 +5,21 @@ package errcode
 // ErrorCode 统一错误码类型。码段契约：< 100 框架码（工具自产，本 registry 分配），≥ 100 业务码（服务器返回）。单一 code 唯一标识，不再需要 Kind 维度。
 type ErrorCode uint64
 
-// 29 个框架错误码按码段分组，每组首个常量上方注明所属层与码段区间；行尾注释为触发条件。
+// 29 个框架错误码按码段分组（网络 5 / 协议 2 / 构建 4 / 监听 2 / 配置 10 / Lua 4 / 回调 2），
+// 每组首个常量上方注明所属层与码段区间；行尾注释为触发条件。
 // ≥ 100 的业务码由服务器经 errors.json 描述，不在此登记。
+//
+// 码 5（曾用于 CONN_DROPPED）已退役且**不得复用**：历史归档里可能仍有按 5 记录的样本，
+// 复用会让旧数据被贴上新含义的标签。连接被对端断开现在不再产出独立的动作错误码——
+// 断开由 monitor 的 Connections.Dropped 计数呈现，主连接断开会停机器人，在途动作随
+// robot ctx 取消报 ErrActionCanceled。
 const (
 	// ErrConnNotFound 表示目标连接尚未建立（网络层 1-10）。
 	ErrConnNotFound   ErrorCode = 1 // 连接未建立（GetTCPConn/GetUDPConn 返回 nil）
 	ErrConnClosed     ErrorCode = 2 // 连接已关闭（isClose == 1）
 	ErrSendFailed     ErrorCode = 3 // socket 写入失败（Send 返回 false）
 	ErrRecvTimeout    ErrorCode = 4 // 等待响应超时（select timeout）
-	ErrConnDropped    ErrorCode = 5 // 等待期间连接被对端断开（gnet OnClose 触发的 ctx.Done）
-	ErrActionCanceled ErrorCode = 6 // 等待期间连接被本地主动关闭（任务停止 / robot.Stop / 业务 Close）
+	ErrActionCanceled ErrorCode = 6 // 流程/连接被取消（任务停止 / robot.Stop / 主连接断开触发的停机）
 
 	// ErrEncodeFailed 表示 Adapter 编码失败（协议层 11-20）。
 	ErrEncodeFailed ErrorCode = 11 // Adapter 编码返回 nil

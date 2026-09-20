@@ -22,7 +22,7 @@ function execute(r)
     if err then
         log.error("逻辑服密钥交换失败: address=" .. tostring(logicAddress)
             .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
-        return err  -- 透传底层 err table（如 5=CONN_DROPPED / 4=RECV_TIMEOUT）
+        return err  -- 透传底层 err table（如 4=RECV_TIMEOUT / 6=ACTION_CANCELED）
     end
     if not keyBody or #keyBody == 0 then
         log.error("逻辑服密钥交换响应为空: address=" .. tostring(logicAddress))
