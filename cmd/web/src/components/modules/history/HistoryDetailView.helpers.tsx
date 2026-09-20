@@ -275,6 +275,9 @@ export function buildChartOptions(points: HistoryTrendPoint[], stageMarks: Stage
     }>,
     yMax?: number,
   ): EChartsOption => ({
+    // 归档数据是静态的，入场动画只是让八张图同时跑一遍补间。
+    // 报告侧（reportCharts）一直是关的，这里跟上。
+    animation: false,
     tooltip,
     legend: { right: 0, top: 0, textStyle: { fontSize: 10, color: labelClr } },
     grid: { left: 34, right: 8, top: 26, bottom: 22 },

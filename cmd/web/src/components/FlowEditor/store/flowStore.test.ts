@@ -90,6 +90,37 @@ describe('flowStore incremental derivation', () => {
     expect(after.rfEdges).toHaveLength(0);
   });
 
+  // 全量重算走 syncDerived，但没变的节点/边必须还是原来那个对象，
+  // 否则画布上每次连线都会把所有节点重渲一遍（memo 也拦不住）。
+  it('syncDerived 复用未变化的节点与边对象', () => {
+    const before = useFlowStore.getState();
+    const beforeNodes = before.rfNodes;
+    const beforeEdges = before.rfEdges;
+
+    before.syncDerived();
+
+    const after = useFlowStore.getState();
+    expect(after.rfNodes).toBe(beforeNodes);
+    expect(after.rfEdges).toBe(beforeEdges);
+  });
+
+  it('拓扑变更只换受影响的对象，旁观节点保持同一引用', () => {
+    const before = useFlowStore.getState();
+    const card = before.rfNodes.find((node) => node.id === '__cb__notices');
+    const actionNode = before.rfNodes.find((node) => node.id === 'send');
+
+    // 给 action 挂一条 listenRef：这是拓扑改动，会触发整图重算
+    before.updateNode('send', {
+      listenRefs: [{ server: 'tcp:logic', listen: 'notices', route: {} }],
+    });
+
+    const after = useFlowStore.getState();
+    expect(after.rfNodes).not.toBe(before.rfNodes);
+    expect(after.rfNodes.find((node) => node.id === 'send')).not.toBe(actionNode);
+    // 监听卡片自身没变，引用应保持
+    expect(after.rfNodes.find((node) => node.id === '__cb__notices')).toBe(card);
+  });
+
   it('keeps drag-time positions out of persisted layout until commit', () => {
     const beforeLayout = useFlowStore.getState().layout;
 

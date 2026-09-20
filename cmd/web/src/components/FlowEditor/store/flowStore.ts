@@ -95,6 +95,36 @@ export interface FlowState {
 
 export type FlowHistoryState = Pick<FlowState, 'defaultDelayMs' | 'nodes' | 'actions' | 'listens'>;
 
+/**
+ * 逐键 Object.is 比较两个 data 对象。
+ *
+ * 之所以浅比较就够：data 里装的是 store 里 nodes/actions/listens 的**引用**，
+ * 而这些表的更新一律是不可变写法（只有被改的那一项换新对象），所以引用相等
+ * 等价于内容未变。
+ */
+function sameShallow(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  const ka = Object.keys(a as object);
+  const kb = Object.keys(b as object);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (!Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** 逐项同一则返回旧数组，让下游（React Flow / memo 过的节点组件）整体跳过重渲染。 */
+function keepArrayIfUnchanged<T>(prev: T[], next: T[]): T[] {
+  if (prev.length !== next.length) return next;
+  for (let i = 0; i < prev.length; i++) {
+    if (prev[i] !== next[i]) return next;
+  }
+  return prev;
+}
+
 const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (set, get) => ({
   defaultDelayMs: 1000,
   nodes: {},
@@ -538,6 +568,9 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
     });
   },
 
+  // 全量重算 rfNodes/rfEdges，但**逐个复用没变的那些对象**：任何一次拓扑改动
+  // （连边、改 next、动 listenRefs）都会走到这里，若整批换新对象，React Flow 会把
+  // 画布上所有节点与边重渲一遍。复用判定见 sameShallow。
   syncDerived: () => {
     const s = get();
     const { rfNodes, rfEdges, listenRefCount, nodesByListen } = jsonToFlow({
@@ -574,9 +607,38 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
       } else {
         position = { x: 0, y: 0 };
       }
+      if (
+        existing &&
+        existing.type === n.type &&
+        existing.position.x === position.x &&
+        existing.position.y === position.y &&
+        sameShallow(existing.data, n.data)
+      ) {
+        return existing;
+      }
       return { ...n, position };
     });
-    set({ rfNodes: positioned, rfEdges, listenRefCount, nodesByListen });
+    const existingEdgeById = new Map(s.rfEdges.map((edge) => [edge.id, edge]));
+    const reusedEdges = rfEdges.map((e) => {
+      const existing = existingEdgeById.get(e.id);
+      if (
+        existing &&
+        existing.source === e.source &&
+        existing.target === e.target &&
+        existing.type === e.type &&
+        existing.sourceHandle === e.sourceHandle &&
+        sameShallow(existing.data, e.data)
+      ) {
+        return existing;
+      }
+      return e;
+    });
+    set({
+      rfNodes: keepArrayIfUnchanged(s.rfNodes, positioned),
+      rfEdges: keepArrayIfUnchanged(s.rfEdges, reusedEdges),
+      listenRefCount,
+      nodesByListen,
+    });
   },
 });
 
