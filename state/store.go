@@ -1,6 +1,6 @@
 // Package state 提供泛型 key-value 状态存储，用于 Robot 运行时状态管理。
-// 所有字段通过字符串 key 访问，支持类型安全的 getter/setter。
-// 替代原有 IRobot 接口的 80+ 个 typed getter/setter，使工具完全数据驱动。
+// 所有字段通过字符串 key 访问，支持类型安全的 getter/setter，
+// 压测流程无需为每个业务字段预置强类型访问器，完全数据驱动。
 package state
 
 import (

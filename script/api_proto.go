@@ -127,7 +127,7 @@ func checkProtoMsgFull(L *lua.LState) (proto.Message, bool, *respHandle) {
 			return msg, readonly, h
 		}
 	}
-	L.RaiseError("expected proto message (userdata)")
+	L.RaiseError("参数里没有 proto 消息（userdata）：请传 proto.create/parse 的产物、网络响应或 wire 视图")
 	return nil, false, nil
 }
 
@@ -217,14 +217,14 @@ func findWireView(L *lua.LState) *protox.WireValue {
 func protoCreate(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Factory == nil {
-		L.RaiseError("proto factory not available")
+		L.RaiseError("proto 工厂不可用：当前运行时未注入 proto 描述符")
 		return 0
 	}
 
 	name := L.CheckString(1)
 	msg, err := ctx.Factory.Create(name)
 	if err != nil {
-		L.RaiseError("create proto message failed: %v", err)
+		L.RaiseError("创建 proto 消息 %s 失败: %v", name, err)
 		return 0
 	}
 
@@ -239,7 +239,7 @@ func protoCreate(L *lua.LState) int {
 func protoSetField(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Factory == nil {
-		L.RaiseError("proto factory not available")
+		L.RaiseError("proto 工厂不可用：当前运行时未注入 proto 描述符")
 		return 0
 	}
 
@@ -283,7 +283,7 @@ func protoSetField(L *lua.LState) int {
 	}
 
 	if err := ctx.Factory.SetField(msg, fieldName, goVal); err != nil {
-		L.RaiseError("set field %s failed: %v", fieldName, err)
+		L.RaiseError("写字段 %s 失败: %v", fieldName, err)
 	}
 	// 响应句柄被改写：置脏（同根共享），此后存储不得再复用原始 raw 快照。
 	if handle != nil && handle.dirty != nil {
@@ -305,12 +305,12 @@ func protoGetField(L *lua.LState) int {
 	if wv := findWireView(L); wv != nil {
 		fieldName := findFirstStringArg(L)
 		if fieldName == "" {
-			L.RaiseError("proto.get_field requires (msg, field)")
+			L.RaiseError("proto.get_field 需要 (msg, field) 两个参数")
 			return 0
 		}
 		val, err := wv.GetFieldCompat(fieldName)
 		if err != nil {
-			L.RaiseError("get field %s failed: %v", fieldName, err)
+			L.RaiseError("读字段 %s 失败: %v", fieldName, err)
 			return 0
 		}
 		L.Push(goValueToLua(L, val))
@@ -336,13 +336,13 @@ func protoGetField(L *lua.LState) int {
 	}
 
 	if fieldName == "" {
-		L.RaiseError("proto.get_field requires (msg, field)")
+		L.RaiseError("proto.get_field 需要 (msg, field) 两个参数")
 		return 0
 	}
 
 	val, err := ctx.Factory.GetField(msg, fieldName)
 	if err != nil {
-		L.RaiseError("get field %s failed: %v", fieldName, err)
+		L.RaiseError("读字段 %s 失败: %v", fieldName, err)
 		return 0
 	}
 
@@ -373,7 +373,7 @@ func protoSerialize(L *lua.LState) int {
 
 	data, err := ctx.Factory.Serialize(msg)
 	if err != nil {
-		L.RaiseError("serialize failed: %v", err)
+		L.RaiseError("proto.serialize 序列化失败: %v", err)
 		return 0
 	}
 
@@ -385,7 +385,7 @@ func protoSerialize(L *lua.LState) int {
 func protoParse(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Factory == nil {
-		L.RaiseError("proto factory not available")
+		L.RaiseError("proto 工厂不可用：当前运行时未注入 proto 描述符")
 		return 0
 	}
 
@@ -406,13 +406,13 @@ func protoParse(L *lua.LState) int {
 	}
 
 	if name == "" || data == nil {
-		L.RaiseError("proto.parse requires (name, data)")
+		L.RaiseError("proto.parse 需要 (name, data) 两个参数")
 		return 0
 	}
 
 	msg, err := ctx.Factory.Parse(name, data)
 	if err != nil {
-		L.RaiseError("parse proto %s failed: %v", name, err)
+		L.RaiseError("解析 proto %s 失败: %v", name, err)
 		return 0
 	}
 
@@ -464,16 +464,20 @@ func protoIterList(L *lua.LState) int {
 	if wv := findWireView(L); wv != nil {
 		// wire 视图：列表游标——一遍收集元素跨度，message 元素惰性产出子视图
 		// （零解码，脚本读哪个字段才扫哪个字段），与 list_get 的子视图语义对齐。
-		// 出错推 nil、非 list 字段空迭代，行为与解码分支一致。
 		fieldName := findFirstStringArg(L)
 		if fieldName == "" {
-			L.RaiseError("proto.iter_list requires (msg, field)")
+			L.RaiseError("proto.iter_list 需要 (msg, field) 两个参数")
 			return 0
 		}
 		cur, err := wv.ListCursorCompat(fieldName)
 		if err != nil {
-			L.Push(lua.LNil)
-			return 1
+			// 与解码分支同构（形态不得漂移）：列表路径不合法但字段本身可读
+			// （如 "items[0].name" 这类带下标段的路径）→ 空迭代；未知字段 /
+			// 非法路径 → nil。cur 为 nil 时 Len()==0，即空迭代。
+			if _, ferr := wv.GetFieldCompat(fieldName); ferr != nil {
+				L.Push(lua.LNil)
+				return 1
+			}
 		}
 		idx := 0
 		iter := L.NewFunction(func(L *lua.LState) int {
@@ -502,7 +506,7 @@ func protoIterList(L *lua.LState) int {
 	}
 	fieldName := findFirstStringArg(L)
 	if fieldName == "" {
-		L.RaiseError("proto.iter_list requires (msg, field)")
+		L.RaiseError("proto.iter_list 需要 (msg, field) 两个参数")
 		return 0
 	}
 	// 解码路径与 wire 游标语义逐字对齐（含 schema 降级回落时，脚本可见形态

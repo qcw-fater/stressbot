@@ -90,13 +90,13 @@ func TestTCPRequest_EncodeFail_ResolverNil(t *testing.T) {
 	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	defer L.Close()
 
-	// resolver nil：函数体开头 ctx.Resolver nil 判定走 RaiseError（network not available）。
+	// resolver nil：函数体开头 ctx.Resolver nil 判定走 RaiseError（网络层不可用）。
 	err := doNet(t, L, `return network.tcp_request('logic', 'C2S.Login', nil)`)
 	if err == nil {
-		t.Fatalf("期望 RaiseError（network not available），实际 nil")
+		t.Fatalf("期望 RaiseError（网络层不可用），实际 nil")
 	}
-	if !strings.Contains(err.Error(), "network not available") {
-		t.Fatalf("err %q 应含 'network not available'", err.Error())
+	if !strings.Contains(err.Error(), "网络层不可用") {
+		t.Fatalf("err %q 应含 '网络层不可用'", err.Error())
 	}
 }
 
@@ -151,8 +151,8 @@ func TestTCPRequest_EmptyService(t *testing.T) {
 	if err == nil {
 		t.Fatalf("期望 RaiseError（service 空），实际 nil")
 	}
-	if !strings.Contains(err.Error(), "tcp_request requires") {
-		t.Fatalf("err %q 应含 'tcp_request requires'", err.Error())
+	if !strings.Contains(err.Error(), "service 不能为空") {
+		t.Fatalf("err %q 应含 'service 不能为空'", err.Error())
 	}
 }
 

@@ -358,7 +358,7 @@ func utilsPackLE(L *lua.LState) int {
 			binary.LittleEndian.PutUint64(b, math.Float64bits(n))
 			buf = append(buf, b...)
 		default:
-			L.RaiseError("unknown pack format: %s", format)
+			L.RaiseError("utils.pack_le 不支持的格式: %s（可用 u8/i8/u16/i16/u32/i32/u64/i64/f32/f64）", format)
 			return 0
 		}
 	}
@@ -380,49 +380,49 @@ func utilsUnpackLE(L *lua.LState) int {
 		switch format {
 		case "u8":
 			if offset+1 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (u8 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 u8，偏移 %d）", offset)
 				return 0
 			}
 			L.Push(lua.LNumber(data[offset]))
 			offset++
 		case "i8":
 			if offset+1 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (i8 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 i8，偏移 %d）", offset)
 				return 0
 			}
 			L.Push(lua.LNumber(int8(data[offset])))
 			offset++
 		case "u16":
 			if offset+2 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (u16 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 u16，偏移 %d）", offset)
 				return 0
 			}
 			L.Push(lua.LNumber(binary.LittleEndian.Uint16(data[offset:])))
 			offset += 2
 		case "i16":
 			if offset+2 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (i16 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 i16，偏移 %d）", offset)
 				return 0
 			}
 			L.Push(lua.LNumber(int16(binary.LittleEndian.Uint16(data[offset:]))))
 			offset += 2
 		case "u32":
 			if offset+4 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (u32 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 u32，偏移 %d）", offset)
 				return 0
 			}
 			L.Push(lua.LNumber(binary.LittleEndian.Uint32(data[offset:])))
 			offset += 4
 		case "i32":
 			if offset+4 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (i32 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 i32，偏移 %d）", offset)
 				return 0
 			}
 			L.Push(lua.LNumber(int32(binary.LittleEndian.Uint32(data[offset:]))))
 			offset += 4
 		case "u64":
 			if offset+8 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (u64 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 u64，偏移 %d）", offset)
 				return 0
 			}
 			v := binary.LittleEndian.Uint64(data[offset:])
@@ -434,7 +434,7 @@ func utilsUnpackLE(L *lua.LState) int {
 			offset += 8
 		case "i64":
 			if offset+8 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (i64 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 i64，偏移 %d）", offset)
 				return 0
 			}
 			v := int64(binary.LittleEndian.Uint64(data[offset:]))
@@ -446,7 +446,7 @@ func utilsUnpackLE(L *lua.LState) int {
 			offset += 8
 		case "f32":
 			if offset+4 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (f32 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 f32，偏移 %d）", offset)
 				return 0
 			}
 			bits := binary.LittleEndian.Uint32(data[offset:])
@@ -454,14 +454,14 @@ func utilsUnpackLE(L *lua.LState) int {
 			offset += 4
 		case "f64":
 			if offset+8 > len(data) {
-				L.RaiseError("unpack_le: 数据不足 (f64 at offset %d)", offset)
+				L.RaiseError("utils.unpack_le: 数据不足（格式 f64，偏移 %d）", offset)
 				return 0
 			}
 			bits := binary.LittleEndian.Uint64(data[offset:])
 			L.Push(lua.LNumber(math.Float64frombits(bits)))
 			offset += 8
 		default:
-			L.RaiseError("unknown unpack format: %s", format)
+			L.RaiseError("utils.unpack_le 不支持的格式: %s（可用 u8/i8/u16/i16/u32/i32/u64/i64/f32/f64）", format)
 			return 0
 		}
 	}

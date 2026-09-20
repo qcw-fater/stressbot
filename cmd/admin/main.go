@@ -51,9 +51,8 @@ func run(args []string) (exitCode int) {
 		if rec := recover(); rec != nil {
 			stack := debug.Stack()
 			fmt.Fprintf(os.Stderr, "[ADMIN] 顶层 panic: %v\n%s\n", rec, stack)
-			if stresslog.GetLogger() != nil {
-				stresslog.Error("[ADMIN] 顶层 panic", zap.Any("panic", rec), zap.String("stack", string(stack)))
-			}
+			// InitLog 之前 stresslog 是 no-op，这条会被丢弃；上面的 stderr 输出保证不漏。
+			stresslog.Error("[ADMIN] 顶层 panic", zap.Any("panic", rec), zap.String("stack", string(stack)))
 			exitCode = 2
 		}
 		if closeLog != nil {

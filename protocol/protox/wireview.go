@@ -3,7 +3,6 @@ package protox
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -27,7 +26,8 @@ import (
 //     不是 not-found——proto.get_path(resp,"record.address") 在 record 缺席时
 //     返回 ""，不是 nil；
 //   - 终端 message 全量物化为 map 树（walkWireLevel 直转，零 dynamicpb）；
-//   - 未知字段 / 越界下标 / 非法嵌套是 error（脚本侧 RaiseError），不是 nil。
+//   - 未知字段 / 非法下标（如 "[abc]"）/ 越界下标 / 非法嵌套是 error
+//     （脚本侧 RaiseError），不是 nil。
 //
 // 正确性防线与导航/直转同构：L1 差分（wireview_test.go），L2/L3 线上影子采样
 // （GetFieldCompat 内嵌，oracle 为 getNestedFieldValue，失配走同一套 schema 降级）。
@@ -91,9 +91,10 @@ func wireGetNested(md protoreflect.MessageDescriptor, b []byte, parts []string) 
 		if !fd.IsList() {
 			return nil, fmt.Errorf("字段 %s 不是 repeated，但路径包含数组索引 %s", part, nextPart)
 		}
-		idx := sscanfIndex(nextPart)
-		if idx < 0 {
-			return nil, fmt.Errorf("数组索引越界: %s", nextPart)
+		idx, iok := parseIndexSeg(nextPart)
+		if !iok || idx < 0 {
+			// 与 getNestedFieldValue 逐字一致：非法下标是 error，不得当成 [0]。
+			return nil, fmt.Errorf("无效数组索引: %s", nextPart)
 		}
 		// 下标访问只扫到第 idx+1 个元素即停（前缀即定值，见 wireCollectList）。
 		elems, ok := wireCollectList(b, fd, idx+1)
@@ -215,18 +216,6 @@ func wireToMapTree(md protoreflect.MessageDescriptor, b []byte) (map[string]any,
 		return nil, err
 	}
 	return sink.m, nil
-}
-
-// sscanfIndex 复刻 getNestedFieldValue 的 fmt.Sscanf("%d") 下标解析：解析失败取 0。
-func sscanfIndex(seg string) int {
-	s := seg[1 : len(seg)-1]
-	if s == "" {
-		return 0
-	}
-	if v, err := strconv.Atoi(s); err == nil {
-		return v
-	}
-	return 0
 }
 
 // ── 列表兼容读（GetListLen / GetListItem 的 wire 版）───────────────────

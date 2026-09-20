@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strconv"
 
+	"stressbot/internal/stresslog"
 	"stressbot/protocol/protox"
 	"stressbot/state"
 
 	lua "github.com/yuin/gopher-lua"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,7 +19,8 @@ const maxSafeInt = 1 << 53 // 9007199254740992，Lua double 可精确表示的�
 // Lua 用法：
 //
 //	local r = require("robot")
-//	r.get("key")           → 读取状态值
+//	r.get("key")           → 读取状态值（整树物化成独立 Lua 表）
+//	r.get_view("key")      → 借阅只读 wire 惰性视图（大消息只读挑着看）
 //	r.set("key", value)    → 写入状态值
 //	r.has("key")           → 检查 key 是否存在
 //	r.delete("key")        → 删除单个 key
@@ -92,7 +95,8 @@ func robotIndex(L *lua.LState) int {
 	case "error":
 		L.Push(L.NewFunction(robotError))
 	default:
-		L.RaiseError("unknown robot method: %s", method)
+		L.RaiseError("robot 没有 %q 方法；可用方法见 robot 模块（get/get_view/set/has/delete/clear/"+
+			"increment/keys/get_path/set_path/get_id/get_index/get_account/get_context/error）", method)
 	}
 	return 1
 }
@@ -165,12 +169,12 @@ func robotSet(L *lua.LState) int {
 
 	base := firstRobotArg(L)
 	if L.GetTop() < base+1 {
-		L.RaiseError("robot.set requires (key, value)")
+		L.RaiseError("robot.set 需要 (key, value) 两个参数")
 		return 0
 	}
 
 	key := lua.LVAsString(L.Get(base))
-	value := luaToGoStoreValue(L.Get(base + 1))
+	value := luaToGoStoreValue(L, "robot.set", L.Get(base+1))
 	ctx.Store.Set(key, value)
 	return 0
 }
@@ -185,7 +189,7 @@ func robotHas(L *lua.LState) int {
 
 	base := firstRobotArg(L)
 	if L.GetTop() < base {
-		L.RaiseError("robot.has requires (key)")
+		L.RaiseError("robot.has 需要 (key) 一个参数")
 		return 0
 	}
 
@@ -202,7 +206,7 @@ func robotDelete(L *lua.LState) int {
 	}
 	base := firstRobotArg(L)
 	if L.GetTop() < base {
-		L.RaiseError("robot.delete requires (key)")
+		L.RaiseError("robot.delete 需要 (key) 一个参数")
 		return 0
 	}
 	key := lua.LVAsString(L.Get(base))
@@ -236,7 +240,7 @@ func robotIncrement(L *lua.LState) int {
 
 	base := firstRobotArg(L)
 	if L.GetTop() < base {
-		L.RaiseError("robot.increment requires (key)")
+		L.RaiseError("robot.increment 需要 (key) 一个参数")
 		return 0
 	}
 
@@ -299,11 +303,11 @@ func robotSetPath(L *lua.LState) int {
 	}
 	base := firstRobotArg(L)
 	if L.GetTop() < base+1 {
-		L.RaiseError("robot.set_path requires (path, value)")
+		L.RaiseError("robot.set_path 需要 (path, value) 两个参数")
 		return 0
 	}
 	path := lua.LVAsString(L.Get(base))
-	value := luaToGoStoreValue(L.Get(base + 1))
+	value := luaToGoStoreValue(L, "robot.set_path", L.Get(base+1))
 	ctx.Store.SetPath(path, value)
 	return 0
 }
@@ -426,13 +430,19 @@ func goValueToLua(L *lua.LState, val any) lua.LValue {
 		return protoMessageToLuaTable(L, v.Message())
 	case *protox.WireValue:
 		// wire-first 整存值：默认 wire 单遍直转 Lua table（WalkWire，零 dynamicpb
-		// 中间树）；schema 降级 / 影子采样失配 / 结构损坏回落解码路径。
-		// 解码也失败理论不可达（存储点已结构校验），防御性返回 nil。
+		// 中间树）；schema 降级 / 影子采样失配 / 结构损坏回落解码路径（直转被拒的
+		// 失配日志由 wireValueToLuaTable 负责，见 ReportWireFailure）。
 		if lv, ok := wireValueToLuaTable(L, v); ok {
 			return lv
 		}
 		msg, err := v.Message()
 		if err != nil {
+			// 回落解码也失败理论不可达（存储点已过 ValidateWire 结构校验）。这里不能
+			// 静默返回 nil——脚本会把内部故障读成「key 不存在」，故留失配证据日志后报错。
+			v.ReportWireFailure("lua-decode-fallback", err)
+			L.RaiseError("state 值（%s）的 wire 直转与解码回落均失败，无法转为 Lua 值: %v。"+
+				"这是内部故障而非 key 缺失（存储时已通过结构校验），请查日志中的 [WIRE] 失配记录",
+				v.Desc().FullName(), err)
 			return lua.LNil
 		}
 		return protoMessageToLuaTable(L, msg)
@@ -458,7 +468,10 @@ func goValueToLua(L *lua.LState, val any) lua.LValue {
 // 语义注意：存表是快照（深转换），存消息按「存入时内容」固化——WireValue 是字节快照，
 // 脚本此后对同一 userdata 调 proto.set_field 不会反映到 state（现有脚本无此用法；
 // 旧 Frozen 引用形态在此用法下行为本就未定义）。
-func luaToGoStoreValue(v lua.LValue) any {
+//
+// 存不进 state 的形态（未知 userdata、函数、协程、channel）一律教学报错：这些值只能
+// 转成 nil，静默存 nil 会让脚本作者在读到 nil 时误以为是「key 没写进去」。
+func luaToGoStoreValue(L *lua.LState, api string, v lua.LValue) any {
 	if ud, ok := v.(*lua.LUserData); ok {
 		switch m := ud.Value.(type) {
 		case *respHandle:
@@ -471,7 +484,18 @@ func luaToGoStoreValue(v lua.LValue) any {
 			return m
 		case proto.Message:
 			return protox.Freeze(m)
+		default:
+			L.RaiseError("%s: %T 形态的 userdata 无法存入 state。"+
+				"可存的是 proto 消息类 userdata（网络响应、proto.create/parse 产物、robot.get_view 视图）、"+
+				"标量、字符串与 Lua 表；其它 userdata 请先用 proto.get_field 等取出需要的字段再存", api, ud.Value)
+			return nil
 		}
+	}
+	switch v.Type() {
+	case lua.LTFunction, lua.LTThread, lua.LTChannel:
+		L.RaiseError("%s: %s 类型无法存入 state，state 只接受标量、字符串、Lua 表与 proto 消息类 userdata",
+			api, v.Type().String())
+		return nil
 	}
 	return luaToGoValue(v)
 }
@@ -556,9 +580,15 @@ func luaToGoValue(v lua.LValue) any {
 			case proto.Message:
 				return m
 			}
+			// 嵌套在 Lua 表里的未知 userdata 无法在 API 入口拦截（入口只看顶层值），
+			// 只能转成 nil；但不能静默——否则脚本作者看到的是"字段莫名消失"。
+			stresslog.Error("[SCRIPT] Lua 值转 Go 失败：未知 userdata 形态已按 nil 处理",
+				zap.String("goType", fmt.Sprintf("%T", ud.Value)))
 		}
 		return nil
 	default:
+		stresslog.Error("[SCRIPT] Lua 值转 Go 失败：该类型无法转换，已按 nil 处理",
+			zap.String("luaType", v.Type().String()))
 		return nil
 	}
 }

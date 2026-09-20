@@ -63,8 +63,8 @@ func LoadTOML[T any](path string, defaults T) (*T, error) {
 //   - $$              — 转义为字面 $
 //   - 不含 $ 的字符串  — 原样返回（零开销）
 //
-// 支持的类型：string、*string、map[string]string、struct（递归）。
-// 其他类型（int / bool / slice 等）跳过。
+// 支持的类型：string、*string、map[string]string、struct、slice/array（均递归）。
+// 其他标量类型（int / bool 等）跳过。
 func ExpandConfigStrings(v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr {
@@ -125,9 +125,38 @@ func expandValue(rv reflect.Value) error {
 		}
 		return nil
 
-	default:
-		// int / bool / slice / array / interface 等不展开
+	case reflect.Slice, reflect.Array:
+		// 展开必须覆盖切片元素：地址列表、目录列表这类 []string 配置项与标量字段
+		// 一样会写 ${VAR}，漏掉它们等于让这些字段静默保留未展开的字面量。
+		if rv.Kind() == reflect.Slice && rv.IsNil() {
+			return nil
+		}
+		// 元素类型不可能含字符串（[]byte / []int 之类）时整段跳过，避免逐元素空转。
+		if !mayContainString(rv.Type().Elem()) {
+			return nil
+		}
+		for i := range rv.Len() {
+			if err := expandValue(rv.Index(i)); err != nil {
+				return err
+			}
+		}
 		return nil
+
+	default:
+		// int / bool / interface 等不展开
+		return nil
+	}
+}
+
+// mayContainString 判断该类型自身或其内部是否可能藏着待展开的字符串。
+func mayContainString(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.String, reflect.Struct, reflect.Map, reflect.Interface:
+		return true
+	case reflect.Ptr, reflect.Slice, reflect.Array:
+		return mayContainString(t.Elem())
+	default:
+		return false
 	}
 }
 

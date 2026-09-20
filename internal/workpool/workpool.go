@@ -57,14 +57,13 @@ var (
 	workPoolOnce sync.Once
 )
 
-// Init 初始化默认协程池（单例模式）。
-// 参数已移除：原 PoolConfig 永远传 nil，现使用包级常量 poolCap/poolExpiryDuration/poolShutdownTimeout。
+// Init 初始化默认协程池（单例模式），参数取包级常量。
 func Init() {
 	workPoolOnce.Do(func() {
 		opts := ants.Options{
 			ExpiryDuration: poolExpiryDuration,
 			PanicHandler: func(err any) {
-				stresslog.DPanic("goroutine pool panic", zap.Any("error", err))
+				stresslog.DPanic("[POOL] 协程池 panic", zap.Any("error", err))
 			},
 		}
 
@@ -77,7 +76,7 @@ func Init() {
 			pool:   pool,
 			stopCh: make(chan struct{}),
 		}
-		stresslog.Info("work pool initialized",
+		stresslog.Info("[POOL] 协程池已初始化",
 			zap.Int("cap", pool.Cap()),
 			zap.Duration("expiry_duration", poolExpiryDuration))
 	})
@@ -137,10 +136,10 @@ func (p *Pool) submit(task func(stopCh <-chan struct{})) error {
 			started: time.Now(),
 			caller:  caller,
 		})
-		stresslog.Debug("goroutine start",
+		stresslog.Debug("[POOL] goroutine 启动",
 			zap.Uint32("id", id),
 			zap.Int32("count", count),
-			zap.String("caller", caller))
+			zap.String("submitter", caller))
 	}
 
 	err := p.pool.Submit(func() {
@@ -148,7 +147,7 @@ func (p *Pool) submit(task func(stopCh <-chan struct{})) error {
 			p.wg.Done()
 			if err := recover(); err != nil {
 				p.failed.Add(1)
-				stresslog.DPanic("goroutine panic",
+				stresslog.DPanic("[POOL] goroutine panic",
 					zap.Uint32("id", id),
 					zap.Any("error", err))
 			}
@@ -157,10 +156,10 @@ func (p *Pool) submit(task func(stopCh <-chan struct{})) error {
 			p.goCount.Add(-1)
 			if debugOn {
 				p.goroutines.Delete(id)
-				stresslog.Debug("goroutine end",
+				stresslog.Debug("[POOL] goroutine 结束",
 					zap.Uint32("id", id),
 					zap.Int32("count", count),
-					zap.String("caller", caller))
+					zap.String("submitter", caller))
 			}
 		}()
 
@@ -176,7 +175,7 @@ func (p *Pool) submit(task func(stopCh <-chan struct{})) error {
 		if debugOn {
 			p.goroutines.Delete(id)
 		}
-		stresslog.Error("submit task failed", zap.Error(err))
+		stresslog.Error("[POOL] 提交任务到协程池失败", zap.Error(err))
 		return ErrSubmitFailed
 	}
 	return nil
@@ -203,23 +202,23 @@ func (p *Pool) GoWithStop(task func(stopCh <-chan struct{})) {
 }
 
 // Shutdown 优雅关闭协程池，等待所有任务完成或超时
-func (p *Pool) Shutdown() {
+func (p *Pool) Shutdown() { p.shutdown(poolShutdownTimeout) }
+
+// shutdown 按给定等待窗口关闭协程池。超时窗口参数化只为让单测不必真等
+// poolShutdownTimeout，生产路径固定走 Shutdown。
+func (p *Pool) shutdown(timeout time.Duration) {
 	if !p.stopped.CompareAndSwap(false, true) {
 		return
 	}
 
-	timeout := poolShutdownTimeout
-	if timeout == 0 {
-		timeout = 5 * time.Second
-	}
-
-	stresslog.Info("work pool shutting down...",
+	stresslog.Info("[POOL] 协程池开始关闭",
 		zap.Int("running", p.Running()),
 		zap.Int64("waiting", p.waiting.Load()),
 		zap.Duration("timeout", timeout))
 
 	close(p.stopCh)
 
+	// 这里必须用裸 go 而非本池：stopped 已置位，submit 会直接拒绝。
 	done := make(chan struct{})
 	go func() {
 		p.wg.Wait()
@@ -229,11 +228,18 @@ func (p *Pool) Shutdown() {
 	select {
 	case <-done:
 		p.pool.Release()
-		stresslog.Info("work pool shutdown complete")
+		stresslog.Info("[POOL] 协程池已关闭")
 	case <-time.After(timeout):
-		stresslog.Error("shutdown timeout",
+		stresslog.Error("[POOL] 协程池关闭超时",
 			zap.Int64("remaining", p.waiting.Load()))
 		p.printLeakedGoroutines()
+		// 超时分支同样要释放池：残留任务已经等不回来了，但 ants 的 worker 缓存、
+		// 清理协程和 cond 必须收回，否则每次超时关闭都漏一个池。
+		// 这里用 Release() 而不是 ReleaseTimeout()：上面的 wg.Wait() 已经等满
+		// timeout，ReleaseTimeout 会再阻塞一个同样长的窗口等那批注定不返回的任务；
+		// Release() 立即置池为关闭态并回收空闲 worker，泄漏的 goroutine 由上面的
+		// printLeakedGoroutines 留证。
+		p.pool.Release()
 	}
 }
 
@@ -241,9 +247,9 @@ func (p *Pool) Shutdown() {
 func (p *Pool) printLeakedGoroutines() {
 	p.goroutines.Range(func(_, value any) bool {
 		info := value.(*goroutineInfo)
-		stresslog.Error("leaked goroutine",
+		stresslog.Error("[POOL] goroutine 泄漏",
 			zap.Uint32("id", info.id),
-			zap.String("caller", info.caller),
+			zap.String("submitter", info.caller),
 			zap.Duration("running", time.Since(info.started)))
 		return true
 	})

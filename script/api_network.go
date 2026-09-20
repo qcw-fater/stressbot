@@ -235,7 +235,7 @@ func serializeMsg(ctx *Context, msg proto.Message) ([]byte, error) {
 func networkConnectTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 	service := L.CheckString(1)
@@ -251,7 +251,7 @@ func networkConnectTCP(L *lua.LState) int {
 func networkConnectUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 	service := L.CheckString(1)
@@ -374,12 +374,12 @@ func requestResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wa
 func networkAwaitTCPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 	service, route, msg, s2cProto := extractNetArgs(L)
 	if service == "" {
-		L.RaiseError("network.tcp_request requires (service, route, msg [, s2c_proto [, timeout_sec]])")
+		L.RaiseError("network.tcp_request 需要 (service, route, msg [, s2c_proto [, timeout_sec]]) 参数，service 不能为空")
 		return 0
 	}
 	return doAwaitTCPRequest(L, ctx, service, route, route, msg, s2cProto, resolveRequestTimeoutSec(L, ctx))
@@ -388,7 +388,7 @@ func networkAwaitTCPRequest(L *lua.LState) int {
 func doAwaitTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, msg proto.Message, s2cProto string, timeout int) int {
 	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
-		L.RaiseError("serialize failed: %v", err)
+		L.RaiseError("序列化请求消息失败: %v", err)
 		return 0
 	}
 	var encodeStart time.Time
@@ -424,7 +424,7 @@ func doAwaitTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute
 func networkAwaitUDPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 	service := L.CheckString(1)
@@ -476,11 +476,11 @@ func doAwaitUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute
 func networkAwaitTCPRequestRoute(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 	if L.GetTop() < 4 {
-		L.RaiseError("network.tcp_request_route requires (service, request_route, response_route, msg [, s2c_proto [, timeout_sec]])")
+		L.RaiseError("network.tcp_request_route 需要 (service, request_route, response_route, msg [, s2c_proto [, timeout_sec]]) 参数")
 		return 0
 	}
 	service := L.CheckString(1)
@@ -488,7 +488,7 @@ func networkAwaitTCPRequestRoute(L *lua.LState) int {
 	responseRoute := L.Get(3)
 	msg, _, _ := unwrapProtoUD(L.Get(4))
 	if msg == nil {
-		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
+		L.RaiseError("network.tcp_request_route 的第 4 个参数必须是 proto 消息（userdata）")
 		return 0
 	}
 	s2cProto := ""
@@ -504,11 +504,11 @@ func networkAwaitTCPRequestRoute(L *lua.LState) int {
 func networkAwaitUDPRequestRoute(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 	if L.GetTop() < 4 {
-		L.RaiseError("network.udp_request_route requires (service, request_route, response_route, body [, s2c_proto [, timeout_sec]])")
+		L.RaiseError("network.udp_request_route 需要 (service, request_route, response_route, body [, s2c_proto [, timeout_sec]]) 参数")
 		return 0
 	}
 	service := L.CheckString(1)
@@ -532,7 +532,7 @@ func networkAwaitUDPRequestRoute(L *lua.LState) int {
 func networkHTTPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 
@@ -558,7 +558,7 @@ func networkHTTPRequest(L *lua.LState) int {
 	}
 
 	if reqURL == "" {
-		L.RaiseError("network.http_request requires (url [, method [, content_type [, body]]])")
+		L.RaiseError("network.http_request 需要 (url [, method [, content_type [, body]]]) 参数，url 不能为空")
 		return 0
 	}
 
@@ -573,7 +573,7 @@ func networkHTTPRequest(L *lua.LState) int {
 		case "json":
 			jsonBytes, err := jsonStdConfig.Marshal(formData)
 			if err != nil {
-				L.RaiseError("json marshal failed: %v", err)
+				L.RaiseError("network.http_request 的 JSON body 编码失败: %v", err)
 				return 0
 			}
 			reqBody = jsonBytes
@@ -618,19 +618,19 @@ func networkHTTPRequest(L *lua.LState) int {
 func networkTCPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 
 	service, route, msg, _ := extractNetArgs(L)
 	if service == "" {
-		L.RaiseError("network.tcp_send requires (service, route, msg)")
+		L.RaiseError("network.tcp_send 需要 (service, route, msg) 三个参数，service 不能为空")
 		return 0
 	}
 
 	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
-		L.RaiseError("serialize failed: %v", err)
+		L.RaiseError("序列化发送消息失败: %v", err)
 		return 0
 	}
 
@@ -673,7 +673,7 @@ func networkTCPSend(L *lua.LState) int {
 func networkUDPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 
@@ -845,7 +845,7 @@ func networkAwaitUDPListen(L *lua.LState) int { return awaitNetworkListen(L, "ud
 func awaitNetworkListen(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 	service, routeKey, s2cProto, timeout, ok := listenParams(L, ctx, protocol)
@@ -893,7 +893,7 @@ func networkTryUDPListen(L *lua.LState) int { return networkTryListen(L, "udp") 
 func networkTryListen(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
+		L.RaiseError("网络层不可用：当前运行时未注入连接发送器或 codec 解析器")
 		return 0
 	}
 
@@ -1037,12 +1037,3 @@ func networkEnsureUDPListener(L *lua.LState) int {
 	ctx.NetSender.EnsureUDPListener(service, routeKey, 1)
 	return 0
 }
-
-// ---------------------------------------------------------------------------
-// adapter 模块（编解码适配器）已下线
-// ---------------------------------------------------------------------------
-//
-// 历史 adapter Lua 模块曾暴露 codec 给业务脚本；现在业务 encode/decode
-// 全走 Go CodecResolver（ctx.Resolver.Resolve），
-// conf/scripts 经 grep 确认零依赖 adapter 模块，故整条 Lua 模块下线（registerAPIs 也同步
-// 删除 PreloadModule("adapter")），不再向业务 LState 注入适配器脚本。

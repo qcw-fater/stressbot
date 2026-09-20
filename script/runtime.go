@@ -740,10 +740,6 @@ func (rp *RuntimePool) ListScripts() []string {
 }
 
 // registerAPIs 注册所有 Lua API 模块到 LState。
-//
-// 「adapter」Lua 模块已下线——业务 encode/decode 全走 Go CodecResolver
-// （ctx.Resolver.Resolve），不再需要业务 LState 上的适配器脚本副本。conf/scripts 经 grep
-// 确认零依赖 adapter 模块。
 func registerAPIs(L *lua.LState) {
 	L.PreloadModule("robot", loadRobotModule)
 	L.PreloadModule("proto", loadProtoModule)

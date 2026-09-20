@@ -270,7 +270,7 @@ func (a *Agent) releaseReservedTask(task *agenttask.Assignment, cancel context.C
 func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFunc, task *agenttask.Assignment) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			stresslog.Error("[AGENT] executeTask panic", zap.String("taskID", task.TaskID), zap.Any("panic", recovered), zap.String("stack", string(debug.Stack())))
+			stresslog.Error("[AGENT] 任务执行 panic", zap.String("taskID", task.TaskID), zap.Any("panic", recovered), zap.String("stack", string(debug.Stack())))
 		}
 	}()
 	startedAt := time.Now()

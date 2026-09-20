@@ -53,12 +53,23 @@ func TestWireViewCompatSemantics(t *testing.T) {
 		"str", "rints", // 已设置字段
 		"rints[0]", "mstr", // 下标 / 空 map
 		"rints[9]",      // 越界 → error
+		"rints[abc]",    // 非法下标 → error（不得当成 [0] 读出首元素）
+		"rints[]",       // 空下标 → error
+		"rints[-1]",       // 负下标 → error
+		"nodes[abc].name", // 非法下标 + 继续下钻 → error
 		"no_such_field", // 未知字段 → error
 		"mstr.k",        // map 不可下钻 → error
 		"str.x",         // 标量不可嵌套 → error
 		"[0]",           // 下标开头 → error
 	} {
 		assertGetFieldCompat(t, f, wv, oracle, p)
+	}
+
+	// 非法下标必须报错，绝不能被当成 [0] 读出首元素（回归「解析失败取 0」的静默缺陷）。
+	for _, p := range []string{"rints[abc]", "rints[]", "rints[-1]", "nodes[abc].name"} {
+		if got, err := wv.GetFieldCompat(p); err == nil {
+			t.Fatalf("path %q 应报错，实际返回 %#v", p, got)
+		}
 	}
 
 	// 列表兼容读。

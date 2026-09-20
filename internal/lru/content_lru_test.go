@@ -110,6 +110,51 @@ func TestContentLRUDoubleCheck(t *testing.T) {
 	if s.Entries != 1 {
 		t.Fatalf("重复插入不应新增条目，got %d", s.Entries)
 	}
+	if s.Cost != 1 {
+		t.Fatalf("重复插入不应重复累加 cost，got %d", s.Cost)
+	}
+}
+
+// 验证重复 Insert 同一 key 会刷新 LRU 位置：该 key 不应比之后插入的新条目更早被驱逐
+func TestContentLRUDuplicateInsertRefreshesRecency(t *testing.T) {
+	c := newByteCache(2, 1<<20)
+	keyA := []byte("a")
+	keyB := []byte("b")
+	keyC := []byte("c")
+
+	c.Insert(keyA, simpleHash(keyA), 1, 1)
+	c.Insert(keyB, simpleHash(keyB), 2, 1)
+	// 重复插入 a：a 重新成为最近使用，b 变成最旧
+	c.Insert(keyA, simpleHash(keyA), 99, 1)
+	// 插入 c 触发驱逐，应淘汰 b 而不是 a
+	c.Insert(keyC, simpleHash(keyC), 3, 1)
+
+	if v, ok := c.Lookup(simpleHash(keyA), keyA); !ok || v != 1 {
+		t.Fatalf("重复插入后的 a 不应被驱逐，且值保持首次写入的 1，got (%d,%v)", v, ok)
+	}
+	if _, ok := c.Lookup(simpleHash(keyB), keyB); ok {
+		t.Fatal("b 应被驱逐")
+	}
+}
+
+// 验证重复 Insert 不会让条目数虚增（含相同 hash 碰撞链场景）
+func TestContentLRUDuplicateInsertKeepsLen(t *testing.T) {
+	c := newByteCache(10, 1<<20)
+	key := []byte("same")
+	h := simpleHash(key)
+	for range 5 {
+		c.Insert(key, h, 7, 3)
+	}
+	s := c.Stats()
+	if s.Entries != 1 {
+		t.Fatalf("重复插入 5 次仍应只有 1 条，got %d", s.Entries)
+	}
+	if s.Cost != 3 {
+		t.Fatalf("重复插入 5 次 cost 仍应为 3，got %d", s.Cost)
+	}
+	if s.Evictions != 0 {
+		t.Fatalf("重复插入不应触发驱逐，got %d", s.Evictions)
+	}
 }
 
 // 验证 Purge 清空

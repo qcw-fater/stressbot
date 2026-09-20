@@ -96,7 +96,8 @@ func (wv *WireValue) Message() (proto.Message, error) {
 
 // MaterializeValue 全量物化为 map[string]any（messageToMap 语义），实现 state.ValueMaterializer。
 // 默认走 wire 单遍直转（WalkWire，零 dynamicpb 中间树）；schema 降级 / 影子采样
-// 失配 / 直转失败时回落解码路径。解码也失败（构造点已结构校验，理论不可达）返回空 map。
+// 失配 / 直转失败时回落解码路径。解码也失败（构造点已结构校验，理论不可达）时上报失配
+// 后返回空 map——空 map 是最后兜底，但绝不静默。
 func (wv *WireValue) MaterializeValue() any {
 	if wv.MaterializeAllowed() {
 		sink := newMapTreeSink()
@@ -110,6 +111,11 @@ func (wv *WireValue) MaterializeValue() any {
 	}
 	msg, err := wv.Message()
 	if err != nil {
+		if wv != nil && wv.desc != nil {
+			// 回落路径也失败：构造点 ValidateWire 已通过，说明校验器与解码器判定不一致。
+			// 与影子失配同一套上报（完整 wire 字节 hex + schema 降级），保证失败可见。
+			recordWireMismatch(wv, []string{"materialize"}, "解码回落失败: "+err.Error())
+		}
 		return map[string]any{}
 	}
 	return messageToMap(msg.ProtoReflect())

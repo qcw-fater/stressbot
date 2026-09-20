@@ -272,6 +272,95 @@ assert(not ok, "wire 视图 set_field 应 fail-loud")
 	}
 }
 
+// TestIterListContractParity proto.iter_list 的契约对拍：wire 惰性视图与解码回落
+// 两条路径必须给出同一形态——未知字段 / 非法路径 → nil，非 repeated（标量 /
+// 单数 message / map）→ 空迭代，repeated → 正常迭代。
+func TestIterListContractParity(t *testing.T) {
+	protox.SetWireShadowEnabled(false)
+	t.Cleanup(func() { protox.SetWireShadowEnabled(true) })
+
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
+	t.Cleanup(L.Close)
+	f := newWireLuaTestFactory(t)
+	GetContext(L).Factory = f
+
+	raw := buildWireLuaBox(t, f)
+	md, ok := f.MessageDescriptor("wirelua.Box")
+	if !ok {
+		t.Fatal("未找到 wirelua.Box")
+	}
+	decoded, err := f.Parse("wirelua.Box", raw)
+	if err != nil {
+		t.Fatalf("解码失败: %v", err)
+	}
+	// vmsg 走 wire 游标路径，fmsg（Frozen）走解码回落路径。
+	L.SetGlobal("vmsg", wrapWireView(L, protox.NewWireValue(md, protox.WireSnapshot(raw))))
+	L.SetGlobal("fmsg", wrapFrozenMessage(L, protox.Freeze(decoded)))
+
+	script := `
+local proto = require("proto")
+
+-- shape 把 iter_list 的返回归一为可比对的标量：nil → "nil"，否则 "iter:" .. 元素个数。
+local function shape(m, field)
+  local it = proto.iter_list(m, field)
+  if it == nil then return "nil" end
+  local n = 0
+  for _ in it do n = n + 1 end
+  return "iter:" .. n
+end
+
+local function probe(m)
+  return {
+    unknown     = shape(m, "no_such_field"),   -- 未知字段
+    bad_path    = shape(m, "s[0].x"),          -- 非法路径（下标打在标量上）
+    scalar      = shape(m, "s"),               -- 非 repeated 标量
+    message     = shape(m, "main"),            -- 非 repeated 单数 message
+    map_field   = shape(m, "kids"),            -- map 字段
+    item_field  = shape(m, "items[0].name"),   -- 列表元素内的标量路径
+    list_msg    = shape(m, "items"),           -- repeated message
+    list_scalar = shape(m, "nums"),            -- repeated 标量
+  }
+end
+
+vshape = probe(vmsg)
+fshape = probe(fmsg)
+`
+	if err := L.DoString(script); err != nil {
+		t.Fatalf("脚本执行失败: %v", err)
+	}
+
+	vshape, fshape := L.GetGlobal("vshape"), L.GetGlobal("fshape")
+	if equal, diff := luaDeepEqual(vshape, fshape); !equal {
+		t.Fatalf("iter_list 两条路径形态漂移: %s", diff)
+	}
+
+	// 契约本身（不只是两条路径彼此一致）。
+	want := map[string]string{
+		"unknown":     "nil",
+		"bad_path":    "nil",
+		"scalar":      "iter:0",
+		"message":     "iter:0",
+		"map_field":   "iter:0",
+		"item_field":  "iter:0",
+		"list_msg":    "iter:2",
+		"list_scalar": "iter:2",
+	}
+	for _, side := range []struct {
+		name  string
+		table lua.LValue
+	}{{"wire 视图", vshape}, {"解码回落", fshape}} {
+		tb, ok := side.table.(*lua.LTable)
+		if !ok {
+			t.Fatalf("%s: probe 未返回表", side.name)
+		}
+		for field, exp := range want {
+			if got := lua.LVAsString(tb.RawGetString(field)); got != exp {
+				t.Errorf("%s: iter_list(%s) 形态 = %q，期望 %q", side.name, field, got, exp)
+			}
+		}
+	}
+}
+
 // TestRobotGetViewSemantics robot.get_view 的契约用例：
 // wire key → 只读视图（proto API 读数 ≡ robot.get 整表）、Frozen key 可借阅、
 // 缺失 key → nil、非消息形态（标量/Lua 表/被 set_path 改写）→ 教学报错、

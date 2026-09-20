@@ -100,7 +100,7 @@ func init() {
 	http.HandleFunc("/debug/sched", func(w http.ResponseWriter, _ *http.Request) {
 		cur := readSchedHistogram()
 		if cur == nil {
-			http.Error(w, "sched latency metric unavailable", http.StatusInternalServerError)
+			http.Error(w, "调度延迟指标不可用", http.StatusInternalServerError)
 			return
 		}
 

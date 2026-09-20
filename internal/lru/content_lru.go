@@ -69,13 +69,16 @@ func (c *ContentLRU[K, V]) Lookup(hash uint64, key K) (V, bool) {
 }
 
 // Insert 锁内插入一条记录。若 key 已存在则跳过（double-check 语义）并返回已有值。
-// double-check 用 equalFn 比对（不计 hit/miss——miss 已在之前的 Lookup 计过）。
+// double-check 用 equalFn 比对（不计 hit/miss——miss 已在之前的 Lookup 计过），
+// 但仍要前移 LRU：命中说明这份内容此刻正在被使用，不前移会让它比一条刚插入的
+// 冷条目更早被驱逐，与"Front = 最近使用"的不变式相悖。
 // hash 由调用方预算（与 Lookup 复用同一 hash）；插入后按双上界驱逐尾部，保证至少留 1 条。
 func (c *ContentLRU[K, V]) Insert(key K, hash uint64, value V, cost int) V {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, e := range c.buckets[hash] {
 		if c.equalFn(e.key, key) {
+			c.lru.MoveToFront(e.elem)
 			return e.value
 		}
 	}

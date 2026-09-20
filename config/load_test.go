@@ -160,6 +160,63 @@ func TestExpandConfigStrings(t *testing.T) {
 	}
 }
 
+func TestExpandConfigStringsSlices(t *testing.T) {
+	t.Setenv("TEST_NODE_HOST", "10.0.0.2")
+	t.Setenv("TEST_SCRIPT_DIR", "/srv/scripts")
+
+	type Endpoint struct {
+		Addr string `toml:"addr"`
+	}
+	type Config struct {
+		Addresses  []string   `toml:"addresses"`
+		ScriptDirs [2]string  `toml:"scriptDirs"`
+		Endpoints  []Endpoint `toml:"endpoints"`
+		Ports      []int      `toml:"ports"`
+		Empty      []string   `toml:"empty"`
+	}
+
+	cfg := &Config{
+		Addresses:  []string{"${TEST_NODE_HOST}:9000", "plain:9001", "${MISSING_NODE:-fallback}:9002"},
+		ScriptDirs: [2]string{"${TEST_SCRIPT_DIR}/a", "${TEST_SCRIPT_DIR}/b"},
+		Endpoints:  []Endpoint{{Addr: "${TEST_NODE_HOST}"}},
+		Ports:      []int{6060, 6061},
+	}
+
+	if err := ExpandConfigStrings(cfg); err != nil {
+		t.Fatalf("ExpandConfigStrings 失败: %v", err)
+	}
+
+	want := []string{"10.0.0.2:9000", "plain:9001", "fallback:9002"}
+	for i := range want {
+		if cfg.Addresses[i] != want[i] {
+			t.Errorf("Addresses[%d] = %q, want %q", i, cfg.Addresses[i], want[i])
+		}
+	}
+	if cfg.ScriptDirs[0] != "/srv/scripts/a" || cfg.ScriptDirs[1] != "/srv/scripts/b" {
+		t.Errorf("ScriptDirs = %v, want [/srv/scripts/a /srv/scripts/b]", cfg.ScriptDirs)
+	}
+	if cfg.Endpoints[0].Addr != "10.0.0.2" {
+		t.Errorf("Endpoints[0].Addr = %q, want 10.0.0.2", cfg.Endpoints[0].Addr)
+	}
+	if cfg.Ports[0] != 6060 || cfg.Ports[1] != 6061 {
+		t.Errorf("Ports = %v, want [6060 6061]（不应被改动）", cfg.Ports)
+	}
+	if cfg.Empty != nil {
+		t.Errorf("Empty = %v, want nil（nil 切片不应被实例化）", cfg.Empty)
+	}
+}
+
+func TestExpandConfigStringsSliceUndefinedError(t *testing.T) {
+	type Config struct {
+		Addresses []string `toml:"addresses"`
+	}
+	cfg := &Config{Addresses: []string{"ok", "${UNDEFINED_SLICE_HOST}"}}
+
+	if err := ExpandConfigStrings(cfg); err == nil {
+		t.Error("期望切片元素引用未定义环境变量返回 error，得到 nil")
+	}
+}
+
 func TestExpandConfigStrings_UndefinedError(t *testing.T) {
 	type Config struct {
 		Password string `toml:"password"`

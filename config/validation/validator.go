@@ -1,4 +1,4 @@
-// Package validation validates stressbot configuration structure before domain decoding.
+// Package validation 在领域解码之前校验 stressbot 配置的结构契约。
 package validation
 
 import (
@@ -21,7 +21,7 @@ var compiledSchemas struct {
 	err   error
 }
 
-// ValidateFlow validates the structural contract only; graph references and business invariants remain in engine.
+// ValidateFlow 只校验结构契约；图引用与业务不变量仍由 engine 负责。
 func ValidateFlow(data []byte) error {
 	flow, _, err := schemasOnce()
 	if err != nil {
@@ -30,7 +30,7 @@ func ValidateFlow(data []byte) error {
 	return validate("flow", flow, data)
 }
 
-// ValidateCodec validates the structural contract only; algorithm and pipeline reference checks remain in codec.
+// ValidateCodec 只校验结构契约；算法与 pipeline 引用检查仍由 codec 负责。
 func ValidateCodec(data []byte) error {
 	_, codec, err := schemasOnce()
 	if err != nil {

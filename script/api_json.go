@@ -145,7 +145,7 @@ func jsonDecode(L *lua.LState) int {
 
 	b := &luaJSONBuilder{L: L, root: lua.LNil}
 	if err := ast.Preorder(str, b, nil); err != nil {
-		L.RaiseError("json decode failed: %v", err)
+		L.RaiseError("json.decode 解码失败: %v", err)
 		return 0
 	}
 
@@ -160,7 +160,7 @@ func jsonEncode(L *lua.LState) int {
 
 	bytes, err := jsonStdConfig.Marshal(data)
 	if err != nil {
-		L.RaiseError("json encode failed: %v", err)
+		L.RaiseError("json.encode 编码失败: %v", err)
 		return 0
 	}
 
