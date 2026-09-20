@@ -65,7 +65,7 @@ stressbot 是可配置化通用游戏服务器压测工具，核心设计：解�
 
 | 范围 | 层级 | 码值 |
 |------|------|------|
-| 1–6 | 网络层 | `CONN_NOT_FOUND` / `CONN_CLOSED` / `SEND_FAILED` / `RECV_TIMEOUT` / `CONN_DROPPED` / `ACTION_CANCELED` |
+| 1–6 | 网络层 | `CONN_NOT_FOUND` / `CONN_CLOSED` / `SEND_FAILED` / `RECV_TIMEOUT` / `ACTION_CANCELED`（码 5 曾用于 `CONN_DROPPED`，已退役且不得复用） |
 | 11–12 | 协议层 | `ENCODE_FAILED` / `PARSE_FAILED` |
 | 21–24 | 构建层 | `CREATE_MSG` / `BIND_FIELD` / `SERIALIZE` / `EXEC_FAILED` |
 | 31–32 | 监听层 | `LISTEN_TIMEOUT` / `LISTEN_REGISTER` |
@@ -225,15 +225,15 @@ cmd/agent → robot → engine → adapter/protox/state
 | `Dialer` | 封装 gnet Client + EventServer，注入 sendFunc/closeFunc 到 Connection |
 | `Message` | `{RouteKey string, Data []byte, HeaderErr uint64}` |
 
-### 5.2 RequestResponse 错误码映射
+### 5.2 请求-响应错误码映射（`SendRequest` + `PendingRequest`）
 
 | 条件 | 错误码 | 构造方式 |
 |------|--------|---------|
 | `c == nil` | `ErrConnNotFound` | `NewActionError` |
 | `isClose == 1` | `ErrConnClosed` | `NewActionError` |
 | Send 失败 | `ErrSendFailed` | `NewActionError`（包装 sendErr） |
-| `ctx.Done()` | `ErrConnDropped` | `NewActionError` |
-| 超时 | `ErrRecvTimeout` | `NewActionError`（保留 code，monitor 按 ResultTimeout + code 聚合） |
+| ctx 取消 | `ErrActionCanceled` | `NewActionError`（Unwrap 保留 `context.Canceled`） |
+| 超时 | `ErrRecvTimeout` | 由调用方 `robotScheduler.awaitResponse` 产出（超时窗口归调用方持有） |
 
 ### 5.3 Send 方法
 
@@ -242,7 +242,7 @@ cmd/agent → robot → engine → adapter/protox/state
 | `c == nil` | `ErrConnNotFound` |
 | `isClose == 1` | `ErrConnClosed` |
 | `sendFunc == nil` | `ErrSendFailed` |
-| sendFunc 出错 | `ErrSendFailed`（底层错误记日志但**未包装进 ActionError**，与 RequestResponse 不一致） |
+| sendFunc 出错 | `ErrSendFailed`（底层错误记日志但**未包装进 ActionError**，与请求-响应路径不一致） |
 
 ### 5.4 OnTraffic 帧解析流程
 
@@ -648,7 +648,7 @@ pending → starting → running → stopping → stopped
 - **context.Canceled 必须提前拦截**：executor.executeAction 中检查必须在 onError 之前，否则停止时刷屏
 - **错误聚合只看 code**：不要恢复 Kind/framework/server 维度；前端按 `code < 100` 推导框架/业务标签
 - **onClose/Close 回调未调用**：Connection 中 onDisconnect 和 onClosed 回调的 if 体为空，回调实际未执行
-- **Send 未包装底层错误**：Connection.Send 失败时底层 error 只记日志未 wrap 进 ActionError，与 RequestResponse 行为不一致
+- **Send 未包装底层错误**：Connection.Send 失败时底层 error 只记日志未 wrap 进 ActionError，与请求-响应路径行为不一致
 
 ### 已废弃模式追踪
 
