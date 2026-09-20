@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+// mergedErrorDetailLimit 跨节点合并后每类错误保留的 Detail 条数上界。
+// 比单节点的 ErrorDetailRingSize 大：并集里每个节点各贡献一条样例时，
+// 三条会把多数节点的现场挤掉，五条足以覆盖典型的多节点故障面。
+const mergedErrorDetailLimit = 5
+
 // SystemSnapshot 系统资源快照。
 type SystemSnapshot struct {
 	Goroutines int     `json:"goroutines"` // 当前 goroutine 数量
@@ -62,7 +67,7 @@ const (
 //
 // RTT 字段含义说明（参见 plans/rtt-timing-breakdown.md）：
 //   - RTT 直方图记录的是"纯网络往返"耗时（不含客户端 proto 构建/解析等开销）。
-//   - 只统计有完整响应帧且 WireRTT > 0 的 request 样本；服务端 headerErr/失败响应也计入，
+//   - 只统计实际测过 RTT 的 request 样本（含量到 0ms 的极快响应）；服务端 headerErr/失败响应也计入，
 //     超时、发送失败、取消且未收到响应帧的分支不产生 RTT 样本。
 //   - 但 RTT Apdex 的分母额外含 RTTFailedCount（无响应帧的请求，按 frustrated 计）：
 //     直方图要干净（没有时延值就不能进），计分要完整（最慢的样本不能缺席）。
@@ -108,7 +113,7 @@ type ActionSnapshot struct {
 	DecodeSampleCount         int64             `json:"decodeSampleCount"`
 	DispatchWaitSampleCount   int64             `json:"dispatchWaitSampleCount"`
 	ParseStoreSampleCount     int64             `json:"parseStoreSampleCount"`
-	RTTSampleCount            int64             `json:"rttSampleCount"`           // 有完整响应帧且 WireRTT > 0 的 request 数
+	RTTSampleCount            int64             `json:"rttSampleCount"`           // 实际测得 RTT 的 request 数（含 0ms 样本）
 	RTTApdexSampleCount       int64             `json:"rttApdexSampleCount"`      // RTT Apdex 分母：有响应帧样本 + 无响应帧失败请求
 	ListenWaitSampleCount     int64             `json:"listenWaitSampleCount"`    // 等待时长可测的监听命中数
 	TotalDurationSampleCount  int64             `json:"totalDurationSampleCount"` // 总耗时 action 样本数
@@ -233,9 +238,8 @@ type ReportWindow struct {
 	InvalidMetricSamples    int64                   `json:"invalidMetricSamples"`
 }
 
-// PublicCopy returns a snapshot suitable for public HTTP and UI responses.
-// DDSketch payloads are an internal Agent/Admin merge format and must not be
-// exposed or accidentally retained by presentation consumers.
+// PublicCopy 返回可用于公共 HTTP 与 UI 响应的快照副本。
+// DDSketch 负载是 Agent/Admin 内部合并格式，不得对外暴露，也不得被展示层意外留存。
 func (s *CollectorSnapshot) PublicCopy() *CollectorSnapshot {
 	if s == nil {
 		return nil
@@ -578,13 +582,26 @@ func (c *MetricsCollector) TakeReportSnapshot(meta ReportMeta) *CollectorSnapsho
 	cumulative := c.snapshotUnlocked(nil, 0)
 	c.transitionMu.Unlock()
 
+	// Executing 是瞬时量（此刻有多少机器人正卡在这个动作里），不是区间累加量：区间采集器
+	// 每周期换新，`recordAction` 对它传 trackExecuting=false（只减不加会算出负数），
+	// `RecordActionStart` 也从不递增它。所以区间采集器自己的 executing 结构性恒为 0。
+	// 区间报告要的语义是「窗口收口那一刻有多少在执行」——直接取同一时刻的累计快照。
+	// 不补这一步，区间视图里的「并发」列永远是 0。
+	executingByAction := make(map[string]int64, len(cumulative.Actions))
+	for _, action := range cumulative.Actions {
+		executingByAction[action.Name] = action.Executing
+	}
 	interval := oldWindow.snapshotUnlocked(nil, 0)
 	for i := range interval.Actions {
 		interval.Actions[i].AvgQPS = float64(interval.Actions[i].SampleCount) / duration
 		interval.Actions[i].PeriodQPS = interval.Actions[i].AvgQPS
+		interval.Actions[i].Executing = executingByAction[interval.Actions[i].Name]
 	}
 	interval.Summary = BuildSnapshotSummary(interval.Actions)
 	interval.Summary.AvgQPS = float64(interval.Summary.SampleCount) / duration
+	// 汇总取累计面的总数而非区间各行之和：某个动作可能整个窗口都没跑完一次（无区间样本、
+	// 不在 interval.Actions 里），但确实有机器人卡在里面，逐行求和会漏掉这部分。
+	interval.Summary.Executing = cumulative.Summary.Executing
 	sendMBps := float64(interval.Bandwidth.TotalSendBytes) / 1024 / 1024 / duration
 	recvMBps := float64(interval.Bandwidth.TotalRecvBytes) / 1024 / 1024 / duration
 	cumulative.Window = &ReportWindow{
@@ -918,7 +935,9 @@ func MergeSnapshots(snaps []*CollectorSnapshot) (*CollectorSnapshot, error) {
 			ma.TimeoutAvgMs = divideMetricSumNs(ma.TimeoutTotalNs, ma.TimeoutCount)
 		}
 
-		// 合并错误 — 按 code 聚合，Messages 取并集去重
+		// 合并错误 — 按 code 聚合，Messages 取并集去重。
+		// 上界取 mergedErrorDetailLimit 而非单节点的 ErrorDetailRingSize：
+		// 并集来自多个节点，各留一条样例比同一节点的三条更能反映故障面。
 		type mergedErrorKey struct {
 			Code uint64
 		}
@@ -933,8 +952,8 @@ func MergeSnapshots(snaps []*CollectorSnapshot) (*CollectorSnapshot, error) {
 							existing.Messages = append(existing.Messages, m)
 						}
 					}
-					if len(existing.Messages) > 5 {
-						existing.Messages = existing.Messages[:5]
+					if len(existing.Messages) > mergedErrorDetailLimit {
+						existing.Messages = existing.Messages[:mergedErrorDetailLimit]
 					}
 				} else {
 					cp := e

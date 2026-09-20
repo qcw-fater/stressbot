@@ -146,7 +146,7 @@ func firstMsg(msgs []string) string {
 	}
 	s := msgs[0]
 	if len(msgs) > 1 {
-		s += fmt.Sprintf(" (+%d more)", len(msgs)-1)
+		s += fmt.Sprintf("（另 %d 条）", len(msgs)-1)
 	}
 	return s
 }

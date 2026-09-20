@@ -6,9 +6,6 @@ import (
 	"stressbot/admin/agent"
 	adminhttp "stressbot/admin/apierror"
 	admintask "stressbot/admin/task"
-	"stressbot/internal/stresslog"
-
-	"go.uber.org/zap"
 )
 
 type Registry = agent.Registry
@@ -24,9 +21,6 @@ const (
 )
 
 func newTestAgentRegistry(nodes ...*Node) *Registry {
-	if stresslog.GetLogger() == nil {
-		stresslog.ReplaceLogger(zap.NewNop())
-	}
 	registry := agent.NewRegistry(agent.Config{
 		UnhealthyThreshold: 30 * time.Second,
 		OfflineThreshold:   60 * time.Second,

@@ -91,11 +91,16 @@ const (
 	ResultCanceled                     // ctx 取消（任务停止/连接断开）
 )
 
+// ErrorDetailRingSize 单节点每类错误保留的 Detail 条数上界。
+// 纯展示层容量：错误定位靠 Count 和 code，样例只要够看清参数形态即可，
+// 多留没有额外信息量，还要按 action × code 常驻占内存。
+const ErrorDetailRingSize = 3
+
 // ErrorEntry 错误分布条目，按 code 单维聚合。
 type ErrorEntry struct {
 	Code     uint64   `json:"code"`     // 错误码
 	CodeName string   `json:"codeName"` // 错误码名称（ErrorCode.String()）；业务码为 ""
-	Messages []string `json:"msgs"`     // 最近 N 条 Detail（最多 3 条，环形缓冲）
+	Messages []string `json:"msgs"`     // 最近若干条 Detail（单节点上界 ErrorDetailRingSize，环形缓冲）
 	Count    int64    `json:"count"`    // 该错误累计出现次数
 }
 
@@ -104,11 +109,11 @@ type errKey struct {
 	Code uint64 // 错误码
 }
 
-// errorBucket 错误桶，原子计数 + 环形缓冲最近 3 条 Detail。
+// errorBucket 错误桶，原子计数 + 环形缓冲保留最近若干条 Detail。
 type errorBucket struct {
-	count   atomic.Int64    // 累计出现次数
-	msgRing [3]atomic.Value // 环形缓冲，存最近 3 条 Detail 字符串
-	ringIdx atomic.Uint32   // 环形缓冲写入位置（递增取模）
+	count   atomic.Int64                    // 累计出现次数
+	msgRing [ErrorDetailRingSize]atomic.Value // 环形缓冲，存最近若干条 Detail 字符串
+	ringIdx atomic.Uint32                   // 环形缓冲写入位置（递增取模）
 }
 
 func (b *errorBucket) record(detail string) {
@@ -148,7 +153,7 @@ type actionMetrics struct {
 	timeoutTotalNs  atomic.Int64      // 超时样本累计延迟（纳秒），用于精确计算平均超时延迟
 	canceledCount   atomic.Int64      // 取消次数（ctx 取消）
 	executing       atomic.Int64      // 当前正在执行中的并发数
-	rtt             *LatencyHistogram // RTT 直方图：纯网络往返（仅成功且有 WireRTT 样本）
+	rtt             *LatencyHistogram // RTT 直方图：纯网络往返（收到响应帧的请求，不论业务成败）
 	listenWait      *LatencyHistogram // 监听等待直方图：开始等待 → 帧被内核收到
 	totalDuration   *LatencyHistogram // 总耗时直方图：单次 action wallClock
 	sendBytes       atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
@@ -163,7 +168,10 @@ type actionMetrics struct {
 	//   - rttSampleCount：RTT 直方图中的独立样本数（逐个 request 记录，非 action 粒度）
 	//   - totalDurationSampleCount：总耗时直方图中的 action 样本数（单次 action 最多 1 个）
 	//   - Lua 脚本单次 action 内可能多次 request，每次独立记录 WireRTT 到直方图
-	// 客户端开销在所有结果分支（含失败/超时）都累加；rttSampleCount 统计所有有完整响应帧且 WireRTT > 0 的 request，
+	// 客户端开销在所有结果分支（含失败/超时）都累加；rttSampleCount 统计「测过 RTT」的 request，
+	// 判据是 Observed 置了 StageRTT，或虽未置位但 WireRTT != 0。
+	// 注意 WireRTT == 0 只要 StageRTT 置位就照记 0ms 样本——本机/极快响应确实能量到 0，
+	// 把它们丢掉会系统性抬高 P50。未置位且 WireRTT == 0 才是「根本没测」，跳过。
 	// 包括服务端 headerErr/失败响应，不包括超时、发送失败、取消且未收到响应帧的分支。
 	clientCostSum            atomic.Int64
 	clientCostCount          atomic.Int64
@@ -378,9 +386,7 @@ func (c *MetricsCollector) Reset() {
 		c.transitionMu.Lock()
 		defer c.transitionMu.Unlock()
 	}
-	if stresslog.GetLogger() != nil {
-		stresslog.Info("[MONITOR] 指标收集器已重置")
-	}
+	stresslog.Info("[MONITOR] 指标收集器已重置")
 	now := time.Now()
 	c.startTime.Store(now.UnixNano())
 	c.collectionEpoch.Add(1)
@@ -425,6 +431,10 @@ func (c *MetricsCollector) SetApdexT(t int) {
 }
 
 // RecordActionStart 记录动作开始执行（递增 executing 计数）。
+//
+// 只作用于累计采集器，**不转发给区间采集器**：executing 是瞬时量，而区间采集器每个上报
+// 周期换新，跨周期的「开始」与「结束」会落在两个采集器上，只减不加会算出负数。区间报告里
+// 的 executing 由 TakeReportSnapshot 从同一时刻的累计快照回填，见那里的注释。
 func (c *MetricsCollector) RecordActionStart(name string) {
 	if c == nil || !c.enabled {
 		return

@@ -147,6 +147,9 @@ func attachFreshWindow(cumulative *monitor.CollectorSnapshot, states []AgentMetr
 				actionRates[action.Name] += float64(action.SampleCount) / duration
 			}
 		}
+		// executing 只统计新鲜节点（states 已按新鲜度过滤）。传入的 cumulative 合并的是
+		// 全部节点，其中失联节点上报的「正在执行」早已不代表现状，累进去会让面板显示一个
+		// 永远降不下来的并发数，所以这里按新鲜节点重算一遍覆盖掉。
 		for _, action := range state.Cumulative.Actions {
 			actionExecuting[action.Name] += action.Executing
 		}
@@ -175,6 +178,10 @@ func attachFreshWindow(cumulative *monitor.CollectorSnapshot, states []AgentMetr
 	windowMerged.Summary.Executing = 0
 	for _, executing := range actionExecuting {
 		windowMerged.Summary.Executing += executing
+	}
+	// 逐行也按新鲜节点口径覆盖，与上面的汇总保持一致；否则动作表和摘要卡片会给出两个数。
+	for i := range windowMerged.Actions {
+		windowMerged.Actions[i].Executing = actionExecuting[windowMerged.Actions[i].Name]
 	}
 	cumulative.Window = &monitor.ReportWindow{
 		StartedAt:       startedAt,

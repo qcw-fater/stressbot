@@ -91,7 +91,7 @@ func (s *Sampler) Start(taskID string) error {
 	defer s.mu.Unlock()
 
 	if s.current != nil {
-		return adminhttp.ErrTaskConflict.WithMessage("sampler already running")
+		return adminhttp.ErrTaskConflict.WithMessage("已有任务正在采样")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
