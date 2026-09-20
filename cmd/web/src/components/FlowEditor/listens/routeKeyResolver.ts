@@ -15,7 +15,7 @@
 
 import { loadCodecRouteSpecs } from '@/services/codecConnections';
 
-/** 占位正则，与 resourcesStore.validateCodecSchema 的 ROUTE_KEY_PLACEHOLDER_RE 一致。 */
+/** 占位正则，与 codecSchemaValidation 的 ROUTE_KEY_PLACEHOLDER_RE 一致。 */
 const ROUTE_KEY_PLACEHOLDER_RE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
 /**

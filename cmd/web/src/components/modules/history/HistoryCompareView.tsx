@@ -26,14 +26,27 @@ import {
 import { formatStageLabel } from './stageLabel';
 import './HistoryPanel.css';
 
-function useViewportHeight(): number {
-  const [h, setH] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 720));
+/** 表格可视高度：跟随窗口但夹在 [200, 440]。 */
+function tableScrollYOf(viewportHeight: number): number {
+  return Math.min(440, Math.max(200, viewportHeight - 320));
+}
+
+/**
+ * 直接存夹取后的高度，而不是存 window.innerHeight 再派生。
+ *
+ * resize 在拖窗口边框时每帧都触发，但夹取结果绝大多数时候不变；存派生值时 setState 传入
+ * 相同数字 React 会自行跳过重渲染，于是不需要再加一层防抖计时器。
+ */
+function useTableScrollY(): number {
+  const [scrollY, setScrollY] = useState(() =>
+    tableScrollYOf(typeof window !== 'undefined' ? window.innerHeight : 720),
+  );
   useEffect(() => {
-    const onResize = () => setH(window.innerHeight);
+    const onResize = () => setScrollY(tableScrollYOf(window.innerHeight));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  return h;
+  return scrollY;
 }
 
 export interface HistoryCompareViewProps {
@@ -85,8 +98,7 @@ function bestWorst(values: (number | undefined)[], higherIsBetter: boolean): Bes
 export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
   const [data, setData] = useState<HistoryCompareTask[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const viewportH = useViewportHeight();
-  const tableScrollY = useMemo(() => Math.min(440, Math.max(200, viewportH - 320)), [viewportH]);
+  const tableScrollY = useTableScrollY();
   const targetsKey = useMemo(
     () =>
       targets.map((t) => (typeof t === 'string' ? t : `${t.id}:${t.stageIndex ?? -1}`)).join(','),
@@ -159,50 +171,59 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
     return out;
   }, [data]);
 
+  // 列定义只随对比目标变化。不 memo 的话每次渲染都换一批新的 render 闭包，
+  // antd Table 会把所有单元格全量重渲染一遍——而这个视图光是窗口 resize 就会重渲染。
+  const columns = useMemo<ColumnsType<ActionRow>>(() => {
+    const cols: ColumnsType<ActionRow> = [
+      {
+        title: '动作',
+        dataIndex: 'name',
+        key: 'name',
+        fixed: 'left',
+        width: 220,
+        render: (v: string) =>
+          v.startsWith('callback:') ? (
+            <span>
+              <Tag color="orange">推送</Tag>
+              <code>{v.slice('callback:'.length)}</code>
+            </span>
+          ) : (
+            <code>{v}</code>
+          ),
+      },
+    ];
+    for (let i = 0; i < (data?.length ?? 0); i++) {
+      cols.push({
+        title: <code>{shortName(data![i].name)}</code>,
+        key: `t${i}`,
+        width: 180,
+        render: (_, r) => (
+          <div style={{ fontSize: 11, lineHeight: 1.6 }}>
+            <div className="hp-compare-cell">样本: {r.samples[i] ?? '—'}</div>
+            <div
+              className={`hp-compare-cell${r.p99Highlight.best.has(i) ? ' hp-compare-cell--best' : ''}${r.p99Highlight.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
+            >
+              {r.p99Label} p99: {r.p99s[i] !== undefined ? `${r.p99s[i]!.toFixed(0)}ms` : '—'}
+            </div>
+            <div
+              className={`hp-compare-cell${r.apdexHighlight.best.has(i) ? ' hp-compare-cell--best' : ''}${r.apdexHighlight.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
+            >
+              Apdex: <ApdexCell value={r.apdexes[i]} />
+            </div>
+          </div>
+        ),
+      });
+    }
+    return cols;
+  }, [data]);
+
+  const tableScroll = useMemo(
+    () => ({ x: 220 + (data?.length ?? 0) * 180, y: tableScrollY }),
+    [data, tableScrollY],
+  );
+
   if (loading) return <Spin />;
   if (!data || data.length === 0) return <Empty description="加载失败" />;
-
-  const columns: ColumnsType<ActionRow> = [
-    {
-      title: '动作',
-      dataIndex: 'name',
-      key: 'name',
-      fixed: 'left',
-      width: 220,
-      render: (v: string) =>
-        v.startsWith('callback:') ? (
-          <span>
-            <Tag color="orange">推送</Tag>
-            <code>{v.slice('callback:'.length)}</code>
-          </span>
-        ) : (
-          <code>{v}</code>
-        ),
-    },
-  ];
-
-  for (let i = 0; i < data.length; i++) {
-    columns.push({
-      title: <code>{shortName(data[i].name)}</code>,
-      key: `t${i}`,
-      width: 180,
-      render: (_, r) => (
-        <div style={{ fontSize: 11, lineHeight: 1.6 }}>
-          <div className="hp-compare-cell">样本: {r.samples[i] ?? '—'}</div>
-          <div
-            className={`hp-compare-cell${r.p99Highlight.best.has(i) ? ' hp-compare-cell--best' : ''}${r.p99Highlight.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
-          >
-            {r.p99Label} p99: {r.p99s[i] !== undefined ? `${r.p99s[i]!.toFixed(0)}ms` : '—'}
-          </div>
-          <div
-            className={`hp-compare-cell${r.apdexHighlight.best.has(i) ? ' hp-compare-cell--best' : ''}${r.apdexHighlight.worst.has(i) ? ' hp-compare-cell--worst' : ''}`}
-          >
-            Apdex: <ApdexCell value={r.apdexes[i]} />
-          </div>
-        </div>
-      ),
-    });
-  }
 
   return (
     <div className="hp-compare-root">
@@ -274,7 +295,7 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
           dataSource={rows}
           columns={columns}
           pagination={{ pageSize: 50, showSizeChanger: false }}
-          scroll={{ x: 220 + data.length * 180, y: tableScrollY }}
+          scroll={tableScroll}
         />
       </div>
     </div>

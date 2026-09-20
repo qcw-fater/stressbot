@@ -54,6 +54,9 @@ export function ProtoBrowser({
   }, [open, isPickerMode, closeWindow, windowId]);
 
   const messages = useMemo(() => {
+    // protoRegistry 是可变单例，列表内容不在 props/state 里，protoHash 是它变更的唯一信号：
+    // 必须留在依赖里，否则换一批 proto 后这里还是旧列表。这条 void 是为了让
+    // exhaustive-deps 不把它当成「多余依赖」报出来，别当成死代码删掉。
     void protoHash;
     if (protoStatus !== 'ready' || !protoRegistry.isLoaded()) return [];
     let list = protoRegistry.listMessages();

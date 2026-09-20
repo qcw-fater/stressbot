@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { validateCodecSchema } from '../resourcesStore';
+import { validateCodecSchema } from '../codecSchemaValidation';
 import type { CodecSchema } from '@/types/codec';
 
 // 读真实 codec.json（一份 PASS 样本），断言空错误。

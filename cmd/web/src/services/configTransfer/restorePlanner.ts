@@ -199,12 +199,25 @@ export function planCollectionReplace<T>(
   for (const source of incoming) {
     const sourceID = identity.id(source);
     const sourceName = identity.name(source);
-    let match = [...unmatched].find(
-      (index) => sourceID !== '' && identity.id(current[index]) === sourceID,
-    );
-    match ??= [...unmatched].find(
-      (index) => sourceName !== '' && identity.name(current[index]) === sourceName,
-    );
+    // 直接遍历 Set：原来每个 incoming 都把 unmatched 摊成两个临时数组，
+    // 空 id/name 的情况还会白扫一遍。Set 的迭代顺序仍是下标升序，命中结果不变。
+    let match: number | undefined;
+    if (sourceID !== '') {
+      for (const index of unmatched) {
+        if (identity.id(current[index]) === sourceID) {
+          match = index;
+          break;
+        }
+      }
+    }
+    if (match === undefined && sourceName !== '') {
+      for (const index of unmatched) {
+        if (identity.name(current[index]) === sourceName) {
+          match = index;
+          break;
+        }
+      }
+    }
     if (match === undefined) {
       stats.added++;
     } else {

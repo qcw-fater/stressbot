@@ -48,9 +48,9 @@ import {
   replaceErrorMap,
   replaceProtoFiles,
   replaceScriptFiles,
-  validateCodecSchema,
   type ResourceFile,
 } from '../resourcesStore';
+import { validateCodecSchema } from '../codecSchemaValidation';
 import { parseErrorMap, validateErrorMap } from '../errorMapValidation';
 import type { BackupSection, RestoreMode } from './types';
 import type { CollectionIdentity } from './restorePlanner';

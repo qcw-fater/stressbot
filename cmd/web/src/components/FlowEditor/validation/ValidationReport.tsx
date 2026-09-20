@@ -6,7 +6,7 @@ import { Alert, App as AntApp, Badge, Empty, List, Space, Tabs, Tag } from 'antd
 import { CloseCircleFilled, ExclamationCircleFilled, InfoCircleFilled } from '@ant-design/icons';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
-import type { ValidationIssue } from './refsCheck';
+import type { ValidationIssue } from './issues';
 import { FloatingWindow } from '../panels/FloatingWindow';
 import { useValidationStore } from './validationStore';
 

@@ -1,12 +1,8 @@
 import { create } from 'zustand';
 import type { TaskFlow } from '@/types/flow';
 import { useFlowStore } from '../store/flowStore';
-import {
-  validateFlow,
-  type FlowValidationContext,
-  type ValidationIssue,
-  type ValidationReport,
-} from './refsCheck';
+import { validateFlow, type FlowValidationContext } from './refsCheck';
+import type { ValidationIssue, ValidationReport } from './issues';
 
 const EMPTY_REPORT: ValidationReport = {
   errors: [],

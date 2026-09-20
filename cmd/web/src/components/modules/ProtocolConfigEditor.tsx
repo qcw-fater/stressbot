@@ -50,8 +50,8 @@ import {
   subtractSyncResult,
   type ResourceFile,
   type BaselineSyncResult,
-  validateCodecSchema,
 } from '@/services/resourcesStore';
+import { validateCodecSchema } from '@/services/codecSchemaValidation';
 import { BaselineSyncModal } from './BaselineSyncModal';
 import { getErrorCodes } from '@/services/api';
 import type { FrameworkCode } from '@/types/api';
