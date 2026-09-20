@@ -15,6 +15,7 @@ import { Modal as StaticModal, message as staticMessage } from 'antd';
 import type { MessageInstance } from 'antd/es/message/interface';
 import type { ModalStaticFunctions } from 'antd/es/modal/confirm';
 import { ApiError, isAbortError } from './api';
+import { taskStateLabel } from './taskStateLabel';
 import type { TaskConflictDetails } from '@/types/api';
 
 type MessageLike = Pick<MessageInstance, 'error' | 'warning' | 'info' | 'success'>;
@@ -116,7 +117,7 @@ function showTaskConflict(err: ApiError): void {
   modalRef.confirm({
     title: '已有任务在执行',
     content: details
-      ? `任务"${details.activeName}"当前处于 ${details.activeState} 状态，需先停止才能启动新任务。`
+      ? `任务"${details.activeName}"当前处于${taskStateLabel(details.activeState)}状态，需先停止才能启动新任务。`
       : '集群中已有任务在执行。',
     okText: details && handler ? '查看运行中' : '我知道了',
     cancelText: '取消',

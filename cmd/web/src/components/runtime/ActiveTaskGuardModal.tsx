@@ -9,7 +9,7 @@
  */
 
 import { Descriptions, Modal, Tag } from 'antd';
-import { attachToActive, showApiError } from '@/services';
+import { attachToActive, showApiError, taskStateColor, taskStateLabel } from '@/services';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import type { TaskBrief } from '@/types/api';
 
@@ -58,7 +58,7 @@ export function ActiveTaskGuardModal({
               <code>{task.id}</code>
             </Descriptions.Item>
             <Descriptions.Item label="状态">
-              <Tag color={STATE_COLOR[task.state]}>{task.state}</Tag>
+              <Tag color={taskStateColor(task.state)}>{taskStateLabel(task.state)}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="机器人数">
               {task.totalBots} 个，分布在 {task.activeAgentCount}/{task.agentCount} 个节点
@@ -76,12 +76,3 @@ export function ActiveTaskGuardModal({
     </Modal>
   );
 }
-
-const STATE_COLOR: Record<TaskBrief['state'], string> = {
-  pending: 'default',
-  starting: 'gold',
-  running: 'processing',
-  stopping: 'volcano',
-  stopped: 'default',
-  failed: 'error',
-};

@@ -324,22 +324,16 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
  *
  * tasksApi.stopTask 同步返回最新 TaskBrief（含 state=stopping），
  * 这里立即写入 store，让 UI 不必等到下一轮 5s 轮询才反映"停止中"状态。
- *
- * 兼容老后端返回 `{status:"stopping"}` 的形态：判断返回对象是否带 `state` 字段，
- * 没有则跳过即时更新，靠轮询补齐。
  */
-export async function stopTask(taskId?: string): Promise<TaskBrief | null> {
+export async function stopTask(taskId?: string): Promise<TaskBrief> {
   const id =
     taskId ?? useRuntimeStore.getState().ownedTaskId ?? useRuntimeStore.getState().activeTask?.id;
   if (!id) {
     throw new Error('当前没有可停止的任务');
   }
   const updated = await tasksApi.stopTask(id);
-  if (updated && typeof (updated as TaskBrief).state === 'string') {
-    useRuntimeStore.getState().setActiveTask(updated);
-    return updated;
-  }
-  return null;
+  useRuntimeStore.getState().setActiveTask(updated);
+  return updated;
 }
 
 /**
@@ -385,10 +379,6 @@ export async function attachToActive(taskId: string): Promise<void> {
   } else {
     runtime.setMode('running');
   }
-
-  // proto 资源同步：留给后续，proto 是按 messageType 名引用的，无法从 flow 静态推断
-  // 应该带哪些 .proto 文件；用户需主动到「资源管理」上传。
-  void useProtoStore.getState();
 }
 
 /**

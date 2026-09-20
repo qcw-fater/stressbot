@@ -43,12 +43,50 @@ const REMOVED_HEARTBEAT_PATTERNS = new Set(['tcpHeartbeat', 'udpHeartbeat']);
 
 const VALID_ON_ERROR_STRATEGIES = new Set<OnErrorStrategy>(['resume', 'skip', 'abort']);
 
+/** 一次校验内复用的「proto 消息 → 合法字段路径集」缓存，见 fieldPathsOf。 */
+export type FieldPathCache = Map<string, Set<string>>;
+
+/**
+ * 展开消息的合法字段路径（含嵌套，深度上限 3）。
+ *
+ * 结果按消息名缓存：同一个 c2sProto 常被多个 action 共用，逐 action 重新递归整棵
+ * 消息树是纯浪费。缓存只活在一次校验里（由调用方持有），proto 重新加载后自然失效。
+ */
+function fieldPathsOf(msgName: string, cache: FieldPathCache): Set<string> {
+  const cached = cache.get(msgName);
+  if (cached) return cached;
+
+  const paths = new Set<string>();
+  const walk = (current: string, prefix: string, depth: number) => {
+    if (depth > 3) return;
+    const m = protoRegistry.lookupMessage(current);
+    if (!m) return;
+    for (const f of m.fields) {
+      const nodeName = f.repeated ? `${f.name}[0]` : f.name;
+      const currentPath = prefix ? `${prefix}.${nodeName}` : nodeName;
+      paths.add(currentPath);
+      // repeated 字段同时允许不带下标的写法
+      if (f.repeated) {
+        paths.add(prefix ? `${prefix}.${f.name}` : f.name);
+      }
+      if (f.kind === 'message' && f.messageName) {
+        walk(f.messageName, currentPath, depth + 1);
+      }
+    }
+  };
+  walk(msgName, '', 0);
+
+  cache.set(msgName, paths);
+  return paths;
+}
+
 // ── Action 校验 ─────────────────────────────────────────────
 
 export function checkAction(
   name: string,
   def: ActionDef,
   knownStateKeys: Set<string> | undefined,
+  fieldPathCache: FieldPathCache = new Map(),
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const loc = { kind: 'action' as const, id: name };
@@ -213,26 +251,7 @@ export function checkAction(
     if (def.c2sProto && def.bindings) {
       const msg = protoRegistry.lookupMessage(def.c2sProto);
       if (msg) {
-        // Build a set of all possible paths (up to a reasonable depth) for validation
-        const validPaths = new Set<string>();
-        const buildPaths = (msgName: string, prefix: string, depth: number) => {
-          if (depth > 3) return;
-          const m = protoRegistry.lookupMessage(msgName);
-          if (!m) return;
-          for (const f of m.fields) {
-            const nodeName = f.repeated ? `${f.name}[0]` : f.name;
-            const currentPath = prefix ? `${prefix}.${nodeName}` : nodeName;
-            validPaths.add(currentPath);
-            // Also allow the base name without array index for repeated fields
-            if (f.repeated) {
-              validPaths.add(prefix ? `${prefix}.${f.name}` : f.name);
-            }
-            if (f.kind === 'message' && f.messageName) {
-              buildPaths(f.messageName, currentPath, depth + 1);
-            }
-          }
-        };
-        buildPaths(def.c2sProto, '', 0);
+        const validPaths = fieldPathsOf(def.c2sProto, fieldPathCache);
 
         for (const b of def.bindings) {
           if (b.field) {

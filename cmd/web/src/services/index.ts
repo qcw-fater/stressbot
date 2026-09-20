@@ -38,6 +38,8 @@ export type { ApdexLevel, FlowSlice, NodeMetricsMap } from './metricsBinding';
 export { showApiError, registerTaskConflictHandler, setMessageApi } from './errorHandler';
 export type { TaskConflictHandler } from './errorHandler';
 
+export { taskStateLabel, taskStateColor } from './taskStateLabel';
+
 export * as resourcesStore from './resourcesStore';
 export type { ResourceFile } from './resourcesStore';
 

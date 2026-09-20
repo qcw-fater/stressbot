@@ -57,6 +57,34 @@ describe('validateFlow', () => {
     expect(r.warnings.find((e) => e.code === 'NODE_ORPHAN')).toBeTruthy();
   });
 
+  it('NODE_CYCLE：调用边成环报 warning，并给出环上路径', () => {
+    const r = validateFlow(
+      baseFlow({
+        nodes: {
+          main: { type: 'sequence', next: ['a'] },
+          a: { type: 'boolean', condition: 'state:go == 1', trueNext: 'b', falseNext: 'a' },
+          b: { type: 'sequence', next: ['a'] },
+        },
+      }),
+    );
+    const cycle = r.warnings.find((e) => e.code === 'NODE_CYCLE');
+    expect(cycle).toBeTruthy();
+    expect(cycle?.message).toContain('a → b → a');
+  });
+
+  it('NODE_CYCLE：loop 节点原地迭代不算环', () => {
+    const r = validateFlow(
+      baseFlow({
+        nodes: {
+          main: { type: 'sequence', next: ['lp'] },
+          lp: { type: 'loop', loopCount: 3, body: 'work' },
+          work: { type: 'action', action: 'A1' },
+        },
+      }),
+    );
+    expect(r.warnings.filter((e) => e.code === 'NODE_CYCLE')).toEqual([]);
+  });
+
   it('NODE_REF_NOT_FOUND：wait then 指向不存在节点', () => {
     const r = validateFlow(
       baseFlow({
@@ -382,6 +410,22 @@ describe('validateFlow', () => {
       }),
     );
     expect(r.errors.find((e) => e.code === 'LISTEN_REF_NOT_FOUND')).toBeTruthy();
+  });
+
+  it('悬空 listenRef 只报一条错误（曾经 REF/CB 两个码各报一遍）', () => {
+    const r = validateFlow(
+      baseFlow({
+        nodes: {
+          main: {
+            type: 'action',
+            action: 'A1',
+            listenRefs: [{ server: 'tcp:x', listen: 'ghost', route: {} }],
+          },
+        },
+      }),
+    );
+    const about = r.errors.filter((e) => e.message.includes('ghost'));
+    expect(about).toHaveLength(1);
   });
 
   it('listenRefs listen=null 合法（静默预注册，不再报 LISTEN_EMPTY_NAME）', () => {

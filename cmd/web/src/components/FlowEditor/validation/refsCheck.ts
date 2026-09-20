@@ -17,7 +17,7 @@ import { resolveRouteKeyForServer } from '../listens/routeKeyResolver';
 import { type StateKeyInfo } from '../editors/ActionEditor/stateRegistry';
 import { validateFlowStructure } from '@/services/schemaValidator';
 import { forEachFlowScriptRef } from '@/services/flowScriptRefs';
-import { checkAction, checkNodeOnError } from './actionRules';
+import { checkAction, checkNodeOnError, type FieldPathCache } from './actionRules';
 import {
   categorize,
   conditionIssue,
@@ -420,8 +420,9 @@ export function validateFlow(
     }
   }
 
-  // 孤立节点检测
+  // 孤立节点与成环检测
   issues.push(...detectOrphanNodes(nodes));
+  issues.push(...detectCycles(nodes));
 
   // R5–R10：actions 校验
   const referencedActions = new Set<string>();
@@ -430,9 +431,10 @@ export function validateFlow(
       referencedActions.add(node.action);
     }
   }
+  const fieldPathCache: FieldPathCache = new Map();
   for (const [name, def] of Object.entries(actions)) {
     if (referencedActions.has(name)) {
-      issues.push(...checkAction(name, def, knownStateKeys));
+      issues.push(...checkAction(name, def, knownStateKeys, fieldPathCache));
     } else {
       issues.push({
         severity: 'warning',
@@ -476,14 +478,9 @@ export function validateFlow(
       });
     }
   }
-  for (const dr of graph.danglingRefs) {
-    issues.push({
-      severity: 'error',
-      code: 'LISTEN_CB_NOT_FOUND',
-      message: `节点 "${dr.nodeId}" listenRefs[${dr.refIndex}] 引用了不存在的 listen "${dr.ref.listen}"`,
-      location: { kind: 'node', id: dr.nodeId },
-    });
-  }
+  // graph.danglingRefs 与上面节点遍历里的 LISTEN_REF_NOT_FOUND 判定条件完全相同
+  // （listen 非空且不在 flow.listens 里），这里不再重复报一遍：一个悬空引用出两条
+  // 措辞几乎一样的 error，用户会以为是两个问题。
   for (const dup of graph.duplicateRegisters) {
     issues.push({
       severity: 'warning',
@@ -552,6 +549,26 @@ export function validateFlow(
 
 // ── 孤立节点检测 ─────────────────────────────────────────────
 
+/**
+ * 节点的全部出边（子节点调用边）。
+ *
+ * 可达性、环检测、循环体归属三处都要按同一套边遍历图；各写一份迟早漂移
+ * （onError.handler 这条边就是典型：漏掉它会让 handler 里的 break 被误报）。
+ */
+function forEachOutgoing(node: NodeLike, fn: (id: string) => void): void {
+  (node.next ?? []).forEach(fn);
+  if (node.body) fn(node.body);
+  if (node.trueNext) fn(node.trueNext);
+  if (node.falseNext) fn(node.falseNext);
+  (node.options ?? []).forEach((o) => fn(o.node));
+  if (node.onError?.handler) fn(node.onError.handler);
+  (node.cases ?? []).forEach((c) => {
+    if (c.next) fn(c.next);
+  });
+  if (node.defaultNext) fn(node.defaultNext);
+  if (node.then) fn(node.then);
+}
+
 function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
   const reachable = new Set<string>();
 
@@ -560,17 +577,7 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
     const node = nodes[id];
     if (!node) return;
     reachable.add(id);
-    (node.next ?? []).forEach(visit);
-    if (node.body) visit(node.body);
-    if (node.trueNext) visit(node.trueNext);
-    if (node.falseNext) visit(node.falseNext);
-    (node.options ?? []).forEach((o) => visit(o.node));
-    if (node.onError?.handler) visit(node.onError.handler);
-    (node.cases ?? []).forEach((c) => {
-      if (c.next) visit(c.next);
-    });
-    if (node.defaultNext) visit(node.defaultNext);
-    if (node.then) visit(node.then);
+    forEachOutgoing(node, visit);
   };
 
   visit('main');
@@ -586,6 +593,52 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
       });
     }
   }
+  return issues;
+}
+
+// ── 成环检测 ────────────────────────────────────────────────
+
+/**
+ * 检测从 main 可达的调用环。
+ *
+ * 引擎执行子节点用的是递归调用（executeNode 直接调 executeNode），所以图上的环
+ * 不是"循环"而是"不断加深的调用栈"：转多少圈就压多少层栈帧，由运行期条件决定何时
+ * 出来，出不来就一直涨。判 warning 不判 error 是因为它未必真的跑不完——条件翻转
+ * 就能退出，只是重复执行这件事应该交给 loop 节点，那才是原地迭代。
+ */
+function detectCycles(nodes: Record<string, NodeLike>): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const expanded = new Set<string>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const reported = new Set<string>();
+
+  const visit = (id: string) => {
+    const node = nodes[id];
+    if (!node) return;
+    if (onStack.has(id)) {
+      if (!reported.has(id)) {
+        reported.add(id);
+        const path = [...stack.slice(stack.indexOf(id)), id].join(' → ');
+        issues.push({
+          severity: 'warning',
+          code: 'NODE_CYCLE',
+          message: `节点 "${id}" 回到了自己，形成环：${path}。引擎按递归调用执行子节点，环会不断加深调用栈；需要重复执行请用 loop 节点`,
+          location: { kind: 'node', id },
+        });
+      }
+      return;
+    }
+    if (expanded.has(id)) return;
+    expanded.add(id);
+    onStack.add(id);
+    stack.push(id);
+    forEachOutgoing(node, visit);
+    stack.pop();
+    onStack.delete(id);
+  };
+
+  visit('main');
   return issues;
 }
 
@@ -607,22 +660,15 @@ type NodeLike = {
 /** 收集所有 loop body 子图中的节点 ID */
 function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
   const inLoop = new Set<string>();
+  // 走全部出边，handler 子树也算在循环体内：它在同一个调用栈里执行，里面的 break 会经
+  // errBreak 一路冒泡回外层循环并真的生效（engine/executor.go 的 executeOnErrorHandler
+  // 原样上抛、executeLoop 捕获）。不跟这条边，handler 里合法的 break 会被误报成"不在循环内"。
   const visit = (id: string) => {
     if (inLoop.has(id)) return;
     const node = nodes[id];
     if (!node) return;
     inLoop.add(id);
-    (node.next ?? []).forEach(visit);
-    if (node.body) visit(node.body);
-    if (node.trueNext) visit(node.trueNext);
-    if (node.falseNext) visit(node.falseNext);
-    (node.options ?? []).forEach((o) => visit(o.node));
-    if (node.onError?.handler) visit(node.onError.handler);
-    (node.cases ?? []).forEach((c) => {
-      if (c.next) visit(c.next);
-    });
-    if (node.defaultNext) visit(node.defaultNext);
-    if (node.then) visit(node.then);
+    forEachOutgoing(node, visit);
   };
   for (const node of Object.values(nodes)) {
     if (node.type === 'loop' && node.body) {

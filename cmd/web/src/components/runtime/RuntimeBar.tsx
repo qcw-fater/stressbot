@@ -56,6 +56,8 @@ import {
   detachFromActiveWithRestore,
   showApiError,
   stopTask,
+  taskStateColor,
+  taskStateLabel,
   useRuntimeStore,
 } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -77,24 +79,6 @@ const SECTION_DIVIDER = (
     style={{ margin: '0 6px', height: 22, borderColor: 'var(--divider-bg)' }}
   />
 );
-
-const STATE_COLOR: Record<TaskBrief['state'], string> = {
-  pending: 'default',
-  starting: 'gold',
-  running: 'processing',
-  stopping: 'volcano',
-  stopped: 'success',
-  failed: 'error',
-};
-
-const STATE_LABEL: Record<TaskBrief['state'], string> = {
-  pending: '待启动',
-  starting: '启动中',
-  running: '运行中',
-  stopping: '停止中',
-  stopped: '已停止',
-  failed: '失败',
-};
 
 export function RuntimeBar({
   onOpenResources,
@@ -353,8 +337,8 @@ export function RuntimeBar({
       )}
       {mode === 'edit' && detachedActiveTask && (
         <Space size={4}>
-          <Tag color={STATE_COLOR[detachedActiveTask.state]} style={{ margin: 0 }}>
-            {STATE_LABEL[detachedActiveTask.state]}
+          <Tag color={taskStateColor(detachedActiveTask.state)} style={{ margin: 0 }}>
+            {taskStateLabel(detachedActiveTask.state)}
           </Tag>
           {modeTag}
         </Space>
@@ -362,8 +346,8 @@ export function RuntimeBar({
       {mode === 'edit' && !detachedActiveTask && modeTag}
       {(mode === 'running' || mode === 'viewActive') && activeTask && (
         <Space size={4}>
-          <Tag color={STATE_COLOR[activeTask.state]} style={{ margin: 0 }}>
-            {STATE_LABEL[activeTask.state]}
+          <Tag color={taskStateColor(activeTask.state)} style={{ margin: 0 }}>
+            {taskStateLabel(activeTask.state)}
           </Tag>
           {modeTag}
           {agentEvents.some((e) => e.type === 'offline' || e.type === 'restarted') &&
@@ -401,8 +385,8 @@ export function RuntimeBar({
       )}
       {mode === 'finalReport' && (
         <Space size={4}>
-          <Tag color={STATE_COLOR[activeTask?.state ?? 'stopped']} style={{ margin: 0 }}>
-            {STATE_LABEL[activeTask?.state ?? 'stopped']}
+          <Tag color={taskStateColor(activeTask?.state ?? 'stopped')} style={{ margin: 0 }}>
+            {taskStateLabel(activeTask?.state ?? 'stopped')}
           </Tag>
           {(() => {
             const detail = activeTask as { cleanupSummary?: CleanupStatus } | null;

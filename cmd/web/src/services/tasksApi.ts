@@ -61,8 +61,6 @@ export function startTask(id: string): Promise<StartTaskResponse> {
 /**
  * 后端 stop 返回最新的 TaskBrief（含 state=stopping 等字段）；
  * 前端拿到后立即更新 active task，省一次 5s 轮询等待。
- *
- * 兼容老后端返回 `{status:"stopping"}`：仍 await 但调用方自己用 store 兜底，不会崩。
  */
 export function stopTask(id: string): Promise<TaskBrief> {
   return postJson<TaskBrief>(`/tasks/${encodeURIComponent(id)}/stop`);
