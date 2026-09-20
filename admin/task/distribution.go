@@ -56,8 +56,16 @@ func assignedAgentCount(assignments []Assignment) int {
 	return count
 }
 
-// SplitGlobalValues distributes a global concurrency value in proportion to
-// assigned bots while preserving the exact total.
+// SplitGlobalValues 按各节点分得的机器人数等比拆分一个全局值（并发度），总和守恒。
+//
+// 每个分到机器人的节点保底 1（0 并发的节点一个机器人也起不来）。保底在机器人分布
+// 倾斜时会把总和顶过 global——例如 global=10、10 个节点、其中一个占 91% 机器人时，
+// 下取整得 9 + 9 个保底 = 18。因此下取整之后既要按最大余数补齐不足，也要从分得
+// 最多的节点回收超发，两个方向都走完才能保证总和恰好等于 global。
+//
+// global 小于有效节点数时两个目标无法兼得（回收到每个节点都只剩 1 仍然超发），
+// 此时保底优先、总和上浮到节点数。ValidateDistributedConcurrency 已在入口挡掉
+// 显式配置的这种情况，这里只是兜住内部调用。
 func SplitGlobalValues(global, totalBots int, assignments []Assignment) map[string]int {
 	out := make(map[string]int, len(assignments))
 	if global <= 0 || totalBots <= 0 || len(assignments) == 0 {
@@ -76,6 +84,8 @@ func SplitGlobalValues(global, totalBots int, assignments []Assignment) map[stri
 		used += floor
 		fractions[index] = exact - math.Floor(exact)
 	}
+
+	// 不足：按小数部分从大到小各补 1。
 	for remainder := global - used; remainder > 0; remainder-- {
 		bestIndex := -1
 		bestFraction := -1.0
@@ -90,6 +100,25 @@ func SplitGlobalValues(global, totalBots int, assignments []Assignment) map[stri
 		}
 		out[assignments[bestIndex].AgentID]++
 		fractions[bestIndex] = -1
+	}
+
+	// 超发：从当前分得最多的节点逐个回收，不把任何节点压到 1 以下。
+	for surplus := used - global; surplus > 0; surplus-- {
+		richestIndex := -1
+		richest := 1
+		for index, assignment := range assignments {
+			if assignment.TotalBots <= 0 {
+				continue
+			}
+			if value := out[assignment.AgentID]; value > richest {
+				richest = value
+				richestIndex = index
+			}
+		}
+		if richestIndex < 0 {
+			break // 全部已降到保底 1，无法继续回收
+		}
+		out[assignments[richestIndex].AgentID]--
 	}
 	return out
 }

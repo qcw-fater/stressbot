@@ -248,8 +248,6 @@ type SharedRuntimeAssignment struct {
 	Redis shared.RedisConfig `json:"redis"`
 }
 
-// ── Agent ─────────────────────────────────────────────
-
 // ── 上报报文 ──────────────────────────────────────────
 
 // CompletionReport 表示 Agent 上报的任务完成结果。
@@ -275,4 +273,34 @@ type CompletionReport struct {
 	StageIndex int `json:"stageIndex,omitempty"`
 	// CleanupStatus Agent 侧资源清理结果。
 	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
+}
+
+// PublicCopy 返回剥离了内部 DDSketch 的浅拷贝，供面向浏览器的 HTTP 响应使用。
+// Reports / StageReports 里的 FinalSnapshot 携带可合并的 sketch 字节，只允许在
+// Agent→Admin 的内部链路和归档里出现，公共 API 必须剥离。
+func (t *Task) PublicCopy() *Task {
+	if t == nil {
+		return nil
+	}
+	public := *t
+	if len(t.Reports) > 0 {
+		reports := make(map[string]CompletionReport, len(t.Reports))
+		for agentID, report := range t.Reports {
+			reports[agentID] = report.publicCopy()
+		}
+		public.Reports = reports
+	}
+	if len(t.StageReports) > 0 {
+		stages := make([]CompletionReport, 0, len(t.StageReports))
+		for _, report := range t.StageReports {
+			stages = append(stages, report.publicCopy())
+		}
+		public.StageReports = stages
+	}
+	return &public
+}
+
+func (r CompletionReport) publicCopy() CompletionReport {
+	r.FinalSnapshot = r.FinalSnapshot.PublicCopy()
+	return r
 }

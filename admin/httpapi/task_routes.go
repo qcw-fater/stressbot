@@ -26,19 +26,19 @@ import (
 func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	const maxMultipartMB = 32
 	if err := r.ParseMultipartForm(int64(maxMultipartMB) << 20); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("multipart parse error"))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("解析 multipart 表单失败"))
 		return
 	}
 
 	name := r.FormValue("name")
 	totalBotsStr := r.FormValue("totalBots")
 	if name == "" || totalBotsStr == "" {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("name and totalBots required"))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("缺少 name 或 totalBots"))
 		return
 	}
 	totalBots, err := strconv.Atoi(totalBotsStr)
 	if err != nil || totalBots <= 0 {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("totalBots must be positive integer"))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("totalBots 必须是正整数"))
 		return
 	}
 
@@ -47,13 +47,13 @@ func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// flow.json（必需）
 	flowFile, _, err := r.FormFile("flow.json")
 	if err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("flow.json file required"))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("必须上传 flow.json 文件"))
 		return
 	}
 	flowData, err := io.ReadAll(flowFile)
 	_ = flowFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
 	if err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("failed to read flow.json"))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("读取 flow.json 失败"))
 		return
 	}
 	if err := validation.ValidateFlow(flowData); err != nil {
@@ -158,7 +158,7 @@ func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// robotConfig（JSON string）
 	if rc := r.FormValue("robotConfig"); rc != "" {
 		if err := json.Unmarshal([]byte(rc), &cfg.RobotConfig); err != nil {
-			writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid robotConfig JSON"))
+			writeError(w, apierror.ErrInvalidArgument.WithMessage("robotConfig 不是合法 JSON"))
 			return
 		}
 	}
@@ -166,23 +166,23 @@ func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// 校验 rampUp 配置
 	if cfg.RobotConfig.RampUp != nil {
 		if len(cfg.RobotConfig.RampUp.Stages) == 0 {
-			writeError(w, apierror.ErrInvalidArgument.WithMessage("rampUp.stages must not be empty"))
+			writeError(w, apierror.ErrInvalidArgument.WithMessage("rampUp.stages 不能为空"))
 			return
 		}
 		sum := 0
 		for _, s := range cfg.RobotConfig.RampUp.Stages {
 			if s.Count <= 0 {
-				writeError(w, apierror.ErrInvalidArgument.WithMessage("rampUp.stage.count must be positive"))
+				writeError(w, apierror.ErrInvalidArgument.WithMessage("rampUp.stage.count 必须大于 0"))
 				return
 			}
 			if s.HoldSec < 0 {
-				writeError(w, apierror.ErrInvalidArgument.WithMessage("rampUp.stage.holdSec must be >= 0"))
+				writeError(w, apierror.ErrInvalidArgument.WithMessage("rampUp.stage.holdSec 不能为负数"))
 				return
 			}
 			sum += s.Count
 		}
 		if sum != totalBots {
-			writeError(w, apierror.ErrInvalidArgument.WithMessage(fmt.Sprintf("rampUp stages count sum (%d) must equal totalBots (%d)", sum, totalBots)))
+			writeError(w, apierror.ErrInvalidArgument.WithMessage(fmt.Sprintf("rampUp 各阶段机器人数之和（%d）必须等于 totalBots（%d）", sum, totalBots)))
 			return
 		}
 	}
@@ -294,7 +294,7 @@ func (s *Handler) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, task)
+	writeJSON(w, http.StatusOK, task.PublicCopy())
 }
 
 // handleGetTaskConfig 任务配置文件下载（Agent 用）。
@@ -503,7 +503,7 @@ func (s *Handler) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if task.State != admintask.Running {
-		writeError(w, apierror.ErrTaskInvalidState.WithMessage(fmt.Sprintf("task is %s, expected running", task.State)))
+		writeError(w, apierror.ErrTaskInvalidState.WithMessage(fmt.Sprintf("任务当前状态为 %s，只有 running 状态才能停止", task.State)))
 		return
 	}
 
@@ -556,5 +556,3 @@ func (s *Handler) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	stresslog.Info("[ADMIN] 任务已删除", zap.String("taskID", id))
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// ── 前端-Agent ──
