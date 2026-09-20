@@ -23,11 +23,16 @@ type RampUpConfig struct {
 	Stages []RampUpStage `json:"stages"`
 }
 
+// defaultStageHoldSec 未配置 holdSec 时的阶段间保持时长。
+// 取 30s 是为了让上一阶段的机器人跑满至少一个监控窗口再叠加下一批，
+// 否则指标区间里混着两个负载水位，看不出每一阶的真实承载。
+const defaultStageHoldSec = 30
+
 // RampUpStage 单个加压阶段。
 type RampUpStage struct {
 	Count       int  `json:"count"`                 // 本阶段新增 bot 数
 	Concurrency int  `json:"concurrency,omitempty"` // 覆盖全局并发数，0 则用全局值
-	HoldSec     int  `json:"holdSec,omitempty"`     // 阶段间等待秒数
+	HoldSec     int  `json:"holdSec,omitempty"`     // 阶段间等待秒数，0 则用 defaultStageHoldSec
 	Reset       bool `json:"reset,omitempty"`       // 开始本阶段前清空所有已有机器人
 }
 
@@ -185,6 +190,12 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			}
 		}
 	}
+	// NewRobot 的失败原因（resolver nil / LState 不可用）是全局性的，一个失败通常意味着全批失败。
+	// 逐个跳过能避免单点拖垮整批，但整批一个都没建起来还返回 nil 就成了"静默空跑"：
+	// 上层看到 err==nil 会继续推进阶段，实际压力为零。
+	if created == 0 && count > 0 {
+		return 0, fmt.Errorf("批次创建失败：请求 %d 个机器人，全部创建失败（详见上方逐个失败日志）", count)
+	}
 	return created, nil
 }
 
@@ -275,7 +286,12 @@ func (m *Manager) StartWithRampUp() error {
 		if stage.Concurrency > 0 {
 			conc = stage.Concurrency
 		}
-		holdSec := max(stage.HoldSec, 30)
+		// 0 表示未填，回退默认保持时长；显式配置的值一律照办。
+		// 旧实现是 max(HoldSec, 30)，把显式写的 5s 悄悄抬成 30s——配置写了不生效比报错更难查。
+		holdSec := stage.HoldSec
+		if holdSec == 0 {
+			holdSec = defaultStageHoldSec
+		}
 
 		stresslog.Info("[MANAGER] 启动阶段",
 			zap.Int("stage", i+1),
