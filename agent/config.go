@@ -131,16 +131,29 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 	if taskWorkDir == "" {
 		taskWorkDir = os.TempDir()
 	}
-	return &ResolvedConfig{
+	// 任一时长写错就停在这里，不带着退化后的默认值继续跑。
+	var firstErr error
+	duration := func(raw string, fallback time.Duration, key string) time.Duration {
+		value, err := config.ParsePositiveDuration(raw, fallback, key)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		return value
+	}
+	resolved := &ResolvedConfig{
 		ID: c.ID, AdminAddress: c.AdminAddress, Name: name, MaxBots: maxBots, AppVersion: c.AppVersion,
 		TaskWorkDir:          taskWorkDir,
-		MetricsInterval:      config.ParseDurationDefault(c.MetricsInterval, 5*time.Second, "agent.metricsInterval"),
-		HeartbeatInterval:    config.ParseDurationDefault(c.HeartbeatInterval, 10*time.Second, "agent.heartbeatInterval"),
-		ReconnectInterval:    config.ParseDurationDefault(c.Reconnect.InitialInterval, 5*time.Second, "agent.reconnect.initialInterval"),
-		ReconnectMaxInterval: config.ParseDurationDefault(c.Reconnect.MaxInterval, 30*time.Second, "agent.reconnect.maxInterval"),
+		MetricsInterval:      duration(c.MetricsInterval, 5*time.Second, "agent.metricsInterval"),
+		HeartbeatInterval:    duration(c.HeartbeatInterval, 10*time.Second, "agent.heartbeatInterval"),
+		ReconnectInterval:    duration(c.Reconnect.InitialInterval, 5*time.Second, "agent.reconnect.initialInterval"),
+		ReconnectMaxInterval: duration(c.Reconnect.MaxInterval, 30*time.Second, "agent.reconnect.maxInterval"),
 		ReconnectMaxRetries:  resolveReconnectRetries(c.ReconnectMaxRetries),
-		TaskReportTimeout:    config.ParseDurationDefault(c.Reconnect.TaskReportTimeout, 30*time.Second, "agent.reconnect.taskReportTimeout"),
-	}, nil
+		TaskReportTimeout:    duration(c.Reconnect.TaskReportTimeout, 30*time.Second, "agent.reconnect.taskReportTimeout"),
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return resolved, nil
 }
 
 func resolveReconnectRetries(value int) int {

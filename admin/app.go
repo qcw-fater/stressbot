@@ -100,16 +100,24 @@ func NewServer(cfg Config) (*Server, error) {
 	// 1. MySQL 必须在装配任何运行时 store 和开放 listener 前完成当前结构初始化。
 	// 任一步失败都关闭连接并让进程以非零状态退出，不提供半健康 HTTP 服务。
 	if cfg.MySQLEnabled() {
-		db, err := mysql.Open(cfg.MySQL.DSN(), mysql.PoolConfig{
+		dsn, err := cfg.MySQL.DSN()
+		if err != nil {
+			return nil, fmt.Errorf("构造 MySQL 连接串失败: %w", err)
+		}
+		connMaxLifetime, err := cfg.MySQL.ConnMaxLifetime()
+		if err != nil {
+			return nil, err
+		}
+		db, err := mysql.Open(dsn, mysql.PoolConfig{
 			MaxOpenConns: cfg.MySQL.Pool.MaxOpenConns, MaxIdleConns: cfg.MySQL.Pool.MaxIdleConns,
-			ConnMaxLifetime: cfg.MySQL.Pool.ConnMaxLifetime,
+			ConnMaxLifetime: connMaxLifetime,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("connect mysql: %w", err)
+			return nil, fmt.Errorf("连接 MySQL 失败: %w", err)
 		}
 		s.db = db
 		if err := mysql.InitializeSchema(context.Background(), db); err != nil {
-			return nil, fmt.Errorf("initialize mysql schema: %w", err)
+			return nil, fmt.Errorf("初始化 MySQL 数据库结构失败: %w", err)
 		}
 		stresslog.Info("[ADMIN] MySQL 已连接且数据库结构初始化完成",
 			zap.String("addr", fmt.Sprintf("%s:%d", cfg.MySQL.Host, cfg.MySQL.Port)),
@@ -119,7 +127,7 @@ func NewServer(cfg Config) (*Server, error) {
 	// 2. 任务存储
 	tasks, err := admintask.NewStore("data")
 	if err != nil {
-		return nil, fmt.Errorf("init task store: %w", err)
+		return nil, fmt.Errorf("初始化任务存储失败: %w", err)
 	}
 	s.tasks = tasks
 	bundles, err := bundle.NewStore("data/bundles", 128)
@@ -133,9 +141,17 @@ func NewServer(cfg Config) (*Server, error) {
 	s.commandDispatch = command.NewDispatcher(s.bundles, s.commandBus, cfg.Redis)
 
 	// 3. AgentRegistry
+	unhealthyAfter, err := config.ParsePositiveDuration(cfg.ControlPlane.UnhealthyAfter, 30*time.Second, "controlPlane.unhealthyAfter")
+	if err != nil {
+		return nil, err
+	}
+	offlineAfter, err := config.ParsePositiveDuration(cfg.ControlPlane.OfflineAfter, 60*time.Second, "controlPlane.offlineAfter")
+	if err != nil {
+		return nil, err
+	}
 	s.agents = agent.NewRegistry(agent.Config{
-		UnhealthyThreshold: config.ParseDurationDefault(cfg.ControlPlane.UnhealthyAfter, 30*time.Second, "controlPlane.unhealthyAfter"),
-		OfflineThreshold:   config.ParseDurationDefault(cfg.ControlPlane.OfflineAfter, 60*time.Second, "controlPlane.offlineAfter"),
+		UnhealthyThreshold: unhealthyAfter,
+		OfflineThreshold:   offlineAfter,
 		NotFoundError:      apierror.ErrAgentNotFound,
 	}, s.onAgentStatusChange)
 	s.agents.SetOnRestart(s.onAgentRestart)
@@ -154,10 +170,10 @@ func NewServer(cfg Config) (*Server, error) {
 		},
 	)
 
-	// 7. Assigner
+	// 5. Assigner
 	s.assigner = admintask.NewAssigner()
 
-	// 8. HistoryStore（可选）及模板 store 复用已初始化的全局 MySQL 连接池。
+	// 6. HistoryStore（可选）及模板 store 复用已初始化的全局 MySQL 连接池。
 	if s.db != nil {
 		if cfg.MySQLEnabled() {
 			s.history = history.NewStore(s.db, cfg.MySQL.RetentionDays, apierror.ErrHistoryNotFound, func(message string) error {
@@ -175,13 +191,13 @@ func NewServer(cfg Config) (*Server, error) {
 		s.listenTemplates = template.NewListenTemplateStore(s.db, generateID)
 	} else {
 		stresslog.Info("[ADMIN] MySQL 未配置：历史归档模块未启用，" +
-			"所有 /api/history* 接口将返回 HISTORY_DISABLED")
+			"所有 /sbot/history* 接口将返回 HISTORY_DISABLED")
 	}
 
-	// 9. 终态回调
+	// 7. 终态回调
 	s.tasks.SetOnTerminal(s.onTaskTerminal)
 
-	// 10. 共享状态（Redis）：验证连通性 + 初始化待清理队列
+	// 8. 共享状态（Redis）：验证连通性 + 初始化待清理队列
 	if cfg.RedisEnabled() {
 		resolved, rerr := cfg.Redis.Resolve()
 		if rerr != nil {
@@ -232,14 +248,16 @@ func (s *Server) Run(ctx context.Context) error {
 		s.sharedCleanup.Start(runtimeCtx)
 	}
 
+	heartbeatInterval, err := config.ParsePositiveDuration(s.cfg.ControlPlane.HeartbeatInterval, 10*time.Second, "controlPlane.heartbeatInterval")
+	if err != nil {
+		return err
+	}
+	leaseDuration, err := config.ParsePositiveDuration(s.cfg.ControlPlane.LeaseDuration, 45*time.Second, "controlPlane.leaseDuration")
+	if err != nil {
+		return err
+	}
+
 	// 注册路由（已包裹 recover 中间件）。
-	//
-	// timeout 配置：
-	//   - ReadHeaderTimeout 防止慢客户端攻击型连接占住 server goroutine 不放，
-	//     避免堆积导致 accept queue 满；
-	//   - IdleTimeout 让长期空闲的 keep-alive 连接主动关闭，
-	//     防止 agent → admin 的 client-side 池保留大量已不再使用的连接；
-	//   - ReadTimeout/WriteTimeout 故意不设：history 导出/日志下载可能很长。
 	s.managementSrv = s.newManagementServer()
 	s.grpcSrv = grpcapi.NewServer(grpcapi.Dependencies{
 		Sessions:               s.sessions,
@@ -247,8 +265,8 @@ func (s *Server) Run(ctx context.Context) error {
 		Commands:               s.commandBus,
 		Bundles:                s.bundles,
 		Metrics:                s.metricsIngestor,
-		HeartbeatInterval:      config.ParseDurationDefault(s.cfg.ControlPlane.HeartbeatInterval, 10*time.Second, "controlPlane.heartbeatInterval"),
-		LeaseDuration:          config.ParseDurationDefault(s.cfg.ControlPlane.LeaseDuration, 45*time.Second, "controlPlane.leaseDuration"),
+		HeartbeatInterval:      heartbeatInterval,
+		LeaseDuration:          leaseDuration,
 		OwnsActiveTask:         s.completion.OwnsActiveTask,
 		ScheduleStop:           s.commandDispatch.ScheduleStop,
 		AcceptTaskReport:       s.completion.Accept,

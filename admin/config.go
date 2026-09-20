@@ -3,13 +3,16 @@ package admin
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
 	"stressbot/config"
-	json "stressbot/internal/jsonx"
 	"stressbot/internal/stresslog"
 	"stressbot/state/shared"
+
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 // Config Admin 服务端配置（对应 admin.toml）。
@@ -63,29 +66,51 @@ type MySQLConfig struct {
 	Pool          config.ConnPoolConfig `toml:"pool"       json:"pool"`             // 连接池参数
 }
 
-// DSN 拼接标准 MySQL 连接字符串，含 timeout 参数。
-func (c MySQLConfig) DSN() string {
+// DSN 用驱动自带的 mysql.Config 生成连接字符串，而非手工拼接：DSN 不是 URL，
+// 但 `@` `/` `:` `?` 在其中都是分隔符，密码或库名里带这些字符时手工拼接会让
+// 驱动解析错位（把密码的后半段当成主机名等）。FormatDSN 负责按驱动规则转义。
+// 各 timeout 留空表示沿用驱动默认（不写进 DSN）。
+func (c MySQLConfig) DSN() (string, error) {
 	port := c.Port
 	if port == 0 {
 		port = 3306
 	}
-	// timeout 参数：各字段未配则用驱动默认（不写进 DSN）。
-	var params []string
-	if c.Pool.DialTimeout != "" {
-		params = append(params, "timeout="+c.Pool.DialTimeout)
+	dialTimeout, err := parseOptionalDuration(c.Pool.DialTimeout, "mysql.pool.dialTimeout")
+	if err != nil {
+		return "", err
 	}
-	if c.Pool.ReadTimeout != "" {
-		params = append(params, "readTimeout="+c.Pool.ReadTimeout)
+	readTimeout, err := parseOptionalDuration(c.Pool.ReadTimeout, "mysql.pool.readTimeout")
+	if err != nil {
+		return "", err
 	}
-	if c.Pool.WriteTimeout != "" {
-		params = append(params, "writeTimeout="+c.Pool.WriteTimeout)
+	writeTimeout, err := parseOptionalDuration(c.Pool.WriteTimeout, "mysql.pool.writeTimeout")
+	if err != nil {
+		return "", err
 	}
-	extra := "parseTime=true&loc=Local"
-	if len(params) > 0 {
-		extra += "&" + strings.Join(params, "&")
-	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?%s",
-		c.Username, c.Password, c.Host, port, c.Database, extra)
+	dsn := mysqldriver.NewConfig()
+	dsn.User = c.Username
+	dsn.Passwd = c.Password
+	dsn.Net = "tcp"
+	dsn.Addr = net.JoinHostPort(c.Host, strconv.Itoa(port))
+	dsn.DBName = c.Database
+	dsn.ParseTime = true
+	dsn.Loc = time.Local
+	dsn.Timeout = dialTimeout
+	dsn.ReadTimeout = readTimeout
+	dsn.WriteTimeout = writeTimeout
+	return dsn.FormatDSN(), nil
+}
+
+// ConnMaxLifetime 解析连接最大存活时间；留空返回 0，表示不设上限。
+func (c MySQLConfig) ConnMaxLifetime() (time.Duration, error) {
+	return parseOptionalDuration(c.Pool.ConnMaxLifetime, "mysql.pool.connMaxLifetime")
+}
+
+// parseOptionalDuration 解析可选的连接池时长：留空返回 0 交给驱动自带默认，写错则报错。
+// 这里用 ParseDuration 而非 ParsePositiveDuration——0 在 MySQL 驱动里是「不限制」的
+// 合法显式值（如 connMaxLifetime = "0"），不能当非法值拒掉。
+func parseOptionalDuration(raw, field string) (time.Duration, error) {
+	return config.ParseDuration(raw, 0, field)
 }
 
 // RedisEnabled 返回服务器是否配置了 Redis（host 非空）。
@@ -150,10 +175,10 @@ func LoadConfig(path string) (*Config, error) {
 // validateConfig 校验配置合法性和联动约束。
 func validateConfig(cfg *Config) error {
 	if cfg.Server.Port <= 0 {
-		return errors.New("server.port is required and must be > 0")
+		return errors.New("server.port 必须配置且大于 0")
 	}
 	if cfg.ControlPlane.Port <= 0 {
-		return errors.New("controlPlane.port is required and must be > 0")
+		return errors.New("controlPlane.port 必须配置且大于 0")
 	}
 	if cfg.Server.ListenHost == "" {
 		return errors.New("server.listenHost 未配置")
@@ -163,28 +188,28 @@ func validateConfig(cfg *Config) error {
 	}
 	heartbeat, err := time.ParseDuration(cfg.ControlPlane.HeartbeatInterval)
 	if err != nil {
-		return fmt.Errorf("invalid controlPlane.heartbeatInterval: %w", err)
+		return fmt.Errorf("controlPlane.heartbeatInterval 不是合法时长: %w", err)
 	}
 	if heartbeat <= 0 {
-		return errors.New("controlPlane.heartbeatInterval must be > 0")
+		return errors.New("controlPlane.heartbeatInterval 必须大于 0")
 	}
 	unhealthy, err := time.ParseDuration(cfg.ControlPlane.UnhealthyAfter)
 	if err != nil {
-		return fmt.Errorf("invalid controlPlane.unhealthyAfter: %w", err)
+		return fmt.Errorf("controlPlane.unhealthyAfter 不是合法时长: %w", err)
 	}
 	if unhealthy <= heartbeat {
 		return errors.New("controlPlane.unhealthyAfter 必须大于 controlPlane.heartbeatInterval")
 	}
 	lease, err := time.ParseDuration(cfg.ControlPlane.LeaseDuration)
 	if err != nil {
-		return fmt.Errorf("invalid controlPlane.leaseDuration: %w", err)
+		return fmt.Errorf("controlPlane.leaseDuration 不是合法时长: %w", err)
 	}
 	if lease <= heartbeat {
 		return errors.New("controlPlane.leaseDuration 必须大于 controlPlane.heartbeatInterval")
 	}
 	offline, err := time.ParseDuration(cfg.ControlPlane.OfflineAfter)
 	if err != nil {
-		return fmt.Errorf("invalid controlPlane.offlineAfter: %w", err)
+		return fmt.Errorf("controlPlane.offlineAfter 不是合法时长: %w", err)
 	}
 	if offline <= unhealthy {
 		return errors.New("controlPlane.offlineAfter 必须大于 controlPlane.unhealthyAfter")
@@ -194,13 +219,19 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.RedisEnabled() {
 		if _, err := cfg.Redis.Resolve(); err != nil {
-			return fmt.Errorf("invalid redis config: %w", err)
+			return fmt.Errorf("redis 配置无效: %w", err)
 		}
 	}
-	// MySQL 连通性校验推迟到装配阶段（NewServer 里 openDB + ping）。
+	// 连接池的时长参数在加载期一并校验：写错的值必须现在报错，
+	// 不能等到装配阶段再静默退化成驱动默认。
+	if cfg.MySQLEnabled() {
+		if _, err := cfg.MySQL.DSN(); err != nil {
+			return err
+		}
+		if _, err := cfg.MySQL.ConnMaxLifetime(); err != nil {
+			return err
+		}
+	}
+	// MySQL 连通性校验推迟到装配阶段（NewServer 里 mysql.Open + ping）。
 	return nil
 }
-
-// 用于测试中直接用 JSON 构造配置的场景（历史归档 JSON 序列化等仍用 sonic）。
-// 生产加载走 LoadConfig（TOML）。
-var _ = json.Unmarshal

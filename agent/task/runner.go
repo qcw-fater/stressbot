@@ -87,7 +87,7 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 				stresslog.SetLogLevel(prev)
 				stresslog.Info("[TASK] 已恢复日志等级",
 					zap.String("taskID", taskID),
-					zap.String("level", prev.String()))
+					zap.String("restoredTo", prev.String()))
 			}()
 		}
 	}
@@ -137,10 +137,23 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 	r.collector.Reset()
 	r.collector.SetApdexT(r.assignment.ApdexT)
 
-	// 7. 解析超时参数
-	hbInterval := config.ParseDurationDefault(r.assignment.HeartbeatInterval, 5*time.Second, "heartbeatInterval")
-	tcpTimeout := config.ParseDurationDefault(r.assignment.TCPTimeout, 60*time.Second, "tcpTimeout")
-	httpTimeout := config.ParseDurationDefault(r.assignment.HTTPTimeout, 10*time.Second, "httpTimeout")
+	// 7. 解析超时参数：任务下发的时长写错就让这次任务失败，
+	//    不能退化成默认值后跑出一份「超时窗口不是配置那个」的压测结果。
+	hbInterval, err := config.ParsePositiveDuration(r.assignment.HeartbeatInterval, 5*time.Second, "heartbeatInterval")
+	if err != nil {
+		stresslog.Error("[TASK] 解析心跳间隔失败", zap.String("taskID", taskID), zap.Error(err))
+		return runFailed(err.Error())
+	}
+	tcpTimeout, err := config.ParsePositiveDuration(r.assignment.TCPTimeout, 60*time.Second, "tcpTimeout")
+	if err != nil {
+		stresslog.Error("[TASK] 解析 TCP 超时失败", zap.String("taskID", taskID), zap.Error(err))
+		return runFailed(err.Error())
+	}
+	httpTimeout, err := config.ParsePositiveDuration(r.assignment.HTTPTimeout, 10*time.Second, "httpTimeout")
+	if err != nil {
+		stresslog.Error("[TASK] 解析 HTTP 超时失败", zap.String("taskID", taskID), zap.Error(err))
+		return runFailed(err.Error())
+	}
 
 	// 8. 启动 gnet 网络引擎
 	// Dialer 元信息源：resolver 任一 Go SchemaAdapter（HeaderSize 全局一致，T1.6 同源）。

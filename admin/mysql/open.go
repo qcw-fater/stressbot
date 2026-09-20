@@ -6,18 +6,20 @@ import (
 	"database/sql"
 	"time"
 
-	// Register the MySQL database/sql driver used by Open.
+	// 注册 Open 使用的 MySQL database/sql 驱动。
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// PoolConfig contains the database/sql pool limits used by Admin.
+// PoolConfig 是 Admin 使用的 database/sql 连接池上限。
+// ConnMaxLifetime 取已解析的时长：配置字符串的合法性由调用方在加载期校验，
+// 这里再解析一次就只能吞掉错误或重复报错。
 type PoolConfig struct {
 	MaxOpenConns    int
 	MaxIdleConns    int
-	ConnMaxLifetime string
+	ConnMaxLifetime time.Duration
 }
 
-// Open creates and verifies the Admin MySQL connection pool.
+// Open 创建并验证 Admin 的 MySQL 连接池。
 func Open(dsn string, pool PoolConfig) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -29,8 +31,8 @@ func Open(dsn string, pool PoolConfig) (*sql.DB, error) {
 	if pool.MaxIdleConns > 0 {
 		db.SetMaxIdleConns(pool.MaxIdleConns)
 	}
-	if lifetime, err := time.ParseDuration(pool.ConnMaxLifetime); err == nil && lifetime > 0 {
-		db.SetConnMaxLifetime(lifetime)
+	if pool.ConnMaxLifetime > 0 {
+		db.SetConnMaxLifetime(pool.ConnMaxLifetime)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
