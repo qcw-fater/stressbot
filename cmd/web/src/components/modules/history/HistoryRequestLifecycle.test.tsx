@@ -30,7 +30,7 @@ vi.mock('@/services', () => ({
 }));
 
 vi.mock('./report/useReportCapture', () => ({
-  useReportCapture: () => vi.fn(),
+  useReportCapture: () => ({ generateReport: vi.fn(), generating: false }),
 }));
 
 const pending = () => new Promise<never>(() => {});

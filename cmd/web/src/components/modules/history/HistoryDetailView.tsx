@@ -75,7 +75,7 @@ export function HistoryDetailView({
   const [tagInput, setTagInput] = useState('');
   const [draggingTagIndex, setDraggingTagIndex] = useState<number | null>(null);
   const [dragOverTagIndex, setDragOverTagIndex] = useState<number | null>(null);
-  const generateReport = useReportCapture(detail, timeseries);
+  const { generateReport, generating: reportGenerating } = useReportCapture(detail, timeseries);
   const [configInfo, setConfigInfo] = useState<HistoryConfigSummary | null>(null);
   const [stagesExpanded, setStagesExpanded] = useState(false);
 
@@ -303,7 +303,8 @@ export function HistoryDetailView({
               type="primary"
               ghost
               icon={<FileTextOutlined />}
-              onClick={generateReport}
+              loading={reportGenerating}
+              onClick={() => void generateReport()}
             >
               报告
             </Button>

@@ -109,11 +109,15 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
   for (const [key, group] of grouping) {
     if (group.length <= 1) continue;
     const distinct = new Set(group.map((g) => g.cb ?? '__null__'));
-    if (distinct.size <= 1 && group.length === 1) continue;
-    if (distinct.size > 1) {
-      const [server, rkey] = key.split('|', 2);
-      duplicateRegisters.push({ server, routeKey: rkey, refs: group });
-    }
+    if (distinct.size <= 1) continue;
+    // 只按第一个 '|' 切：伪 routeKey 是 JSON，字符串值里可能自带 '|'，
+    // 按分隔符全切会把展示用的 routeKey 截断半截
+    const sep = key.indexOf('|');
+    duplicateRegisters.push({
+      server: key.slice(0, sep),
+      routeKey: key.slice(sep + 1),
+      refs: group,
+    });
   }
 
   return {

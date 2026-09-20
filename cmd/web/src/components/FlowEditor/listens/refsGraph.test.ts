@@ -84,6 +84,29 @@ describe('refsGraph', () => {
     expect(g.danglingRefs.length).toBe(0);
   });
 
+  it('route 值自带 | 时 duplicateRegisters 的 routeKey 不被截断', () => {
+    const flow: TaskFlow = {
+      ...baseFlow,
+      nodes: {
+        main: { type: 'sequence', next: ['n1', 'n2'] },
+        n1: {
+          type: 'action',
+          action: 'A1',
+          listenRefs: [{ route: { cmd: 'a|b' }, server: 'tcp:logic', listen: 'cbA' }],
+        },
+        n2: {
+          type: 'action',
+          action: 'A2',
+          listenRefs: [{ route: { cmd: 'a|b' }, server: 'tcp:logic', listen: 'cbB' }],
+        },
+      },
+    };
+    const g = buildRefsGraph(flow);
+    expect(g.duplicateRegisters.length).toBe(1);
+    expect(g.duplicateRegisters[0].server).toBe('tcp:logic');
+    expect(g.duplicateRegisters[0].routeKey).toBe(routeKey({ cmd: 'a|b' }));
+  });
+
   it('routeKey 在键序不同时仍稳定', () => {
     expect(routeKey({ cmd: 1, act: 2 })).toBe(routeKey({ act: 2, cmd: 1 }));
     expect(routeKey({ cmd: 1, act: 2 })).not.toBe(routeKey({ cmd: 1, act: 3 }));
