@@ -267,13 +267,18 @@ function FailureSummaryTable({ actions }: FailureSummaryTableProps) {
             <th>动作</th>
             <th className="num">失败</th>
             <th className="num">超时</th>
-            <th className="num">失败率</th>
+            <th className="num">异常率</th>
           </tr>
         </thead>
         <tbody>
           {problemActions.slice(0, 10).map((a) => {
+            // 失败与超时一起算：这张表本来就把只超时不失败的动作也列了进来，
+            // 只除 failureCount 会让那一行显示 0.0%，在一张专门挑问题的表里读成"没事"。
+            // 取消不计——那是主动停止机器人的结果，不是服务端异常。
             const rate =
-              a.sampleCount > 0 ? ((a.failureCount / a.sampleCount) * 100).toFixed(1) : '0';
+              a.sampleCount > 0
+                ? (((a.failureCount + a.timeoutCount) / a.sampleCount) * 100).toFixed(1)
+                : '0';
             return (
               <tr key={a.name}>
                 <td>
@@ -504,14 +509,14 @@ function DetailTableSection({ actions, timingDetail }: DetailTableSectionProps) 
                 <td className="num">
                   {hasPrimary && primary.hist.maxMs != null ? fmtMs(primary.hist.maxMs) : '—'}
                 </td>
-                <td className="num">{fmtMs(a.nonRTTAvgMs ?? 0)}</td>
-                <td className="num">{fmtMs(a.sendAvgMs ?? 0)}</td>
-                {showCodec && <td className="num">{fmtMs(a.encodeAvgMs ?? 0)}</td>}
-                {showCodec && <td className="num">{fmtMs(a.decodeAvgMs ?? 0)}</td>}
-                {showFull && <td className="num">{fmtMs(a.buildAvgMs ?? 0)}</td>}
-                {showFull && <td className="num">{fmtMs(a.decodeWaitAvgMs ?? 0)}</td>}
-                {showFull && <td className="num">{fmtMs(a.dispatchToActionWaitAvgMs ?? 0)}</td>}
-                {showFull && <td className="num">{fmtMs(a.parseStoreAvgMs ?? 0)}</td>}
+                <td className="num">{fmtMs(a.nonRTTAvgMs)}</td>
+                <td className="num">{fmtMs(a.sendAvgMs)}</td>
+                {showCodec && <td className="num">{fmtMs(a.encodeAvgMs)}</td>}
+                {showCodec && <td className="num">{fmtMs(a.decodeAvgMs)}</td>}
+                {showFull && <td className="num">{fmtMs(a.buildAvgMs)}</td>}
+                {showFull && <td className="num">{fmtMs(a.decodeWaitAvgMs)}</td>}
+                {showFull && <td className="num">{fmtMs(a.dispatchToActionWaitAvgMs)}</td>}
+                {showFull && <td className="num">{fmtMs(a.parseStoreAvgMs)}</td>}
                 <td className="num">{a.avgQps.toFixed(1)}</td>
               </tr>
             );

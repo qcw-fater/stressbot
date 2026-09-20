@@ -325,13 +325,17 @@ export function buildLatencyOption(actions: HistoryActionMetric[]): EChartsOptio
 export function buildSuccessDonutOption(actions: HistoryActionMetric[]): EChartsOption {
   let success = 0,
     failure = 0,
-    timeout = 0;
+    timeout = 0,
+    canceled = 0;
   for (const a of actions) {
     success += a.successCount;
     failure += a.failureCount;
     timeout += a.timeoutCount;
+    canceled += a.canceledCount ?? 0;
   }
-  const total = success + failure + timeout;
+  // 取消也是样本的一种去向。漏掉它会让圈心的"总样本"小于动作表里的样本数，
+  // 且停止一批机器人产生的取消会被无声吞掉（monitor 把取消单列正是为了区分它与失败）。
+  const total = success + failure + timeout + canceled;
 
   return {
     animation: false,
@@ -348,6 +352,7 @@ export function buildSuccessDonutOption(actions: HistoryActionMetric[]): ECharts
           { value: success, name: '成功', itemStyle: { color: COLORS.green } },
           { value: failure, name: '失败', itemStyle: { color: COLORS.red } },
           { value: timeout, name: '超时', itemStyle: { color: COLORS.orange } },
+          { value: canceled, name: '取消', itemStyle: { color: COLORS.gray } },
         ].filter((d) => d.value > 0),
       },
     ],

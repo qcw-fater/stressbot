@@ -6,8 +6,9 @@
  *     的场景（如监控大盘里突出的吞吐 Statistic）；
  *   - 字节数（fmtBytesPlain）：始终按 B 计，**不带后缀**，单位由表头 `(B)` 标注。
  *     用于表格列：单位统一便于排序对比，避免 16B / 1.2KB / 2MB 混排导致视觉错位；
- *   - 毫秒（fmtMs）：< 1 用 2 位小数，< 10 用 1 位小数，否则整数；零或非有限值显示为 "—"，
- *     避免在表格里写 "0.00" 这种"看似有数据"的占位；
+ *   - 毫秒（fmtMs）：< 1 用 2 位小数，< 10 用 1 位小数，否则整数；
+ *     **缺数据靠 null/undefined 表达**（显示 "—"），0 是如实测到的零而不是占位。
+ *     调用方不要写 `fmtMs(v ?? 0)` 把"没有样本"伪装成 0 —— 直接把 v 传进来。
  *   - tabular-nums：数字等宽，列对齐时数字看起来不会跳动。
  */
 
@@ -21,7 +22,7 @@ export function fmtBytes(n: number): string {
 
 /**
  * 字节数表格列格式（单位由表头标注，单元格只显示数字）：
- *   - 0 / 非有限值 → "—"（与 fmtMs 一致，区分"真零"与"无数据"占位）
+ *   - 0 / 非有限值 → "—"。这一列的 0 只可能来自"没有样本"：真发生过的收发帧不可能是 0 字节
  *   - 其它 → 千分位整数（如 16 → "16"、10240 → "10,240"）
  */
 export function fmtBytesPlain(n: number): string {
@@ -29,9 +30,9 @@ export function fmtBytesPlain(n: number): string {
   return Math.round(n).toLocaleString('en-US');
 }
 
-/** 毫秒紧凑格式（单位由表头标注，单元格只显示数字）。 */
-export function fmtMs(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '—';
+/** 毫秒紧凑格式（单位由表头标注，单元格只显示数字）。缺数据传 null/undefined。 */
+export function fmtMs(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n < 0) return '—';
   if (n === 0) return '0';
   if (n < 1) return n.toFixed(2);
   if (n < 10) return n.toFixed(1);

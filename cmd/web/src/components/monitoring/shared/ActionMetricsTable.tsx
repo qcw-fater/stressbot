@@ -290,7 +290,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
       for (const field of timingBreakdownFields) {
         csvCols.push({
           header: TIMING_FIELD_META[field].title,
-          getValue: (r) => fmtMs(r[field] ?? 0),
+          getValue: (r) => fmtMs(r[field]),
         });
       }
     }
@@ -518,7 +518,8 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
           key: field,
           width: meta.width,
           sorter: (a, b) => (a[field] ?? 0) - (b[field] ?? 0),
-          render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v ?? 0)}</span>,
+          // 不补 0：这几列没有值代表这一段没采到样本，写 0 会和旁边延迟列的 "—" 打架
+          render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span>,
         });
       }
     }

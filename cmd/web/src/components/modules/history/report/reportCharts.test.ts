@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import type { BarSeriesOption } from 'echarts';
 import type { HistoryActionMetric } from '@/types/api';
 import { APDEX_THRESHOLDS } from '@/services/metricsBinding';
-import { buildApdexOption, buildRankingOption } from './reportCharts';
+import { buildApdexOption, buildRankingOption, buildSuccessDonutOption } from './reportCharts';
 
 const emptyHist = {
   count: 0,
@@ -102,6 +102,43 @@ describe('buildApdexOption', () => {
 
     const option = buildApdexOption([listenOnly, action()]);
     expect(firstSeries(option).data).toHaveLength(1);
+  });
+});
+
+describe('buildSuccessDonutOption', () => {
+  it('取消计入构成，圈心总数与样本数对得上', () => {
+    const option = buildSuccessDonutOption([
+      action({
+        sampleCount: 10,
+        successCount: 6,
+        failureCount: 1,
+        timeoutCount: 1,
+        canceledCount: 2,
+      }),
+    ]);
+    const data = (option.series as Array<{ data: Array<{ name: string; value: number }> }>)[0].data;
+    expect(data).toMatchObject([
+      { name: '成功', value: 6 },
+      { name: '失败', value: 1 },
+      { name: '超时', value: 1 },
+      { name: '取消', value: 2 },
+    ]);
+    const centerText = (option.graphic as Array<{ style: { text: string } }>)[0].style.text;
+    expect(centerText).toBe('10');
+  });
+
+  it('零值项不进图例', () => {
+    const option = buildSuccessDonutOption([
+      action({
+        sampleCount: 5,
+        successCount: 5,
+        failureCount: 0,
+        timeoutCount: 0,
+        canceledCount: 0,
+      }),
+    ]);
+    const data = (option.series as Array<{ data: Array<{ name: string }> }>)[0].data;
+    expect(data.map((d) => d.name)).toEqual(['成功']);
   });
 });
 

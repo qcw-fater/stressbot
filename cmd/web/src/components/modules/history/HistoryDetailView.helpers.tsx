@@ -9,7 +9,11 @@ import type { ReactNode } from 'react';
 import type { EChartsOption } from 'echarts';
 import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
 import { resolveKind } from '@/components/monitoring/shared/actionKind';
-import { fmtMs } from '@/components/monitoring/shared/formats';
+import {
+  fmtMs,
+  fmtPercent as fmtPercentShared,
+  fmtScore as fmtScoreShared,
+} from '@/components/monitoring/shared/formats';
 import type {
   CleanupStatus,
   HistoryActionMetric,
@@ -31,7 +35,7 @@ export interface DerivedSummary {
   totalTimeouts: number;
   totalCanceled: number;
   totalErrors: number;
-  successRate: number;
+  successRate: number | null;
   rttApdex: number | null;
   avgQps: number;
   peakQps: number;
@@ -64,6 +68,22 @@ export function MetricTile({ label, value, sub, tone = 'blue' }: MetricTileProps
       {sub && <div className="hp-kpi-tile__sub">{sub}</div>}
     </div>
   );
+}
+
+/**
+ * 无数据时给中性色。
+ *
+ * 这两个指标的值都可能是 null（没有样本 / 没有往返类动作），显示成 "—"；
+ * 若染色时把 null 当 0，格子会变成刺眼的红色，和"不适用"这个文案对不上。
+ */
+export function successTone(rate: number | null): MetricTileProps['tone'] {
+  if (rate == null) return 'blue';
+  return rate >= 0.95 ? 'good' : rate >= 0.8 ? 'warn' : 'bad';
+}
+
+export function apdexTone(score: number | null): MetricTileProps['tone'] {
+  if (score == null) return 'blue';
+  return score >= 0.9 ? 'good' : score >= 0.75 ? 'warn' : 'bad';
 }
 
 interface ReportSectionProps {
@@ -429,7 +449,9 @@ export function deriveSummary(detail: HistoryDetail, points: HistoryTrendPoint[]
     totalTimeouts,
     totalCanceled,
     totalErrors,
-    successRate: totalSamples > 0 ? metrics.successRate : 0,
+    // 没有样本时给 null 而不是 0（与下一行的 rttApdex 同口径）：
+    // 0 会被显示成 "0.00%"，读起来像全军覆没，而实际是这一场根本没跑起来
+    successRate: totalSamples > 0 ? metrics.successRate : null,
     rttApdex: metrics.rttApdexSampleCount > 0 ? metrics.rttApdex : null,
     avgQps: metrics.avgQps,
     peakQps: max(points, (p) => p.totalQps),
@@ -582,12 +604,14 @@ export function fmtKBpsPeak(points: HistoryTrendPoint[], key: 'sendKBps' | 'recv
   return `${peak.toFixed(1)} KB/s`;
 }
 
+// 报告正文比监控面板多留一位小数（Apdex 三位、成功率两位），其余语义与 shared/formats
+// 完全一致，所以这里只是定死位数的薄封装，不再自己实现一遍格式化。
 export function fmtScore(v: number | null | undefined) {
-  return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(3) : '—';
+  return fmtScoreShared(v, 3);
 }
 
-export function fmtPercent(v: number) {
-  return `${(v * 100).toFixed(2)}%`;
+export function fmtPercent(v: number | null | undefined) {
+  return fmtPercentShared(v, 2);
 }
 
 export function sum<T>(items: T[], pick: (item: T) => number) {

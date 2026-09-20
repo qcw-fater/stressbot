@@ -22,6 +22,7 @@ import { ApiError, historyApi, isAbortError, showApiError } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
+import { fmtPercent } from '@/components/monitoring/shared/formats';
 import type { HistoryRecord } from '@/types/api';
 import { HistoryDetailView } from './HistoryDetailView';
 import { HistoryCompareView } from './HistoryCompareView';
@@ -815,10 +816,10 @@ function StageGroup({
                   {hasMetrics ? (
                     <>
                       <span>
-                        RTT <b>{fmtMs(c.avgRttMs)}</b>
+                        RTT <b>{fmtRttText(c.avgRttMs)}</b>
                       </span>
                       <span>
-                        P95 <b>{fmtMs(c.p95RttMs)}</b>
+                        P95 <b>{fmtRttText(c.p95RttMs)}</b>
                       </span>
                     </>
                   ) : null}
@@ -882,12 +883,6 @@ function fmtMetricCount(n: number): string {
   return n.toLocaleString();
 }
 
-/** 格式化成功率 0~1 → "99.2%" */
-function fmtPercent(v?: number): string {
-  if (v == null) return '—';
-  return `${(v * 100).toFixed(1)}%`;
-}
-
 /** 成功率着色类名 */
 function fmtRateClass(v?: number): string {
   if (v == null) return '';
@@ -896,8 +891,13 @@ function fmtRateClass(v?: number): string {
   return 'hp-sc-bad';
 }
 
-/** 格式化延迟毫秒 */
-function fmtMs(v?: number): string {
+/**
+ * 行内延迟文本（自带 ms 后缀），不同于表格用的 shared/formats.fmtMs（单位在表头、0 如实显示）。
+ *
+ * 这里把 0 也显示成 "—"：列表卡片上的 RTT 取自归档汇总，没有 RTT 样本时字段就是 0，
+ * 显示 "0ms" 会被读成「快得没有延迟」。
+ */
+function fmtRttText(v?: number): string {
   if (v == null || v === 0) return '—';
   if (v < 1) return '<1ms';
   if (v < 100) return `${v.toFixed(1)}ms`;

@@ -100,14 +100,15 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
   const primary = selectPrimaryMetric(m);
   const hist = primary.histogram;
   const primaryP99 = hist?.p99Ms;
+  // 只看主指标自己齐不齐：早先这里还多要求 totalDuration.p99Ms 非空，
+  // 与「按 kind 选主指标」自相矛盾——RTT 样本齐全但总耗时直方图为空时会把徽章整个藏掉。
   const showP99 =
     primary.sampleCount > 0 &&
     hist != null &&
     hist.avgMs != null &&
     hist.p95Ms != null &&
     primaryP99 != null &&
-    hist.maxMs != null &&
-    m.totalDuration.p99Ms != null;
+    hist.maxMs != null;
 
   // Apdex 只对往返类打分；其余类别的徽章位置改用成功计数（样式统一，文本诚实）。
   const isNetworked = m.kind === 'networked' && m.rttApdexSampleCount > 0;

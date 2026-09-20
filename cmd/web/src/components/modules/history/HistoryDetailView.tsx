@@ -38,6 +38,8 @@ import {
   fmtKBpsPeak,
   fmtScore,
   fmtPercent,
+  successTone,
+  apdexTone,
   eventLabel,
   eventColor,
   resultLabel,
@@ -338,19 +340,13 @@ export function HistoryDetailView({
           label="整体成功率"
           value={fmtPercent(summary.successRate)}
           sub={`${summary.totalSuccess.toLocaleString()} 成功 / ${summary.totalSamples.toLocaleString()} 样本`}
-          tone={summary.successRate >= 0.95 ? 'good' : summary.successRate >= 0.8 ? 'warn' : 'bad'}
+          tone={successTone(summary.successRate)}
         />
         <MetricTile
           label="RTT Apdex"
           value={fmtScore(summary.rttApdex)}
           sub={`阈值 T=${finalSnap.apdexT}ms`}
-          tone={
-            (summary.rttApdex ?? 0) >= 0.9
-              ? 'good'
-              : (summary.rttApdex ?? 0) >= 0.75
-                ? 'warn'
-                : 'bad'
-          }
+          tone={apdexTone(summary.rttApdex)}
         />
         <MetricTile
           label="峰值 QPS"
