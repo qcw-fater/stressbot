@@ -304,13 +304,31 @@ func bindConn(gconn gnet.Conn, conn *Connection) {
 		if onWritten == nil {
 			return gconn.AsyncWrite(data, nil)
 		}
-		return gconn.AsyncWrite(data, func(gnet.Conn, error) error {
-			onWritten(time.Now())
-			return nil
-		})
+		return gconn.AsyncWrite(data, writeDoneCallback(conn, onWritten))
 	}
 	conn.closeFunc = func() error {
 		return gconn.Close()
+	}
+}
+
+// writeDoneCallback 构造 gnet 写完成回调：只有写成功才登记写完成时刻。
+//
+// gnet 在写失败时也会带 err 调用本回调。此时数据并没有交给内核，登记时间戳会让一次
+// 失败的发送凭空产出一个 RTT 起点，污染 WireRTT 与 Apdex；因此失败只记日志、不登记，
+// 计时起点回退到入队时刻（writeStampFallbacks 会因此上量，正是需要被看见的信号）。
+//
+// 返回 nil 不改变 gnet 对写失败的既有处理（连接错误由 OnClose 归因）。
+func writeDoneCallback(conn *Connection, onWritten WriteDoneFunc) func(gnet.Conn, error) error {
+	return func(_ gnet.Conn, err error) error {
+		if err != nil {
+			stresslog.Warn("[GNET] 异步写失败，不登记写完成时刻",
+				zap.String("service", conn.ServiceName()),
+				zap.String("robot", conn.robotName),
+				zap.Error(err))
+			return nil
+		}
+		onWritten(time.Now())
+		return nil
 	}
 }
 
