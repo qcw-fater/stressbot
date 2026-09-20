@@ -78,6 +78,11 @@ func (svc *grpcControlService) Session(stream controlpb.AgentControlService_Sess
 	if err := requireAgentID(hello.AgentId); err != nil {
 		return logControlHandshakeFailure(remoteAddress, hello.AgentId, status.Error(codes.InvalidArgument, err.Error()))
 	}
+	if remoteAddress == "" {
+		stresslog.Warn("[ADMIN] 无法获取节点控制连接地址，节点地址留空",
+			zap.String("agentID", hello.AgentId),
+			zap.String("agentName", hello.Name))
+	}
 	session, err := svc.deps.Sessions.Attach(stream.Context(), hello.AgentId)
 	if err != nil {
 		stresslog.Debug("[ADMIN] gRPC 控制会话握手未完成",
@@ -111,7 +116,7 @@ func (svc *grpcControlService) Session(stream controlpb.AgentControlService_Sess
 		}
 	}()
 	if err := svc.deps.Sessions.WithCurrent(session.AgentID(), session.Generation(), func() error {
-		if err := svc.deps.Agents.Register(agentNodeFromHello(hello)); err != nil {
+		if err := svc.deps.Agents.Register(agentNodeFromHello(hello, remoteAddress)); err != nil {
 			return err
 		}
 		if hello.CurrentTaskId != "" && !svc.deps.OwnsActiveTask(hello.AgentId, hello.CurrentTaskId) {
@@ -398,8 +403,11 @@ func controlCommandAckStatus(statusValue controlpb.CommandAckStatus) string {
 	}
 }
 
-func agentNodeFromHello(hello *controlpb.Hello) *agent.Node {
-	return &agent.Node{ID: hello.AgentId, Name: hello.Name, AppVersion: hello.AppVersion, MaxBots: int(hello.MaxBots),
+// agentNodeFromHello 由 Hello 帧构造注册表节点。remoteAddress 是本次控制会话的
+// gRPC 对端地址：每次 Hello 都重新注册整个节点，因此重连后端口变化会自动刷新；
+// 取不到对端时留空，不得回填占位值。
+func agentNodeFromHello(hello *controlpb.Hello, remoteAddress string) *agent.Node {
+	return &agent.Node{ID: hello.AgentId, Name: hello.Name, Address: remoteAddress, AppVersion: hello.AppVersion, MaxBots: int(hello.MaxBots),
 		StressInterval: time.Duration(hello.MetricsIntervalNanos).String(), SystemInterval: time.Duration(hello.MetricsIntervalNanos).String(),
 		StaticInfo: staticInfoFromProto(hello.StaticInfo), Status: runtimeStatusAdmin(hello.Status), LastHeartbeatAt: time.Now(),
 		CurrentTaskID: hello.CurrentTaskId, CurrentBots: int(hello.CurrentBots)}

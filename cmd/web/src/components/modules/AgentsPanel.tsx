@@ -54,6 +54,19 @@ const STATUS_BADGE_COLOR: Record<AgentStatus, string> = {
   offline: 'var(--text-tertiary)',
 };
 
+/**
+ * 端点展示文本：地址由服务器按控制连接对端填充，取不到对端时为空串，
+ * 不含端口时（如非 TCP 传输）也只显示主机名，避免渲染出 "hostname:" 这种半截文本。
+ */
+export function endpointLabel(hostname: string, address: string): string {
+  const host = hostname.trim();
+  const addr = address.trim();
+  const colon = addr.lastIndexOf(':');
+  const port = colon >= 0 ? addr.slice(colon + 1) : '';
+  if (!host) return port || '—';
+  return port ? `${host}:${port}` : host;
+}
+
 function gaugeColor(v?: number | null): string {
   if (v == null) return 'var(--color-blue)';
   if (v > 80) return 'var(--color-error)';
@@ -314,7 +327,7 @@ function AgentMetricCard({ agent, stressMetrics, onShutdown, onDelete }: AgentMe
         <div className="agent-card__header-right">
           <Tooltip title={staticTooltip}>
             <span className="agent-card__address">
-              {agent.staticInfo.hostname}:{agent.address.split(':').pop()}
+              {endpointLabel(agent.staticInfo.hostname, agent.address)}
             </span>
           </Tooltip>
         </div>

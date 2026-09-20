@@ -19,6 +19,9 @@ const (
 )
 
 // Node is the registry's current view of a connected Agent.
+//
+// Address 是节点控制会话的 gRPC 对端地址（客户端临时端口），随每次 Hello 重新注册
+// 刷新；对端不可得时为空串，展示侧需容忍空值。
 type Node struct {
 	ID             string     `json:"agentId"`
 	Name           string     `json:"name"`

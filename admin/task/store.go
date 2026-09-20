@@ -52,7 +52,7 @@ func NewRepository[T any, S comparable](dataDir string, adapter Adapter[T, S]) (
 	store := &Repository[T, S]{tasks: make(map[string]T), dataDir: dataDir, adapter: adapter}
 	items, err := adapter.Load(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("load tasks: %w", err)
+		return nil, fmt.Errorf("加载任务失败: %w", err)
 	}
 	now := time.Now()
 	for _, item := range items {
@@ -154,7 +154,8 @@ func (s *Repository[T, S]) Delete(id string) error {
 }
 
 // Transition 以 CAS 语义执行状态转换：校验当前状态等于 from 且转换边合法（validTransition），
-// 成功后按目标状态补记 startedAt/stoppedAt、落盘；进入终态时清除 activeID 并异步触发 onTerminal。
+// 成功后按目标状态补记 startedAt/stoppedAt、落盘；进入活跃态时登记 activeID，进入终态时
+// 清除 activeID 并异步触发 onTerminal。activeID 与任务状态始终在同一把锁内一起变更。
 func (s *Repository[T, S]) Transition(id string, from, to S) (T, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -184,7 +185,22 @@ func (s *Repository[T, S]) Transition(id string, from, to S) (T, error) {
 	if err := s.adapter.Save(s.dataDir, item); err != nil {
 		stresslog.Warn("[ADMIN] 保存任务文件失败", zap.String("id", id), zap.Error(err))
 	}
-	if !s.adapter.IsActive(to) {
+	// activeID 的登记与清除都收在这把锁里，与状态写入同一个临界区。
+	//
+	// 早先的做法是 Begin 在 Transition 返回后再补一句 s.activeID = id。中间那段窗口里任务
+	// 已经是 starting（活跃态）而 activeID 还是空串，后果有两个：轻的是 HasActive/ActiveTask
+	// 在这一瞬谎报「无活跃任务」；重的是若此刻另一路把它推到 failed，下面的清除分支因
+	// s.activeID != id 什么也没清，等 Begin 回来补登记，activeID 就永久指向一个已终结的
+	// 任务——后续所有启动被 Conflict 挡死，只能重启 Admin。
+	if s.adapter.IsActive(to) {
+		if s.activeID != "" && s.activeID != id {
+			// 走到这里说明单活跃任务约束在上游被绕过了（Begin 是唯一的准入口）。
+			// 以当前这次转换为准修复指向，同时把异常留证。
+			stresslog.Warn("[TASK] 进入活跃态时已存在其它活跃任务，单活跃约束被绕过",
+				zap.String("taskID", id), zap.String("previousActiveID", s.activeID))
+		}
+		s.activeID = id
+	} else {
 		if s.activeID == id {
 			s.activeID = ""
 		}
@@ -223,8 +239,13 @@ func (s *Repository[T, S]) HasActive() bool {
 	return s.activeID != ""
 }
 
-// Begin 启动入口：在 startMu 串行化下先检查单活跃任务约束（冲突时带活跃任务详情返回 Conflict），
-// 再执行 pending→starting 转换并登记 activeID；保证并发启动只有一个能成功。
+// Begin 启动入口：在 startMu 串行化下先检查单活跃任务约束（冲突时带活跃任务详情返回
+// Conflict），再执行 pending→starting 转换——activeID 由 Transition 在同一把 mu 锁内登记。
+//
+// 「检查」与「转换」之间放开了 mu，靠 startMu 保证期间不会有别的任务变成活跃态：
+// pending→starting 是唯一能凭空产生活跃任务的边，而它只能经由本方法、已被 startMu 串行化；
+// 其余进入活跃态的转换都发生在那个已经持有 activeID 的任务身上（此时上面的检查已返回
+// Conflict，走不到这里）。
 func (s *Repository[T, S]) Begin(id string, pending, starting S) (T, error) {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
@@ -240,15 +261,7 @@ func (s *Repository[T, S]) Begin(id string, pending, starting S) (T, error) {
 	}
 	s.mu.RUnlock()
 
-	item, err := s.Transition(id, pending, starting)
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	s.mu.Lock()
-	s.activeID = id
-	s.mu.Unlock()
-	return item, nil
+	return s.Transition(id, pending, starting)
 }
 
 func validTransition(from, to string) bool {
