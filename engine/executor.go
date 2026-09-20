@@ -32,7 +32,10 @@ type Executor struct {
 	flow           *flowdef.TaskFlow
 	handler        ActionHandler
 	defaultDelayMs int    // 解析自 flow.DefaultDelayMs，初始化后只读
-	caller         string // 调用方标识，用于日志追踪
+	// caller 是调用方标识（机器人账号），日志里以 robot 键输出——不能用 caller 做键，
+	// 那是 zap 内建的源码位置键（stresslog 的 CallerKey），同名会让一行 JSON 出现两个
+	// caller，解析器取后者，源码位置被静默吃掉。
+	caller string
 }
 
 // ActionHandler 动作执行委托接口。
@@ -87,15 +90,15 @@ func (e *Executor) Flow() *flowdef.TaskFlow {
 //     不打 warn 避免 500 robot 停止时 500 条警告刷屏掩盖真实问题
 //   - 其它错误 → warn，业务/工具异常需要排查
 func (e *Executor) Run(ctx context.Context) error {
-	stresslog.Debug("[ENGINE] 开始执行流程", zap.String("caller", e.caller))
+	stresslog.Debug("[ENGINE] 开始执行流程", zap.String("robot", e.caller))
 	err := e.executeNode(ctx, "main")
 	switch {
 	case err == nil:
-		stresslog.Debug("[ENGINE] 流程正常结束", zap.String("caller", e.caller))
+		stresslog.Debug("[ENGINE] 流程正常结束", zap.String("robot", e.caller))
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		stresslog.Debug("[ENGINE] 流程因取消退出", zap.String("caller", e.caller), zap.Error(err))
+		stresslog.Debug("[ENGINE] 流程因取消退出", zap.String("robot", e.caller), zap.Error(err))
 	default:
-		stresslog.Warn("[ENGINE] 流程异常退出", zap.String("caller", e.caller), zap.Error(err))
+		stresslog.Warn("[ENGINE] 流程异常退出", zap.String("robot", e.caller), zap.Error(err))
 	}
 	return err
 }
@@ -113,7 +116,7 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 		return fmt.Errorf("%w: %s (caller=%s)", ErrNodeNotFound, nodeID, e.caller)
 	}
 
-	stresslog.Debug("[ENGINE] 执行节点", zap.String("caller", e.caller), zap.String("node", nodeID), zap.String("type", node.Type))
+	stresslog.Debug("[ENGINE] 执行节点", zap.String("robot", e.caller), zap.String("node", nodeID), zap.String("type", node.Type))
 
 	switch node.Type {
 	case flowdef.NodeSequence:
@@ -206,7 +209,7 @@ func (e *Executor) executeLoop(ctx context.Context, node *flowdef.Node) error {
 		if node.Condition != "" {
 			if !e.evaluatePreparedCondition(node.Condition, node.PreparedCondition()) {
 				stresslog.Debug("[ENGINE] loop 前置条件不满足，退出循环",
-					zap.String("caller", e.caller), zap.Int("iteration", i))
+					zap.String("robot", e.caller), zap.Int("iteration", i))
 				break
 			}
 		}
@@ -244,9 +247,10 @@ func (e *Executor) executeLoop(ctx context.Context, node *flowdef.Node) error {
 }
 
 // executeAction 动作节点：执行指定 action。
+// node.action 为空但 listenRefs 非空是合法的「纯注册监听」节点，走 executeListenOnly。
 func (e *Executor) executeAction(ctx context.Context, node *flowdef.Node) error {
 	if node.Action == "" {
-		return nil
+		return e.executeListenOnly(ctx, node)
 	}
 
 	actionDef, ok := e.flow.Action(node.Action)
@@ -265,7 +269,7 @@ func (e *Executor) executeAction(ctx context.Context, node *flowdef.Node) error 
 		if cancelErr := normalizeActionCancel(err); cancelErr != nil {
 			if errors.Is(cancelErr, context.Canceled) && stresslog.DebugEnabled() {
 				stresslog.Debug("[ENGINE] 动作在停止阶段被取消",
-					zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
+					zap.String("robot", e.caller), zap.String("action", node.Action), zap.Error(err))
 			}
 			return cancelErr
 		}
@@ -274,14 +278,14 @@ func (e *Executor) executeAction(ctx context.Context, node *flowdef.Node) error 
 			return e.finishActionAccepted(ctx, node, actionDef, err)
 		}
 
-		e.logActionFailure("[ENGINE] 动作执行失败", node, actionDef, retriesUsed, maxRetries, err)
+		e.logActionFailure("[ENGINE] 动作执行失败", node, actionDef.Pattern, retriesUsed, maxRetries, err)
 		if err := e.executeOnErrorHandler(ctx, node); err != nil && !errors.Is(err, errSkip) {
 			return err
 		}
 
 		if retriesUsed < maxRetries {
 			retriesUsed++
-			e.logActionRetry(node, actionDef, retriesUsed, maxRetries, err)
+			e.logActionRetry(node, actionDef.Pattern, retriesUsed, maxRetries, err)
 			if err := e.retryDelay(ctx, node.OnError.Retry); err != nil {
 				return err
 			}
@@ -298,13 +302,32 @@ func (e *Executor) executeAction(ctx context.Context, node *flowdef.Node) error 
 	}
 }
 
+// executeListenOnly 只注册监听、不执行动作的 action 节点（node.action 为空）。
+// 注册成功后照常走节点延迟，让后续推送有 drain 窗口。
+func (e *Executor) executeListenOnly(ctx context.Context, node *flowdef.Node) error {
+	if len(node.ListenRefs) == 0 {
+		// 既不发包也不注册监听的 action 节点只会拖慢流程，是配置漏填的典型形态，必须可见。
+		stresslog.Warn("[ENGINE] action 节点既无 action 也无 listenRefs，节点空转",
+			zap.String("robot", e.caller))
+		return nil
+	}
+	if err := e.registerActionListens(ctx, node, ""); err != nil {
+		return err
+	}
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ENGINE] 纯监听节点注册完成",
+			zap.String("robot", e.caller), zap.Int("listens", len(node.ListenRefs)))
+	}
+	return e.nodeDelay(ctx, node)
+}
+
 func (e *Executor) finishActionSuccess(ctx context.Context, node *flowdef.Node, actionDef *flowdef.ActionDef) error {
-	if err := e.registerActionListens(ctx, node, actionDef); err != nil {
+	if err := e.registerActionListens(ctx, node, actionDef.Pattern); err != nil {
 		return err
 	}
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[ENGINE] 执行动作成功",
-			zap.String("caller", e.caller),
+			zap.String("robot", e.caller),
 			zap.String("action", node.Action),
 			zap.String("pattern", actionDef.Pattern),
 			zap.Int("listens", len(node.ListenRefs)))
@@ -319,14 +342,14 @@ func (e *Executor) finishActionAccepted(ctx context.Context, node *flowdef.Node,
 	extra := actionErrorLogFields(err)
 	fields := make([]zap.Field, 0, 5+len(extra))
 	fields = append(fields,
-		zap.String("caller", e.caller),
+		zap.String("robot", e.caller),
 		zap.String("action", node.Action),
 		zap.String("pattern", actionDef.Pattern),
 		zap.Int("ignoreCodeCount", len(node.OnError.IgnoreCodes)),
 		zap.Error(err))
 	fields = append(fields, extra...)
 	stresslog.Warn("[ENGINE] 动作错误码已忽略，流程继续", fields...)
-	if listenErr := e.registerActionListens(ctx, node, actionDef); listenErr != nil {
+	if listenErr := e.registerActionListens(ctx, node, actionDef.Pattern); listenErr != nil {
 		return listenErr
 	}
 	if err := e.nodeDelay(ctx, node); err != nil {
@@ -335,7 +358,9 @@ func (e *Executor) finishActionAccepted(ctx context.Context, node *flowdef.Node,
 	return nil
 }
 
-func (e *Executor) registerActionListens(ctx context.Context, node *flowdef.Node, actionDef *flowdef.ActionDef) error {
+// registerActionListens 注册节点上的 listenRefs。
+// pattern 仅用于日志定位动作模式，纯监听节点（无 action）传空串。
+func (e *Executor) registerActionListens(ctx context.Context, node *flowdef.Node, pattern string) error {
 	if len(node.ListenRefs) == 0 {
 		return nil
 	}
@@ -343,13 +368,17 @@ func (e *Executor) registerActionListens(ctx context.Context, node *flowdef.Node
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
-		e.logActionFailure("[ENGINE] 注册监听失败", node, actionDef, 0, onErrorMaxRetries(node), err, zap.Int("listenCount", len(node.ListenRefs)))
+		e.logActionFailure("[ENGINE] 注册监听失败", node, pattern, 0, onErrorMaxRetries(node), err, zap.Int("listenCount", len(node.ListenRefs)))
 		// 动作本体已成功但监听注册失败，不重试原 action，按最终错误路径执行节点延迟。
 		if err := e.nodeDelay(ctx, node); err != nil {
 			return err
 		}
 		return applyOnErrorStrategy(onErrorStrategy(node), func() error {
-			return errcode.NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
+			detail := "action=" + node.Action
+			if node.Action == "" {
+				detail = "纯监听节点（无 action）"
+			}
+			return errcode.NewActionError(errcode.ErrListenRegister, detail, err)
 		})
 	}
 	return nil
@@ -380,13 +409,13 @@ func actionErrorLogFields(err error) []zap.Field {
 	}
 }
 
-func (e *Executor) logActionFailure(msg string, node *flowdef.Node, actionDef *flowdef.ActionDef, retriesUsed, maxRetries int, err error, extraFields ...zap.Field) {
+func (e *Executor) logActionFailure(msg string, node *flowdef.Node, pattern string, retriesUsed, maxRetries int, err error, extraFields ...zap.Field) {
 	extra := actionErrorLogFields(err)
 	fields := make([]zap.Field, 0, 8+len(extraFields)+len(extra))
 	fields = append(fields,
-		zap.String("caller", e.caller),
+		zap.String("robot", e.caller),
 		zap.String("action", node.Action),
-		zap.String("pattern", actionDef.Pattern),
+		zap.String("pattern", pattern),
 		zap.String("onErrorStrategy", onErrorStrategy(node)),
 		zap.String("handler", onErrorHandler(node)),
 		zap.Int("retryUsed", retriesUsed),
@@ -401,13 +430,13 @@ func (e *Executor) logActionFailure(msg string, node *flowdef.Node, actionDef *f
 	stresslog.Warn(msg, fields...)
 }
 
-func (e *Executor) logActionRetry(node *flowdef.Node, actionDef *flowdef.ActionDef, retriesUsed, maxRetries int, err error) {
+func (e *Executor) logActionRetry(node *flowdef.Node, pattern string, retriesUsed, maxRetries int, err error) {
 	extra := actionErrorLogFields(err)
 	fields := make([]zap.Field, 0, 8+len(extra))
 	fields = append(fields,
-		zap.String("caller", e.caller),
+		zap.String("robot", e.caller),
 		zap.String("action", node.Action),
-		zap.String("pattern", actionDef.Pattern),
+		zap.String("pattern", pattern),
 		zap.String("handler", onErrorHandler(node)),
 		zap.Int("retryUsed", retriesUsed),
 		zap.Int("maxRetries", maxRetries),
@@ -461,7 +490,7 @@ func normalizeActionCancel(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	if actionErr, ok := errors.AsType[*errcode.ActionError](err); ok && actionErr.Code == errcode.ErrActionCanceled {
+	if isCanceledError(err) {
 		return context.Canceled
 	}
 	return nil
@@ -485,7 +514,7 @@ func (e *Executor) executeBoolean(ctx context.Context, node *flowdef.Node) error
 	result := e.evaluatePreparedCondition(node.Condition, node.PreparedCondition())
 
 	stresslog.Debug("[ENGINE] boolean 条件判断",
-		zap.String("caller", e.caller), zap.Bool("result", result), zap.String("next", func() string {
+		zap.String("robot", e.caller), zap.Bool("result", result), zap.String("next", func() string {
 			if result {
 				return node.TrueNext
 			}
@@ -528,11 +557,11 @@ func (e *Executor) executeSwitch(ctx context.Context, node *flowdef.Node) error 
 		// 命中第 i 条 case
 		if conditionCase.Next == "" {
 			stresslog.Debug("[ENGINE] switch 命中 case 但 next 为空，结束分支",
-				zap.String("caller", e.caller), zap.Int("case", i), zap.String("condition", conditionCase.Condition))
+				zap.String("robot", e.caller), zap.Int("case", i), zap.String("condition", conditionCase.Condition))
 			return nil
 		}
 		stresslog.Debug("[ENGINE] switch 命中 case",
-			zap.String("caller", e.caller), zap.Int("case", i),
+			zap.String("robot", e.caller), zap.Int("case", i),
 			zap.String("condition", conditionCase.Condition), zap.String("next", conditionCase.Next))
 		err := e.executeNode(ctx, conditionCase.Next)
 		if errors.Is(err, errSkip) {
@@ -546,11 +575,11 @@ func (e *Executor) executeSwitch(ctx context.Context, node *flowdef.Node) error 
 		// 未配置 default 且全部 case 未命中：分支静默结束（机器人此处什么都没做）。
 		// 这是压测里最易藏 bug 的场景（路由落空），升 warn 默认可见；若属预期 fall-through，补一个 default 即可消除。
 		stresslog.Warn("[ENGINE] switch 无 case 命中且未配置 default，分支静默结束",
-			zap.String("caller", e.caller), zap.Int("cases", len(node.Cases)))
+			zap.String("robot", e.caller), zap.Int("cases", len(node.Cases)))
 		return nil
 	}
 	stresslog.Debug("[ENGINE] switch 无 case 命中，执行默认分支",
-		zap.String("caller", e.caller), zap.Int("cases", len(node.Cases)), zap.String("next", node.DefaultNext))
+		zap.String("robot", e.caller), zap.Int("cases", len(node.Cases)), zap.String("next", node.DefaultNext))
 	err := e.executeNode(ctx, node.DefaultNext)
 	if errors.Is(err, errSkip) {
 		return nil
@@ -564,7 +593,7 @@ func (e *Executor) evaluatePreparedCondition(source string, condition *flowdef.C
 	}
 	if condition == nil {
 		stresslog.Error("[ENGINE] 条件表达式尚未准备",
-			zap.String("caller", e.caller), zap.String("condition", source),
+			zap.String("robot", e.caller), zap.String("condition", source),
 			zap.Error(errConditionNotPrepared))
 		return false
 	}
@@ -572,6 +601,9 @@ func (e *Executor) evaluatePreparedCondition(source string, condition *flowdef.C
 }
 
 // executeWeighted 加权随机节点：按权重随机选择一个 option 执行。
+//
+// 权重之和 ≤ 0（全 0 或全负）是配置错误而非一种"什么都不选"的用法：这样的节点永远不会
+// 走任何分支，静默跳过会让整条支路在压测里凭空消失，故按 onError.strategy 上报。
 func (e *Executor) executeWeighted(ctx context.Context, node *flowdef.Node) error {
 	if len(node.Options) == 0 {
 		return nil
@@ -588,15 +620,16 @@ func (e *Executor) executeWeighted(ctx context.Context, node *flowdef.Node) erro
 		total += w
 	}
 	if total <= 0 {
-		stresslog.Warn("[ENGINE] weighted 所有选项权重之和 ≤ 0，跳过")
-		return nil
+		stresslog.Error("[ENGINE] weighted 所有选项权重之和 ≤ 0，无分支可选",
+			zap.String("robot", e.caller), zap.Int("options", len(node.Options)))
+		return fmt.Errorf("%w: options=%d (caller=%s)", ErrWeightedNoBranch, len(node.Options), e.caller)
 	}
 
+	// r ∈ [0,total)，累加权重必然在某一项上超过 r，因此循环一定命中，无需循环后兜底。
 	r := rand.Intn(total)
 	cumulative := 0
 	for _, opt := range node.Options {
-		w := max(opt.Weight, 0)
-		cumulative += w
+		cumulative += max(opt.Weight, 0)
 		if r < cumulative {
 			err := e.executeNode(ctx, opt.Node)
 			if errors.Is(err, errSkip) {
@@ -605,12 +638,9 @@ func (e *Executor) executeWeighted(ctx context.Context, node *flowdef.Node) erro
 			return err
 		}
 	}
-
-	err := e.executeNode(ctx, node.Options[len(node.Options)-1].Node)
-	if errors.Is(err, errSkip) {
-		return nil
-	}
-	return err
+	// 不可达断言：total > 0 时 cumulative 最终等于 total > r，循环必然已 return。
+	// 与旧的「兜底执行最后一个 option」不同——那种兜底会把不变量破裂伪装成正常分支。
+	return fmt.Errorf("%w: 权重累加未命中任何分支（total=%d, r=%d）", ErrWeightedNoBranch, total, r)
 }
 
 // executeWait 等待节点：暂停指定时间。支持固定和随机两种模式。

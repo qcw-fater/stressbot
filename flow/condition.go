@@ -37,16 +37,14 @@ func (c *conditionEvalContext) effectiveBool(value any, err error) bool {
 // EvalState 使用本次传入的 Store 执行已编译 state 条件。
 func (c *CompiledCondition) EvalState(store *state.Store) bool {
 	if c == nil {
-		if stresslog.GetLogger() != nil {
-			stresslog.Error("[ENGINE] 条件表达式尚未编译")
-		}
+		stresslog.Error("[ENGINE] 条件表达式尚未编译")
 		return false
 	}
+	// 加载期已拒绝无前缀条件，走到这里只剩 lua: 条件被误当 state 条件求值这一种情况：
+	// 调用方必须先用 LuaScript() 分流，否则该条件恒为 false。
 	if c.kind != conditionState || c.program == nil {
-		if stresslog.GetLogger() != nil {
-			stresslog.Warn("[ENGINE] 条件表达式格式错误，仅支持 state: 前缀",
-				zap.String("expr", c.source))
-		}
+		stresslog.Error("[ENGINE] lua: 条件不能按 state 条件求值，调用方需先经 LuaScript 分流",
+			zap.String("expr", c.source))
 		return false
 	}
 	return c.program.eval(c.source, store)
@@ -56,14 +54,14 @@ func (p *conditionProgram) eval(source string, store *state.Store) bool {
 	context := conditionEvalContext{store: store}
 	value, err := p.evalNode(p.root, &context)
 	context.recordError(err)
-	if context.firstErr != nil && stresslog.GetLogger() != nil {
+	if context.firstErr != nil {
 		stresslog.Warn("[ENGINE] 条件表达式求值失败",
 			zap.String("expr", source), zap.Error(context.firstErr))
 	}
 	if result, ok := value.(bool); ok {
 		return result
 	}
-	if context.firstErr == nil && stresslog.GetLogger() != nil {
+	if context.firstErr == nil {
 		stresslog.Warn("[ENGINE] 条件表达式结果非布尔",
 			zap.String("expr", source), zap.String("type", fmt.Sprintf("%T", value)))
 	}

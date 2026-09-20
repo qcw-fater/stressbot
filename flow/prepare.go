@@ -13,7 +13,7 @@ var protectedStateKeys = map[string]struct{}{
 	"account": {},
 }
 
-// IsProtectedStateKey reports keys injected for every robot and required for its lifecycle.
+// IsProtectedStateKey 判断该键是否为每个机器人注入、且其生命周期依赖的内置状态。
 func IsProtectedStateKey(key string) bool {
 	_, ok := protectedStateKeys[key]
 	return ok
@@ -69,6 +69,17 @@ func PrepareTaskFlow(flow *TaskFlow) error {
 			where := fmt.Sprintf("节点 %q cases[%d]", id, i)
 			if err := compiler.prepare(where, node.Cases[i].Condition, &node.Cases[i].compiledCondition); err != nil {
 				return err
+			}
+		}
+		// listenRefs 指向 listens 表是跨表引用，JSON Schema 查不到（它只校验形状）。
+		// 漏掉这层校验时，listen 名字写错的后果是那条监听永远不触发，而流程照跑不误——
+		// 压测跑完才发现推送一条没收到。放在加载期一次性挡掉。
+		for i, ref := range node.ListenRefs {
+			if ref.Listen == "" {
+				continue // 空 listen 表示只建缓存队列、不挂回调，是合法用法
+			}
+			if _, ok := flow.Listens[ref.Listen]; !ok {
+				return fmt.Errorf("节点 %q listenRefs[%d] 引用的 listen %q 在 listens 中无定义", id, i, ref.Listen)
 			}
 		}
 	}

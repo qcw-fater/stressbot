@@ -11,7 +11,6 @@ type conditionKind uint8
 const (
 	conditionState conditionKind = iota + 1
 	conditionLua
-	conditionUnsupported
 )
 
 type conditionNodeKind uint8
@@ -112,6 +111,9 @@ func (c *CompiledCondition) LuaScript() (string, bool) {
 
 // compileCondition 把完整条件文本编译为不可变程序。
 // state 值和运行期类型不在这里读取或固定。
+//
+// 缺前缀的非空条件在这里就报错：运行期无从判断作者本意是 state 比较还是 Lua 脚本，
+// 放过去只会让该分支恒为 false，压测跑完才发现整条支路从未执行。
 func compileCondition(source string) (*CompiledCondition, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -132,7 +134,8 @@ func compileCondition(source string) (*CompiledCondition, error) {
 		}, nil
 	}
 	if !strings.HasPrefix(source, PrefixState) {
-		return &CompiledCondition{source: source, kind: conditionUnsupported}, nil
+		return nil, fmt.Errorf("条件表达式 %q 缺少前缀：必须以 %q（内置比较）或 %q（脚本求值）开头",
+			source, PrefixState, PrefixLua)
 	}
 
 	input := strings.TrimSpace(source[len(PrefixState):])

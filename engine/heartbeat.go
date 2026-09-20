@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"math/rand"
 	"stressbot/binding"
 	"time"
 
@@ -72,9 +71,9 @@ type HeartbeatConfig struct {
 // appendLE 按 type 将 int64 值以小端字节序追加到 buf。
 // 支持的类型与宽度见 heartbeatTypeWidth（整数 u8..i64 + 浮点 f32/f64）。
 //
-// 整数：有符号按无符号位模式写入（uintN(int64) 截断），等价 Lua 回绕掩码
+// 整数：有符号按无符号位模式写入，超出宽度的高位直接截断
 //
-//	u16 → &0xFFFF，u32 → &0xFFFFFFFF，u64/i64 → 全 64 位。
+//	（u16/i16 → 低 16 位，u32/i32 → 低 32 位，u64/i64 → 全 64 位）。
 //
 // 浮点（f32/f64）：调用方 resolveHeartbeatField 已把 IEEE754 位模式塞进 int64，
 // 这里按宽度直接 PutUint 还原为小端字节，故无需为浮点单开分支。
@@ -106,7 +105,7 @@ func appendLE(buf []byte, typ string, v int64) ([]byte, error) {
 	return buf, nil
 }
 
-// BuildHeartbeatBody 按声明式布局构造心跳 body（Go-only，零 Lua）。
+// BuildHeartbeatBody 按声明式布局构造心跳 body。
 //
 // 参数：
 //   - fields：字段布局（按顺序拼接）；
@@ -220,7 +219,7 @@ func resolveHeartbeatField(f *HeartbeatField, idx int, st *state.Store, privateC
 			return 0, false, fmt.Errorf("心跳 randomInt 源 min>max（idx=%d type=%q min=%d max=%d）",
 				idx, f.Type, lo, hi)
 		}
-		return lo + rand.Int63n(hi-lo+1), false, nil
+		return randomInt64InRange(lo, hi), false, nil
 
 	default:
 		return 0, false, fmt.Errorf("心跳字段未知 source=%q（idx=%d type=%q）", f.Source, idx, f.Type)

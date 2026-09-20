@@ -1,4 +1,5 @@
-// Package flow 提供流程引擎，驱动压测机器人的行为。
+// Package flow 定义压测流程的配置模型：节点 DAG、动作、监听、onError 与条件表达式；
+// 图的遍历与动作执行在 engine 包，本包只保存模型与加载期准备（PrepareTaskFlow）。
 // flow.go 定义流程图结构（TaskFlow / Node / ActionDef / ListenDef / ListenRef 等），
 // 所有结构均可从 JSON 配置加载，无需硬编码行为逻辑。
 package flow

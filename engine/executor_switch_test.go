@@ -246,12 +246,12 @@ func TestExecuteSwitchEmptyCasesRunsDefault(t *testing.T) {
 func TestExecuteSwitchStopsOnContextCancelBetweenCases(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &switchTestHandler{
-		booleanResults: map[string]bool{"c0": false, "c1": false},
+		booleanResults: map[string]bool{"state:c0": false, "state:c1": false},
 		onBoolean:      func() { cancel() }, // 求值 c0 时取消 ctx
 	}
 	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
-		{Condition: "c0", Next: "advanced"},
-		{Condition: "c1", Next: "normal"},
+		{Condition: "state:c0", Next: "advanced"},
+		{Condition: "state:c1", Next: "normal"},
 	}, DefaultNext: "fallback"})
 
 	err := exec.Run(ctx)
@@ -259,8 +259,8 @@ func TestExecuteSwitchStopsOnContextCancelBetweenCases(t *testing.T) {
 		t.Fatalf("Run error = %v, want context.Canceled", err)
 	}
 	// c0 已求值（求值时取消 ctx），c1 因 ctx 取消在迭代入口被拦
-	if !reflect.DeepEqual(h.booleanCalls, []string{"c0"}) {
-		t.Fatalf("booleanCalls = %#v, want [c0]", h.booleanCalls)
+	if !reflect.DeepEqual(h.booleanCalls, []string{"state:c0"}) {
+		t.Fatalf("booleanCalls = %#v, want [state:c0]", h.booleanCalls)
 	}
 	if len(h.actions) != 0 {
 		t.Fatalf("actions = %#v, want none", h.actions)

@@ -1,5 +1,4 @@
-// Package flow 提供流程执行引擎。
-// cond_tokenizer.go 把条件表达式（已剥离 state: 前缀）切成 token 序列。
+// condition_tokenizer.go 把条件表达式（已剥离 state: 前缀）切成 token 序列。
 //
 // 字面量只有两类：数字（123、1.5）和带引号字符串（"member"）。裸标识符恒为
 // state 路径。无 true/false/nil 等关键字——存在性由"按类型的非零比较"表达。

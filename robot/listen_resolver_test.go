@@ -70,17 +70,15 @@ func TestRegisterListen_ResolverHit_NoError(t *testing.T) {
 	}
 }
 
-// TestRegisterListen_MissingListenDef_NoHardFail 守护：listenRefs[].listen 显式引用的
-// listens 项缺失时，RegisterListen 不得在阶段内 hard-fail（返回 error）。
+// TestRegisterListen_MissingListenDef_FailLoud 守护：listenRefs[].listen 引用的 listens
+// 项缺失时，RegisterListen 必须返回 error。
 //
-// 注意：本断言仅锁定「不 hard-fail」这一点，不区分「跳过该条」与「按 nil 回调注册」。
-// 这两种行为在本测试的脚手架下不可观测——network.NewClient 未建立连接，GetTCPConn 返回
-// nil 导致整组被跳过，无论 entry 是否被加入 groups 都观察不到副作用；为可观测化而注入
-// 真实连接或测试专用钩子会超出既有 stubResolver/fakeAdapter 测试风格，得不偿失。
-// 因此「缺失 listen 定义 → 跳过该条（Error 日志 + continue）」与「配置笔误被静默注册成
-// nil 回调队列」的区分由 code review 守护，而非本断言。本断言只防止「配置笔误直接
-// hard-fail 中断整个流程」这一回归。
-func TestRegisterListen_MissingListenDef_NoHardFail(t *testing.T) {
+// 该契约在本轮从「Error 日志 + 跳过该条」改成 fail loud。原行为的代价是流程照跑不误、
+// 只在日志里留一行，而这条监听永远不会触发——压测跑完才发现推送一条没收到。改成 fail
+// loud 之后，正常配置路径其实到不了这里：同一笔误已由 flow.PrepareTaskFlow 的跨表引用
+// 校验在加载期挡掉（见 flow/prepare.go）。这里保留运行期硬失败作为第二道防线，覆盖绕过
+// PrepareTaskFlow 直接构造 TaskFlow 的调用方。
+func TestRegisterListen_MissingListenDef_FailLoud(t *testing.T) {
 	res := &stubResolver{byServer: map[string]protocol.Adapter{
 		"tcp:logic": fakeAdapter{},
 	}}
@@ -97,7 +95,10 @@ func TestRegisterListen_MissingListenDef_NoHardFail(t *testing.T) {
 	err := h.RegisterListen([]flowdef.ListenRef{
 		{Server: "tcp:logic", Listen: "missing", Route: map[string]any{"cmd": 1, "act": 2}},
 	})
-	if err != nil {
-		t.Fatalf("缺失 listen 定义不应在 RegisterListen hard-fail，got %v", err)
+	if err == nil {
+		t.Fatal("缺失 listen 定义时 RegisterListen 应返回 error")
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("错误信息应点名缺失的 listen，got %v", err)
 	}
 }

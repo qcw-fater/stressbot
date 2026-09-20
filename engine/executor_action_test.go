@@ -385,6 +385,65 @@ func TestExecutorExecuteActionListenRefsOnlyOnSuccessOrIgnore(t *testing.T) {
 	})
 }
 
+// action 为空 + listenRefs 非空是「纯注册监听」节点：必须真的注册监听并照常走节点延迟，
+// 而不是在入口处直接 return（那样 listenRefs 永远不生效，后续 listen 动作只能超时）。
+func TestExecutorListenOnlyNodeRegistersListens(t *testing.T) {
+	handler := &executorActionTestHandler{}
+	ex := newExecutorActionTest(handler)
+
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:       flowdef.NodeAction,
+		ListenRefs: []flowdef.ListenRef{{Server: "tcp:logic", Listen: "push"}},
+		DelayMs:    1,
+	})
+	if err != nil {
+		t.Fatalf("纯监听节点不应报错: %v", err)
+	}
+	if handler.registerCalls != 1 {
+		t.Fatalf("应注册一次 listenRefs，实际 registerCalls=%d", handler.registerCalls)
+	}
+	if handler.actionCalls != 0 {
+		t.Fatalf("纯监听节点不应执行动作，实际 actionCalls=%d", handler.actionCalls)
+	}
+	if handler.sleepCalls != 1 {
+		t.Fatalf("纯监听节点应执行节点延迟，实际 sleepCalls=%d", handler.sleepCalls)
+	}
+}
+
+func TestExecutorListenOnlyNodeRegisterFailureAborts(t *testing.T) {
+	handler := &executorActionTestHandler{registerErr: errcode.NewActionError(errcode.ErrListenRegister, "listen failed")}
+	ex := newExecutorActionTest(handler)
+
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:       flowdef.NodeAction,
+		ListenRefs: []flowdef.ListenRef{{Server: "tcp:logic", Listen: "push"}},
+		OnError:    &flowdef.OnErrorDef{Strategy: flowdef.StrategyAbort},
+		DelayMs:    -1,
+	})
+	actionErr, ok := errors.AsType[*errcode.ActionError](err)
+	if !ok || actionErr.Code != errcode.ErrListenRegister {
+		t.Fatalf("注册失败应按 ErrListenRegister abort，实际 %v", err)
+	}
+	if actionErr.Detail == "" {
+		t.Error("纯监听节点的失败 detail 不应为空")
+	}
+}
+
+// 既无 action 也无 listenRefs 的 action 节点是配置漏填：不报错但必须留下 warn，不能静默空转。
+func TestExecutorEmptyActionNodeDoesNothing(t *testing.T) {
+	handler := &executorActionTestHandler{}
+	ex := newExecutorActionTest(handler)
+
+	err := ex.executeAction(context.Background(), &flowdef.Node{Type: flowdef.NodeAction, DelayMs: 1})
+	if err != nil {
+		t.Fatalf("空 action 节点不应报错: %v", err)
+	}
+	if handler.registerCalls != 0 || handler.actionCalls != 0 || handler.sleepCalls != 0 {
+		t.Fatalf("空 action 节点不应产生任何副作用，register=%d action=%d sleep=%d",
+			handler.registerCalls, handler.actionCalls, handler.sleepCalls)
+	}
+}
+
 func TestExecutorExecuteActionListenRegisterFailureDoesNotRetry(t *testing.T) {
 	handler := &executorActionTestHandler{registerErr: errcode.NewActionError(errcode.ErrListenRegister, "listen failed")}
 	ex := newExecutorActionTest(handler)

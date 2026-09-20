@@ -1,5 +1,4 @@
-// Package flow 提供流程执行引擎。
-// cond_compare.go 提供条件表达式的严格类型数值分类、比较与算术。
+// condition_compare.go 提供条件表达式的严格类型数值分类、比较与算术。
 //
 // store 的值域闭合且无指针。数值可能以多种 Go 数值类型出现：
 //   - 内置字段 id/index 经 state.Set 注入为原生 int（见 robot.go）

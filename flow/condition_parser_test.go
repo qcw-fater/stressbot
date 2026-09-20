@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"strings"
 	"testing"
 
 	"stressbot/state"
@@ -472,11 +473,43 @@ func TestCompileCondition_StatePrefix(t *testing.T) {
 	if !evalFullCompiledCondition("state:index % 2 == 0", s) {
 		t.Error("state:index % 2 == 0 should be true")
 	}
-	if evalFullCompiledCondition("hp > 0", s) {
-		t.Error("缺少 state: 前缀应返回 false")
+	if _, err := compileCondition("hp > 0"); err == nil {
+		t.Error("缺少 state:/lua: 前缀应在编译期报错")
 	}
 	if !evalFullCompiledCondition("  ", s) {
 		t.Error("空表达式应返回 true")
+	}
+}
+
+// TestCompileCondition_MissingPrefixFailsLoud 覆盖加载期 fail-loud：缺前缀的条件既不能
+// 编译成恒 false 的程序，也不能只在运行期打日志——报错文本要同时给出原文和两个合法前缀，
+// 让配置作者一眼看出该补哪个。
+func TestCompileCondition_MissingPrefixFailsLoud(t *testing.T) {
+	for _, expr := range []string{"hp > 0", "check.lua", "State:hp > 0", "lua check.lua"} {
+		condition, err := compileCondition(expr)
+		if err == nil {
+			t.Fatalf("compileCondition(%q) 应报错，实际返回 %#v", expr, condition)
+		}
+		for _, want := range []string{expr, PrefixState, PrefixLua} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("compileCondition(%q) 错误文本 %q 应含 %q", expr, err.Error(), want)
+			}
+		}
+	}
+}
+
+// TestPrepareTaskFlow_MissingConditionPrefix 覆盖缺前缀条件必须作为配置错误上报，
+// 且错误信息定位到具体条件位置。
+func TestPrepareTaskFlow_MissingConditionPrefix(t *testing.T) {
+	flow := &TaskFlow{Nodes: map[string]*Node{
+		"n1": {Type: NodeBoolean, Condition: "hp > 0"},
+	}}
+	err := PrepareTaskFlow(flow)
+	if err == nil {
+		t.Fatal("缺前缀的节点 condition 应被 PrepareTaskFlow 拒绝")
+	}
+	if !strings.Contains(err.Error(), `节点 "n1" condition`) {
+		t.Errorf("错误信息缺少条件位置：%s", err)
 	}
 }
 
