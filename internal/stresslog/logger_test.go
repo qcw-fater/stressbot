@@ -105,15 +105,28 @@ func TestInitLogReturnsIdempotentCloser(t *testing.T) {
 	}
 }
 
-func TestReplaceLoggerCanRestoreUninitializedState(t *testing.T) {
+// TestUninitializedLoggerIsNoOpNotNil 未初始化状态必须是 no-op logger 而非 nil。
+//
+// 包级日志函数直接解引用全局 logger、不做判空，取 nil 会让 InitLog 之前的任何一条日志
+// 变成 nil panic——而配置加载失败恰恰发生在 InitLog 之前，用户本该看到「配置哪行写错了」，
+// 实际拿到的是崩溃栈。
+func TestUninitializedLoggerIsNoOpNotNil(t *testing.T) {
 	original := GetLogger()
-	ReplaceLogger(zap.NewNop())
 	t.Cleanup(func() { ReplaceLogger(original) })
 
 	ReplaceLogger(nil)
-	if GetLogger() != nil {
-		t.Fatal("ReplaceLogger(nil) 未恢复未初始化状态")
+	if GetLogger() == nil {
+		t.Fatal("ReplaceLogger(nil) 应装回 no-op logger，不得留 nil")
 	}
+	// 未初始化状态下打各级别日志都不能 panic。
+	Debug("debug")
+	Info("info")
+	Warn("warn")
+	Error("error")
+	DebugS("debugS", "k", "v")
+	InfoS("infoS", "k", "v")
+	WarnS("warnS", "k", "v")
+	ErrorS("errorS", "k", "v")
 }
 
 func TestErrorAndDPanicLogsFlushImmediately(t *testing.T) {

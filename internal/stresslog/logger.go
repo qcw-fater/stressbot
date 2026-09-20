@@ -19,8 +19,13 @@ const (
 )
 
 // logger 负责高性能结构化日志；sugarLogger 兼容少量格式化调用。
-var logger *zap.Logger
-var sugarLogger *zap.SugaredLogger
+//
+// 零值是 no-op logger 而非 nil：包级日志函数（Debug/Info/Warn/...）直接解引用这两个变量，
+// 取 nil 会让 InitLog 之前的任何一条日志变成 nil panic——而配置加载失败恰恰发生在 InitLog
+// 之前，用户本该看到「配置哪一行写错了」，实际拿到的是崩溃栈。no-op 零值让「还没初始化」
+// 退化成「日志被丢弃」，调用方无需再逐处判空。
+var logger = zap.NewNop()
+var sugarLogger = logger.Sugar()
 
 var loglevel = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 var activeFileSink atomic.Pointer[fileLogSink]
@@ -203,18 +208,18 @@ func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) fu
 	}
 }
 
-// GetLogger 返回当前全局 zap logger；未调用 InitLog 前为 nil。
+// GetLogger 返回当前全局 zap logger；InitLog 之前是 no-op logger，永不为 nil。
 func GetLogger() *zap.Logger {
 	return logger
 }
 
-// ReplaceLogger 为测试提供无输出 logger 注入能力。
+// ReplaceLogger 为测试提供 logger 注入能力。传 nil 表示回到未初始化状态，
+// 此时装回 no-op logger 而不是 nil——包级日志函数不做判空，留 nil 会在后续调用时 panic。
 func ReplaceLogger(replacement *zap.Logger) {
-	logger = replacement
 	if replacement == nil {
-		sugarLogger = nil
-		return
+		replacement = zap.NewNop()
 	}
+	logger = replacement
 	sugarLogger = replacement.Sugar()
 }
 
