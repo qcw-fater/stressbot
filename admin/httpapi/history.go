@@ -10,7 +10,6 @@ import (
 	"stressbot/admin/apierror"
 	"stressbot/admin/history"
 	admintask "stressbot/admin/task"
-	json "stressbot/internal/jsonx"
 )
 
 // compareTarget 对比目标：任务 ID + 可选阶段段落号（-1 表示整体）。
@@ -27,15 +26,15 @@ func parseCompareTargets(q url.Values) ([]compareTarget, error) {
 		raw = q.Get("ids")
 	}
 	if raw == "" {
-		return nil, apierror.ErrInvalidArgument.WithMessage("ids or targets query param required")
+		return nil, apierror.ErrInvalidArgument.WithMessage("缺少 ids 或 targets 查询参数")
 	}
 
 	parts := strings.Split(raw, ",")
 	if len(parts) < 2 {
-		return nil, apierror.ErrInvalidArgument.WithMessage("at least 2 targets required")
+		return nil, apierror.ErrInvalidArgument.WithMessage("至少需要 2 个对比目标")
 	}
 	if len(parts) > 5 {
-		return nil, apierror.ErrInvalidArgument.WithMessage("at most 5 targets for comparison")
+		return nil, apierror.ErrInvalidArgument.WithMessage("最多支持 5 个对比目标")
 	}
 
 	targets := make([]compareTarget, 0, len(parts))
@@ -58,12 +57,12 @@ func parseCompareTargets(q url.Values) ([]compareTarget, error) {
 			t.id = p
 		}
 		if t.id == "" {
-			return nil, apierror.ErrInvalidArgument.WithMessage("invalid compare target")
+			return nil, apierror.ErrInvalidArgument.WithMessage("对比目标格式非法")
 		}
 		targets = append(targets, t)
 	}
 	if len(targets) < 2 {
-		return nil, apierror.ErrInvalidArgument.WithMessage("at least 2 valid targets required")
+		return nil, apierror.ErrInvalidArgument.WithMessage("至少需要 2 个有效对比目标")
 	}
 	return targets, nil
 }
@@ -212,8 +211,8 @@ func (s *Handler) handleUpdateHistory(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	var req history.UpdateHistoryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid json"))
+	if err := decodeJSONBody(w, r, &req, jsonBodyMaxBytes, "请求体不是合法 JSON"); err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -261,8 +260,8 @@ func (s *Handler) handleCloneHistory(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid JSON body"))
+	if err := decodeJSONBody(w, r, &body, jsonBodyMaxBytes, "请求体不是合法 JSON"); err != nil {
+		writeError(w, err)
 		return
 	}
 

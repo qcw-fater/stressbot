@@ -54,10 +54,10 @@ func (s *Handler) writeBaselineFiles(cfg *admintask.Config, flowData []byte) {
 func safeWriteFile(dir, name string, data []byte) error {
 	name = filepath.Base(name)
 	if name == "." || name == ".." {
-		return fmt.Errorf("invalid file name: %s", name)
+		return fmt.Errorf("文件名非法: %s", name)
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("mkdir: %w", err)
+		return fmt.Errorf("创建目录 %s 失败: %w", dir, err)
 	}
 	return os.WriteFile(filepath.Join(dir, name), data, 0644)
 }

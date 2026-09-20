@@ -90,7 +90,7 @@ func (s *Handler) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if agent.Status != adminagent.Offline {
-		writeError(w, apierror.ErrAgentBusy.WithMessage("can only delete offline agents"))
+		writeError(w, apierror.ErrAgentBusy.WithMessage("只能删除已离线的节点"))
 		return
 	}
 	if err := s.agents.Deregister(id); err != nil {
@@ -109,7 +109,7 @@ func (s *Handler) handleShutdownAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if agent.Status == adminagent.Offline {
-		writeError(w, apierror.ErrAgentOffline.WithMessage("agent is offline, cannot send shutdown"))
+		writeError(w, apierror.ErrAgentOffline.WithMessage("节点已离线，无法下发关闭命令"))
 		return
 	}
 	ctx, cancel := commandContext()
@@ -148,5 +148,3 @@ func (s *Handler) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Request
 		"failed":    failed,
 	})
 }
-
-// ── 前端-指标 ──

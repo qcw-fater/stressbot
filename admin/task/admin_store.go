@@ -42,7 +42,7 @@ func NewStore(dataDir string) (*Store, error) {
 		Save:   saveTaskFile,
 		Remove: removeTaskFile,
 		Duplicate: func() error {
-			return apierror.ErrTaskConflict.WithMessage("task already exists")
+			return apierror.ErrTaskConflict.WithMessage("任务已存在")
 		},
 		NotFound: func() error { return apierror.ErrTaskNotFound },
 		InvalidState: func(message string) error {

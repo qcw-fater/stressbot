@@ -18,24 +18,24 @@ func taskFilePath(dataDir, taskID string) string {
 func saveTaskFile(dataDir string, task *Task) error {
 	dir := filepath.Join(dataDir, "tasks")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create tasks dir: %w", err)
+		return fmt.Errorf("创建任务目录失败: %w", err)
 	}
 
 	data, err := json.MarshalIndent(task, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal task: %w", err)
+		return fmt.Errorf("序列化任务失败: %w", err)
 	}
 
 	// 原子写入：先写临时文件再 rename
 	tmp := taskFilePath(dataDir, task.ID) + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("write temp: %w", err)
+		return fmt.Errorf("写入任务临时文件失败: %w", err)
 	}
 
 	dst := taskFilePath(dataDir, task.ID)
 	if err := os.Rename(tmp, dst); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename: %w", err)
+		return fmt.Errorf("重命名任务文件失败: %w", err)
 	}
 	return nil
 }

@@ -43,7 +43,7 @@ func listFlowDetails(ctx context.Context, q flowSnapshotQuerier) ([]FlowTemplate
 		FROM flow_template ORDER BY id
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list flow snapshot: %w", err)
+		return nil, fmt.Errorf("查询流程快照失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -58,7 +58,7 @@ func listFlowDetails(ctx context.Context, q flowSnapshotQuerier) ([]FlowTemplate
 			&item.ID, &item.Name, &item.NodeCount, &item.ActionCount,
 			&item.CreatedAt, &item.UpdatedAt, &flow, &layout,
 		); err != nil {
-			return nil, fmt.Errorf("scan flow snapshot: %w", err)
+			return nil, fmt.Errorf("扫描流程快照失败: %w", err)
 		}
 		item.Flow = json.RawMessage(flow)
 		if layout != nil {
@@ -67,7 +67,7 @@ func listFlowDetails(ctx context.Context, q flowSnapshotQuerier) ([]FlowTemplate
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate flow snapshot: %w", err)
+		return nil, fmt.Errorf("遍历流程快照失败: %w", err)
 	}
 	return items, nil
 }
@@ -102,7 +102,7 @@ func (s *FlowTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceFlow
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin replace flow snapshot: %w", err)
+		return nil, fmt.Errorf("开启流程快照替换事务失败: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -122,7 +122,7 @@ func (s *FlowTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceFlow
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM flow_template`); err != nil {
-		return nil, fmt.Errorf("delete flow snapshot: %w", err)
+		return nil, fmt.Errorf("清空流程快照失败: %w", err)
 	}
 	for i := range items {
 		item := &items[i]
@@ -132,7 +132,7 @@ func (s *FlowTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceFlow
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`, item.ID, item.Name, []byte(item.Flow), layoutArg(item.Layout),
 			item.NodeCount, item.ActionCount, item.CreatedAt, item.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("insert flow snapshot: %w", err)
+			return nil, fmt.Errorf("写入流程快照失败: %w", err)
 		}
 	}
 	persisted, err := listFlowDetails(ctx, tx)
@@ -144,7 +144,7 @@ func (s *FlowTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceFlow
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit flow snapshot: %w", err)
+		return nil, fmt.Errorf("提交流程快照事务失败: %w", err)
 	}
 
 	return &ReplaceFlowSnapshotResponse{Revision: revision, Count: len(persisted)}, nil
@@ -156,7 +156,7 @@ func computeFlowSnapshotRevision(items []FlowTemplateDetail) (string, error) {
 
 	b, err := json.Marshal(stable)
 	if err != nil {
-		return "", fmt.Errorf("marshal flow snapshot: %w", err)
+		return "", fmt.Errorf("序列化流程快照失败: %w", err)
 	}
 	sum := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil

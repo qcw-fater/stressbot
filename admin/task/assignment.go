@@ -26,7 +26,7 @@ func (a *Assigner) Assign(task *Task, agents []*agent.Node, startNumber int) ([]
 		}
 	}
 	if len(available) == 0 {
-		return nil, apierror.ErrCapacityExceeded.WithMessage("no idle agents available")
+		return nil, apierror.ErrCapacityExceeded.WithMessage("没有可用的空闲节点")
 	}
 
 	var totalCapacity int

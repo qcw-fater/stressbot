@@ -1,6 +1,6 @@
-// Package admin — T4.2 codec 预览/算法元数据端点。
+// codec 预览/算法元数据端点。
 //
-// 这两个端点供前端 codec 编辑器（T3）调用：
+// 这两个端点供前端 codec 编辑器调用：
 //   - POST /sbot/codec/preview  包 codec.Preview：跑一次 encode/decode，返回帧/字段解释。
 //   - GET  /sbot/codec/algorithms 包 codec.Algorithms：返回算法下拉元数据清单。
 //
@@ -51,24 +51,25 @@ type codecPreviewRequest struct {
 // admin handler 注册约定。
 func (s *Handler) handleCodecPreview(w http.ResponseWriter, r *http.Request) {
 	var req codecPreviewRequest
+	r.Body = http.MaxBytesReader(w, r.Body, jsonBodyMaxBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid json: "+err.Error()))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("请求体不是合法 JSON: "+err.Error()))
 		return
 	}
 
 	// schema 为空 → 400（编辑器至少需提供 schema 对象）。
 	if len(req.Schema) == 0 {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("schema required"))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("缺少 schema 字段"))
 		return
 	}
 	if err := validation.ValidateCodec(req.Schema); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid schema: "+err.Error()))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("codec 配置非法: "+err.Error()))
 		return
 	}
 
 	var schema codec.Schema
 	if err := json.Unmarshal(req.Schema, &schema); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid schema: "+err.Error()))
+		writeError(w, apierror.ErrInvalidArgument.WithMessage("codec 配置非法: "+err.Error()))
 		return
 	}
 

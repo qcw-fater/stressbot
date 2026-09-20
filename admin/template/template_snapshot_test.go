@@ -7,10 +7,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"go.uber.org/zap"
 
 	json "stressbot/internal/jsonx"
-	"stressbot/internal/stresslog"
 )
 
 func snapshotAction(id, name string, createdAt, updatedAt time.Time) ActionTemplate {
@@ -120,9 +118,6 @@ func TestTemplateSnapshotRejectsStaleRevisionWithoutDelete(t *testing.T) {
 }
 
 func TestTemplateSnapshotRollsBackWhenInsertFails(t *testing.T) {
-	if stresslog.GetLogger() == nil {
-		stresslog.ReplaceLogger(zap.NewNop())
-	}
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)

@@ -116,12 +116,12 @@ func (s *Handler) registerManagementRoutes() http.Handler {
 			writeJSON(w, statusCode, &apierror.Error{Code: "REQUEST_SCHEMA_INVALID", HTTPStatus: statusCode, Message: message})
 		},
 		func(w http.ResponseWriter, r *http.Request, rec any, stack []byte) {
-			stresslog.Error("[ADMIN] HTTP handler panic",
+			stresslog.Error("[ADMIN] HTTP 处理器 panic",
 				zap.String("path", r.URL.Path),
 				zap.String("method", r.Method),
 				zap.Any("panic", rec),
 				zap.String("stack", string(stack)))
-			writeError(w, apierror.ErrInternal.WithMessage("internal server error"))
+			writeError(w, apierror.ErrInternal.WithMessage("服务器内部错误"))
 		},
 	)
 }

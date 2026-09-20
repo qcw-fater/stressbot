@@ -8,14 +8,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"stressbot/admin/apierror"
 	"stressbot/config/validation"
 	json "stressbot/internal/jsonx"
 )
-
-// flowTemplateNameMax 流程模板名称最大长度（与前端 FLOW_NAME_MAX_LENGTH 一致）。
-const flowTemplateNameMax = 80
 
 // FlowTemplateStore 流程模板库存储。
 // db 由 Admin Server 统一管理（共享全局 MySQL 实例），本结构不负责 Close。
@@ -55,14 +53,16 @@ type FlowTemplateSaveRequest struct {
 	Layout json.RawMessage `json:"layout,omitempty"`
 }
 
-// validateFlowTemplateName 校验名称：去首尾空白、非空、不超过上限。
+// validateFlowTemplateName 校验名称：去首尾空白、非空、不超过 NameMax 个字符。
+// 上限按字符数而非字节数算——flow_template.name 是 utf8mb4 的 VARCHAR(80)，
+// 前端 FLOW_NAME_MAX_LENGTH 也按字符计，按字节卡会把 27 个汉字的合法名字拒掉。
 func validateFlowTemplateName(name string) (string, error) {
 	n := strings.TrimSpace(name)
 	if n == "" {
 		return "", apierror.ErrInvalidArgument.WithMessage("流程名称不能为空")
 	}
-	if len(n) > flowTemplateNameMax {
-		return "", apierror.ErrInvalidArgument.WithMessage(fmt.Sprintf("流程名称不能超过 %d 个字符", flowTemplateNameMax))
+	if utf8.RuneCountInString(n) > NameMax {
+		return "", apierror.ErrInvalidArgument.WithMessage(fmt.Sprintf("流程名称不能超过 %d 个字符", NameMax))
 	}
 	return n, nil
 }
@@ -113,7 +113,7 @@ func (s *FlowTemplateStore) Create(ctx context.Context, req FlowTemplateSaveRequ
 		INSERT INTO flow_template (id, name, flow_json, layout_json, node_count, action_count, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, name, []byte(req.Flow), layoutArg(req.Layout), nodeCount, actionCount, now, now); err != nil {
-		return nil, fmt.Errorf("insert flow_template: %w", err)
+		return nil, fmt.Errorf("写入 flow_template 失败: %w", err)
 	}
 	return &FlowTemplateDetail{
 		FlowTemplateSummary: FlowTemplateSummary{
@@ -135,7 +135,7 @@ func (s *FlowTemplateStore) List(ctx context.Context) ([]FlowTemplateSummary, er
 		FROM flow_template ORDER BY updated_at DESC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list flow_template: %w", err)
+		return nil, fmt.Errorf("查询 flow_template 失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -143,12 +143,12 @@ func (s *FlowTemplateStore) List(ctx context.Context) ([]FlowTemplateSummary, er
 	for rows.Next() {
 		var it FlowTemplateSummary
 		if err := rows.Scan(&it.ID, &it.Name, &it.NodeCount, &it.ActionCount, &it.CreatedAt, &it.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan flow_template: %w", err)
+			return nil, fmt.Errorf("扫描 flow_template 失败: %w", err)
 		}
 		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate flow_template: %w", err)
+		return nil, fmt.Errorf("遍历 flow_template 失败: %w", err)
 	}
 	return items, nil
 }
@@ -174,7 +174,7 @@ func (s *FlowTemplateStore) get(ctx context.Context, id string) (*FlowTemplateDe
 		return nil, apierror.ErrFlowTemplateNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get flow_template: %w", err)
+		return nil, fmt.Errorf("获取 flow_template 失败: %w", err)
 	}
 	d.Flow = json.RawMessage(flow)
 	if layout != nil {
@@ -204,11 +204,11 @@ func (s *FlowTemplateStore) Update(ctx context.Context, id string, req FlowTempl
 			SET name=?, flow_json=?, layout_json=?, node_count=?, action_count=?, updated_at=?
 			WHERE id=?
 		`, name, []byte(req.Flow), layoutArg(req.Layout), nodeCount, actionCount, now, id); err != nil {
-			return nil, fmt.Errorf("update flow_template: %w", err)
+			return nil, fmt.Errorf("更新 flow_template 失败: %w", err)
 		}
 	} else {
 		if _, err := s.db.ExecContext(ctx, `UPDATE flow_template SET name=?, updated_at=? WHERE id=?`, name, now, id); err != nil {
-			return nil, fmt.Errorf("rename flow_template: %w", err)
+			return nil, fmt.Errorf("重命名 flow_template 失败: %w", err)
 		}
 	}
 	// UPDATE 命中 0 行（id 不存在）时由 Get 翻译为 FLOW_TEMPLATE_NOT_FOUND。
@@ -222,11 +222,11 @@ func (s *FlowTemplateStore) Delete(ctx context.Context, id string) error {
 
 	res, err := s.db.ExecContext(ctx, `DELETE FROM flow_template WHERE id=?`, id)
 	if err != nil {
-		return fmt.Errorf("delete flow_template: %w", err)
+		return fmt.Errorf("删除 flow_template 失败: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("delete flow_template rows affected: %w", err)
+		return fmt.Errorf("读取 flow_template 删除影响行数失败: %w", err)
 	}
 	if n == 0 {
 		return apierror.ErrFlowTemplateNotFound

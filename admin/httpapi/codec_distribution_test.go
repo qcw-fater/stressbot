@@ -1,4 +1,4 @@
-// Package admin 覆盖多 codec 上传、基线与浏览器下载测试。
+// 覆盖多 codec 上传、基线与浏览器下载测试。
 //
 // 覆盖：
 //   - multipart 上传多份 adapter/*_codec.json + adapter/errors.json → TaskConfig.Codecs 含各文件、ErrorMap 非空。

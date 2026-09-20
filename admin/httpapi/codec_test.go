@@ -1,4 +1,4 @@
-// Package admin — T4.2 codec preview/algorithms 端点测试。
+// codec preview/algorithms 端点测试。
 //
 // 覆盖（与 brief 验收逐条对齐）：
 //   - preview encode：合法 schema + route + body + key → 200，FrameHex 非空、Fields 含 cmd/act。

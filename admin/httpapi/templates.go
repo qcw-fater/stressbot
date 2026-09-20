@@ -5,7 +5,6 @@ import (
 
 	"stressbot/admin/apierror"
 	"stressbot/admin/template"
-	json "stressbot/internal/jsonx"
 )
 
 func (s *Handler) actionTemplateStore(w http.ResponseWriter) *template.ActionTemplateStore {
@@ -34,7 +33,7 @@ func (s *Handler) handleCreateActionTemplate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req template.ActionTemplateSaveRequest
-	if err := decodeTemplateJSON(w, r, &req, templateCRUDMaxBytes, "动作模板不是合法 JSON"); err != nil {
+	if err := decodeJSONBody(w, r, &req, jsonBodyMaxBytes, "动作模板不是合法 JSON"); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -63,7 +62,7 @@ func (s *Handler) handleUpdateActionTemplate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req template.ActionTemplateSaveRequest
-	if err := decodeTemplateJSON(w, r, &req, templateCRUDMaxBytes, "动作模板不是合法 JSON"); err != nil {
+	if err := decodeJSONBody(w, r, &req, jsonBodyMaxBytes, "动作模板不是合法 JSON"); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -104,7 +103,7 @@ func (s *Handler) handleReplaceActionTemplateSnapshot(w http.ResponseWriter, r *
 		return
 	}
 	var req template.ReplaceSnapshotRequest[template.ActionTemplate]
-	if err := decodeTemplateJSON(w, r, &req, templateSnapshotMaxBytes, "动作模板快照不是合法 JSON"); err != nil {
+	if err := decodeJSONBody(w, r, &req, jsonSnapshotMaxBytes, "动作模板快照不是合法 JSON"); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -141,7 +140,7 @@ func (s *Handler) handleCreateListenTemplate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req template.ListenTemplateSaveRequest
-	if err := decodeTemplateJSON(w, r, &req, templateCRUDMaxBytes, "监听模板不是合法 JSON"); err != nil {
+	if err := decodeJSONBody(w, r, &req, jsonBodyMaxBytes, "监听模板不是合法 JSON"); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -170,7 +169,7 @@ func (s *Handler) handleUpdateListenTemplate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req template.ListenTemplateSaveRequest
-	if err := decodeTemplateJSON(w, r, &req, templateCRUDMaxBytes, "监听模板不是合法 JSON"); err != nil {
+	if err := decodeJSONBody(w, r, &req, jsonBodyMaxBytes, "监听模板不是合法 JSON"); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -211,7 +210,7 @@ func (s *Handler) handleReplaceListenTemplateSnapshot(w http.ResponseWriter, r *
 		return
 	}
 	var req template.ReplaceSnapshotRequest[template.ListenTemplate]
-	if err := decodeTemplateJSON(w, r, &req, templateSnapshotMaxBytes, "监听模板快照不是合法 JSON"); err != nil {
+	if err := decodeJSONBody(w, r, &req, jsonSnapshotMaxBytes, "监听模板快照不是合法 JSON"); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -242,8 +241,8 @@ func (s *Handler) handleCreateFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req template.FlowTemplateSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid json"))
+	if err := decodeJSONBody(w, r, &req, jsonBodyMaxBytes, "流程不是合法 JSON"); err != nil {
+		writeError(w, err)
 		return
 	}
 	created, err := s.flows.Create(r.Context(), req)
@@ -273,8 +272,8 @@ func (s *Handler) handleUpdateFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req template.FlowTemplateSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid json"))
+	if err := decodeJSONBody(w, r, &req, jsonBodyMaxBytes, "流程不是合法 JSON"); err != nil {
+		writeError(w, err)
 		return
 	}
 	updated, err := s.flows.Update(r.Context(), r.PathValue("id"), req)
@@ -315,10 +314,9 @@ func (s *Handler) handleReplaceFlowSnapshot(w http.ResponseWriter, r *http.Reque
 		writeError(w, apierror.ErrFlowLibraryDisabled.WithMessage("服务器未启用流程库"))
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
 	var req template.ReplaceFlowSnapshotRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierror.ErrInvalidArgument.WithMessage("备份中的流程快照不是合法 JSON"))
+	if err := decodeJSONBody(w, r, &req, jsonSnapshotMaxBytes, "备份中的流程快照不是合法 JSON"); err != nil {
+		writeError(w, err)
 		return
 	}
 	resp, err := s.flows.ReplaceSnapshot(r.Context(), req)

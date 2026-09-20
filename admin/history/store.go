@@ -92,7 +92,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return fmt.Errorf("开启事务失败: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -128,7 +128,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 		sql.NullString{String: task.FlowTemplateID, Valid: task.FlowTemplateID != ""},
 	)
 	if err != nil {
-		return fmt.Errorf("insert task_history: %w", err)
+		return fmt.Errorf("写入 task_history 失败: %w", err)
 	}
 
 	// 2. task_assignment
@@ -138,7 +138,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 			VALUES (?, ?, ?, ?)
 		`, task.ID, a.AgentID, a.StartNumber, a.TotalBots)
 		if err != nil {
-			return fmt.Errorf("insert task_assignment: %w", err)
+			return fmt.Errorf("写入 task_assignment 失败: %w", err)
 		}
 	}
 
@@ -155,7 +155,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 	// 注意：有 reset 任务中，Agent 每段 reset 采集器，故最终报告仅覆盖最后一个段落。
 	for agentID, report := range task.Reports {
 		if err := insertTaskReport(ctx, tx, task.ID, agentID, agentNames[agentID], report, -1); err != nil {
-			return fmt.Errorf("insert task_report: %w", err)
+			return fmt.Errorf("写入 task_report 失败: %w", err)
 		}
 	}
 	// 3b. reset 边界阶段段落报告：映射为连续段落号写入。
@@ -165,7 +165,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 			continue // 非计划内（异常配置），跳过
 		}
 		if err := insertTaskReport(ctx, tx, task.ID, report.AgentID, agentNames[report.AgentID], report, segNo); err != nil {
-			return fmt.Errorf("insert task_report (stage): %w", err)
+			return fmt.Errorf("写入 task_report（阶段）失败: %w", err)
 		}
 	}
 	// 3c. 有 reset：最终报告额外写入最后一个段落，使末段详情可像普通详情查看节点报告。
@@ -173,7 +173,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 		finalSeg := plan.FinalSegmentNo()
 		for agentID, report := range task.Reports {
 			if err := insertTaskReport(ctx, tx, task.ID, agentID, agentNames[agentID], report, finalSeg); err != nil {
-				return fmt.Errorf("insert task_report (final stage): %w", err)
+				return fmt.Errorf("写入 task_report（末阶段）失败: %w", err)
 			}
 		}
 	}
@@ -188,7 +188,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 		ON DUPLICATE KEY UPDATE final_stress=VALUES(final_stress), final_system=VALUES(final_system)
 	`, task.ID, stressJSON, sysJSON)
 	if err != nil {
-		return fmt.Errorf("insert task_aggregated: %w", err)
+		return fmt.Errorf("写入 task_aggregated 失败: %w", err)
 	}
 	// 4b. 有 reset：写入各阶段段落聚合。
 	if plan.HasReset {
@@ -205,16 +205,16 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 		for segNo, snaps := range segSnaps {
 			merged, err := monitor.MergeSnapshots(snaps)
 			if err != nil {
-				return fmt.Errorf("merge stage %d metrics: %w", segNo, err)
+				return fmt.Errorf("合并阶段 %d 指标失败: %w", segNo, err)
 			}
 			mergedJSON, _ := json.Marshal(merged)
 			if err := insertTaskAggregated(ctx, tx, task.ID, segNo, mergedJSON, emptySysJSON); err != nil {
-				return fmt.Errorf("insert task_aggregated (stage): %w", err)
+				return fmt.Errorf("写入 task_aggregated（阶段）失败: %w", err)
 			}
 		}
 		// 最终段落：等于整体最终聚合（含系统终态）。
 		if err := insertTaskAggregated(ctx, tx, task.ID, plan.FinalSegmentNo(), stressJSON, sysJSON); err != nil {
-			return fmt.Errorf("insert task_aggregated (final stage): %w", err)
+			return fmt.Errorf("写入 task_aggregated（末阶段）失败: %w", err)
 		}
 	}
 
@@ -227,7 +227,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 	_, err = tx.ExecContext(ctx, upsertTaskConfigArchiveSQL,
 		task.ID, flowJSON, protoFilesJSON, luaScriptsJSON, codecsJSON, task.Config.ErrorMap, robotCfgJSON)
 	if err != nil {
-		return fmt.Errorf("insert task_config_archive: %w", err)
+		return fmt.Errorf("写入 task_config_archive 失败: %w", err)
 	}
 
 	// 6. task_agent_events
@@ -237,7 +237,7 @@ func (h *Store) Archive(ctx context.Context, task *admintask.Task, finalStress *
 			VALUES (?, ?, ?, ?, ?, ?)
 		`, task.ID, evt.AgentID, evt.AgentName, evt.Type, evt.Timestamp, evt.Detail)
 		if err != nil {
-			return fmt.Errorf("insert task_agent_events: %w", err)
+			return fmt.Errorf("写入 task_agent_events 失败: %w", err)
 		}
 	}
 
@@ -266,7 +266,7 @@ func (h *Store) List(ctx context.Context, filter Filter) (*ListResponse, error) 
 	var total int
 	countSQL := "SELECT COUNT(*)" + fromJoin + where
 	if err := h.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
-		return nil, fmt.Errorf("count history: %w", err)
+		return nil, fmt.Errorf("统计历史记录失败: %w", err)
 	}
 
 	querySQL := fmt.Sprintf(
@@ -275,7 +275,7 @@ func (h *Store) List(ctx context.Context, filter Filter) (*ListResponse, error) 
 	)
 	rows, err := h.db.QueryContext(ctx, querySQL, append(args, limit, offset)...)
 	if err != nil {
-		return nil, fmt.Errorf("list history: %w", err)
+		return nil, fmt.Errorf("查询历史记录失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -290,7 +290,7 @@ func (h *Store) List(ctx context.Context, filter Filter) (*ListResponse, error) 
 			&r.CreatedAt, &startedAt, &stoppedAt, &r.DurationSec, &r.ErrorMsg,
 			&r.Starred, &tagsBytes, &r.Note, &r.DebugMode, &summaryBytes, &r.StageCount,
 		); err != nil {
-			return nil, fmt.Errorf("scan history: %w", err)
+			return nil, fmt.Errorf("扫描历史记录失败: %w", err)
 		}
 
 		if startedAt.Valid {
@@ -307,7 +307,7 @@ func (h *Store) List(ctx context.Context, filter Filter) (*ListResponse, error) 
 		items = append(items, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate history: %w", err)
+		return nil, fmt.Errorf("遍历历史记录失败: %w", err)
 	}
 
 	if items == nil {
@@ -438,7 +438,7 @@ func (h *Store) getRecord(ctx context.Context, id string) (*Record, error) {
 		return nil, h.notFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get history: %w", err)
+		return nil, fmt.Errorf("获取历史记录失败: %w", err)
 	}
 
 	if startedAt.Valid {
@@ -546,7 +546,7 @@ func (h *Store) stagePlanForTask(ctx context.Context, id string) (admintask.Stag
 func (h *Store) queryAssignments(ctx context.Context, taskID string) ([]admintask.Assignment, error) {
 	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, start_number, total_bots FROM task_assignment WHERE task_id = ?`, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("query assignments: %w", err)
+		return nil, fmt.Errorf("查询任务分配失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -554,13 +554,13 @@ func (h *Store) queryAssignments(ctx context.Context, taskID string) ([]admintas
 	for rows.Next() {
 		var a admintask.Assignment
 		if err := rows.Scan(&a.AgentID, &a.StartNumber, &a.TotalBots); err != nil {
-			return nil, fmt.Errorf("scan assignment: %w", err)
+			return nil, fmt.Errorf("扫描任务分配失败: %w", err)
 		}
 		a.TaskID = taskID
 		items = append(items, a)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate assignments: %w", err)
+		return nil, fmt.Errorf("遍历任务分配失败: %w", err)
 	}
 	return items, nil
 }
@@ -569,7 +569,7 @@ func (h *Store) queryAssignments(ctx context.Context, taskID string) ([]admintas
 func (h *Store) queryReports(ctx context.Context, taskID string) ([]AgentReport, error) {
 	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, agent_name, result, error_msg, finished_at, final_snapshot, cleanup_status FROM task_report WHERE task_id = ?`, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("query reports: %w", err)
+		return nil, fmt.Errorf("查询任务报告失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -580,7 +580,7 @@ func (h *Store) queryReports(ctx context.Context, taskID string) ([]AgentReport,
 		var snapBytes []byte
 		var cleanupBytes []byte
 		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt, &snapBytes, &cleanupBytes); err != nil {
-			return nil, fmt.Errorf("scan report: %w", err)
+			return nil, fmt.Errorf("扫描任务报告失败: %w", err)
 		}
 		if finishedAt.Valid {
 			rep.FinishedAt = finishedAt.Time
@@ -595,7 +595,7 @@ func (h *Store) queryReports(ctx context.Context, taskID string) ([]AgentReport,
 		items = append(items, rep)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate reports: %w", err)
+		return nil, fmt.Errorf("遍历任务报告失败: %w", err)
 	}
 	return items, nil
 }
@@ -612,7 +612,7 @@ func (h *Store) queryReportSummaries(ctx context.Context, taskID string, stageIn
 		WHERE task_id = ? AND stage_index = ?
 	`, taskID, stageIndex)
 	if err != nil {
-		return nil, fmt.Errorf("query report summaries: %w", err)
+		return nil, fmt.Errorf("查询任务报告摘要失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -622,7 +622,7 @@ func (h *Store) queryReportSummaries(ctx context.Context, taskID string, stageIn
 		var finishedAt sql.NullTime
 		var cleanupBytes []byte
 		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt, &cleanupBytes); err != nil {
-			return nil, fmt.Errorf("scan report summary: %w", err)
+			return nil, fmt.Errorf("扫描任务报告摘要失败: %w", err)
 		}
 		if finishedAt.Valid {
 			rep.FinishedAt = finishedAt.Time
@@ -636,7 +636,7 @@ func (h *Store) queryReportSummaries(ctx context.Context, taskID string, stageIn
 		items = append(items, rep)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate report summaries: %w", err)
+		return nil, fmt.Errorf("遍历任务报告摘要失败: %w", err)
 	}
 	return items, nil
 }
@@ -682,7 +682,7 @@ func (h *Store) queryAggregatedSummary(ctx context.Context, taskID string, stage
 func (h *Store) queryAgentEvents(ctx context.Context, taskID string) ([]admintask.AgentEvent, error) {
 	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, agent_name, event_type, timestamp, detail FROM task_agent_events WHERE task_id = ? ORDER BY timestamp`, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("query agent events: %w", err)
+		return nil, fmt.Errorf("查询节点事件失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -691,7 +691,7 @@ func (h *Store) queryAgentEvents(ctx context.Context, taskID string) ([]admintas
 		var evt admintask.AgentEvent
 		var detail sql.NullString
 		if err := rows.Scan(&evt.AgentID, &evt.AgentName, &evt.Type, &evt.Timestamp, &detail); err != nil {
-			return nil, fmt.Errorf("scan agent event: %w", err)
+			return nil, fmt.Errorf("扫描节点事件失败: %w", err)
 		}
 		if detail.Valid {
 			evt.Detail = detail.String
@@ -699,7 +699,7 @@ func (h *Store) queryAgentEvents(ctx context.Context, taskID string) ([]admintas
 		items = append(items, evt)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate agent events: %w", err)
+		return nil, fmt.Errorf("遍历节点事件失败: %w", err)
 	}
 	return items, nil
 }
@@ -719,7 +719,7 @@ func (h *Store) GetCompareTask(ctx context.Context, id string, stageIndex int) (
 	var stressBytes []byte
 	err = h.db.QueryRowContext(ctx, `SELECT final_stress FROM task_aggregated WHERE task_id = ? AND stage_index = ?`, id, queryStage).Scan(&stressBytes)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("get compare stress: %w", err)
+		return nil, fmt.Errorf("获取对比压测指标失败: %w", err)
 	}
 
 	var stress monitor.CollectorSnapshot
@@ -786,7 +786,7 @@ func (h *Store) GetConfig(ctx context.Context, id string) (*admintask.Config, er
 		return nil, h.notFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get config: %w", err)
+		return nil, fmt.Errorf("获取任务配置失败: %w", err)
 	}
 
 	cfg.FlowJSON = json.RawMessage(flowJSON)
@@ -812,7 +812,7 @@ func (h *Store) GetConfigSummary(ctx context.Context, id string) (*ConfigSummary
 		return nil, h.notFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get config summary: %w", err)
+		return nil, fmt.Errorf("获取任务配置摘要失败: %w", err)
 	}
 
 	var robotCfg admintask.RobotConfig
@@ -891,7 +891,7 @@ func (h *Store) GetTimeseries(ctx context.Context, id string, maxPoints, stageIn
 
 	rows, err := h.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("get timeseries: %w", err)
+		return nil, fmt.Errorf("获取时序数据失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -925,7 +925,7 @@ func (h *Store) GetTimeseries(ctx context.Context, id string, maxPoints, stageIn
 		points = append(points, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate timeseries: %w", err)
+		return nil, fmt.Errorf("遍历时序数据失败: %w", err)
 	}
 
 	originalCount := len(points)
@@ -1141,7 +1141,7 @@ func (h *Store) AllTags(ctx context.Context) ([]string, error) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tags: %w", err)
+		return nil, fmt.Errorf("遍历标签失败: %w", err)
 	}
 	return tags, nil
 }
@@ -1167,7 +1167,7 @@ func allTagsFallback(ctx context.Context, db *sql.DB) ([]string, error) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tag fallback: %w", err)
+		return nil, fmt.Errorf("遍历标签兜底查询结果失败: %w", err)
 	}
 
 	var result []string
@@ -1191,7 +1191,7 @@ func (h *Store) UpsertMeta(ctx context.Context, id string, stageIndex int, req U
 		if errors.Is(err, sql.ErrNoRows) {
 			return h.notFound
 		}
-		return fmt.Errorf("check history exists: %w", err)
+		return fmt.Errorf("检查历史记录是否存在失败: %w", err)
 	}
 
 	// 读出当前值后按请求里出现的字段合并，未出现的字段保持不变（部分更新）。
@@ -1217,7 +1217,7 @@ func (h *Store) UpsertMeta(ctx context.Context, id string, stageIndex int, req U
 		ON DUPLICATE KEY UPDATE starred = VALUES(starred), tags = VALUES(tags), note = VALUES(note), updated_at = VALUES(updated_at)
 	`, id, stageIndex, starredVal, tagsJSON, cur.Note, time.Now())
 	if err != nil {
-		return fmt.Errorf("upsert meta: %w", err)
+		return fmt.Errorf("写入任务元数据失败: %w", err)
 	}
 	return nil
 }
@@ -1358,13 +1358,13 @@ func (h *Store) Delete(ctx context.Context, id string, force bool) error {
 			if errors.Is(err, sql.ErrNoRows) {
 				return h.notFound
 			}
-			return fmt.Errorf("check history exists: %w", err)
+			return fmt.Errorf("检查历史记录是否存在失败: %w", err)
 		}
 		var starred int
 		// 任务级或任一段落被收藏即受保护
 		if err := h.db.QueryRowContext(ctx,
 			`SELECT EXISTS (SELECT 1 FROM task_meta WHERE task_id = ? AND starred = 1)`, id).Scan(&starred); err != nil {
-			return fmt.Errorf("check starred: %w", err)
+			return fmt.Errorf("检查收藏标记失败: %w", err)
 		}
 		if starred == 1 {
 			return h.starred("task is starred, use force=true to delete")
@@ -1373,7 +1373,7 @@ func (h *Store) Delete(ctx context.Context, id string, force bool) error {
 
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return fmt.Errorf("开启事务失败: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -1388,13 +1388,13 @@ func (h *Store) Delete(ctx context.Context, id string, force bool) error {
 	}
 	for _, tbl := range childTables {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, tbl), id); err != nil {
-			return fmt.Errorf("delete %s: %w", tbl, err)
+			return fmt.Errorf("删除 %s 失败: %w", tbl, err)
 		}
 	}
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM task_history WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("delete task_history: %w", err)
+		return fmt.Errorf("删除 task_history 失败: %w", err)
 	}
 	n, _ := result.RowsAffected() // 同上
 	if n == 0 {
@@ -1456,22 +1456,22 @@ func (h *Store) PruneExpired(ctx context.Context, now time.Time) (int, error) {
 		  AND NOT EXISTS (SELECT 1 FROM task_meta m WHERE m.task_id = th.id AND m.starred = 1)
 	`, cutoff)
 	if err != nil {
-		return 0, fmt.Errorf("prune expired: query ids: %w", err)
+		return 0, fmt.Errorf("清理过期记录：查询 ID 失败: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return 0, fmt.Errorf("prune expired: scan id: %w", err)
+			return 0, fmt.Errorf("清理过期记录：扫描 ID 失败: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("prune expired: iterate ids: %w", err)
+		return 0, fmt.Errorf("清理过期记录：遍历 ID 失败: %w", err)
 	}
 	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("prune expired: close ids: %w", err)
+		return 0, fmt.Errorf("清理过期记录：关闭结果集失败: %w", err)
 	}
 
 	if len(ids) == 0 {
@@ -1481,7 +1481,7 @@ func (h *Store) PruneExpired(ctx context.Context, now time.Time) (int, error) {
 	// 事务：子表 + 主表原子删除，避免中途失败导致数据不一致
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("prune expired: begin tx: %w", err)
+		return 0, fmt.Errorf("清理过期记录：开启事务失败: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -1497,7 +1497,7 @@ func (h *Store) PruneExpired(ctx context.Context, now time.Time) (int, error) {
 	}
 	for _, tbl := range childTables {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id IN (%s)`, tbl, placeholders), args...); err != nil {
-			return 0, fmt.Errorf("prune expired: delete %s: %w", tbl, err)
+			return 0, fmt.Errorf("清理过期记录：删除 %s 失败: %w", tbl, err)
 		}
 	}
 
@@ -1505,11 +1505,11 @@ func (h *Store) PruneExpired(ctx context.Context, now time.Time) (int, error) {
 	result, err := tx.ExecContext(ctx,
 		fmt.Sprintf(`DELETE FROM task_history WHERE id IN (%s)`, placeholders), args...)
 	if err != nil {
-		return 0, fmt.Errorf("prune expired: delete main: %w", err)
+		return 0, fmt.Errorf("清理过期记录：删除主表失败: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("prune expired: commit: %w", err)
+		return 0, fmt.Errorf("清理过期记录：提交事务失败: %w", err)
 	}
 
 	n, _ := result.RowsAffected() // 同上

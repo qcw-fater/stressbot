@@ -1,4 +1,4 @@
-// Package admin — T3 Batch-1 前置：adapter 基线索引端点测试。
+// adapter 基线索引端点测试。
 //
 // 覆盖 brief §4：
 //   - GET /sbot/baseline/adapter/index.json 返回 200、Content-Type: application/json；

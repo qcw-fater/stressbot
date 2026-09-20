@@ -17,6 +17,12 @@ import (
 	"google.golang.org/grpc"
 )
 
+// 管理面 HTTP 超时：
+//   - ReadHeaderTimeout 防止慢客户端攻击型连接占住 server goroutine 不放，
+//     避免堆积导致 accept queue 满；
+//   - IdleTimeout 让长期空闲的 keep-alive 连接主动关闭，
+//     防止 agent → admin 的 client-side 池保留大量已不再使用的连接；
+//   - ReadTimeout/WriteTimeout 故意不设：history 导出可能很长。
 const (
 	managementReadHeaderTimeout = 10 * time.Second
 	managementIdleTimeout       = 120 * time.Second
@@ -51,13 +57,13 @@ func (s *Server) serveServers(ctx context.Context) error {
 	var listenConfig net.ListenConfig
 	managementListener, err := listenConfig.Listen(ctx, "tcp", s.managementSrv.Addr)
 	if err != nil {
-		return fmt.Errorf("management server listen: %w", err)
+		return fmt.Errorf("管理面监听失败: %w", err)
 	}
 	controlPlaneAddr := net.JoinHostPort(s.cfg.ControlPlane.ListenHost, strconv.Itoa(s.cfg.ControlPlane.Port))
 	controlPlaneListener, err := listenConfig.Listen(ctx, "tcp", controlPlaneAddr)
 	if err != nil {
 		_ = managementListener.Close()
-		return fmt.Errorf("control plane server listen: %w", err)
+		return fmt.Errorf("控制面监听失败: %w", err)
 	}
 
 	results := make(chan adminServeResult, 2)
@@ -70,13 +76,13 @@ func (s *Server) serveServers(ctx context.Context) error {
 			results <- adminServeResult{name: name, err: err}
 		})
 	}
-	serve("management", s.managementSrv, managementListener)
+	serve("管理面", s.managementSrv, managementListener)
 	workpool.Default().Go(func() {
 		err := s.grpcSrv.Serve(controlPlaneListener)
 		if errors.Is(err, grpc.ErrServerStopped) {
 			err = nil
 		}
-		results <- adminServeResult{name: "gRPC control plane", err: err}
+		results <- adminServeResult{name: "gRPC 控制面", err: err}
 	})
 
 	select {
@@ -86,7 +92,7 @@ func (s *Server) serveServers(ctx context.Context) error {
 	case result := <-results:
 		shutdownErr := s.Shutdown(context.Background())
 		if result.err != nil {
-			return fmt.Errorf("%s server: %w", result.name, result.err)
+			return fmt.Errorf("%s 服务异常退出: %w", result.name, result.err)
 		}
 		return shutdownErr
 	}
