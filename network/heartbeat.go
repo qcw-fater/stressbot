@@ -12,8 +12,7 @@ import (
 // 每次心跳触发时调用，返回完整的待发送字节数据（已含消息头+消息体+加密）。
 // 返回 nil 表示本次跳过发送。
 //
-// 2-B 起为 Go-only builder（不再保存 Lua function）；
-// 2-C3 起由 connectionPump 在其单 goroutine 内同步调用，因此 builder 不必线程安全
+// 由 connectionPump 在其单 goroutine 内同步调用，因此 builder 不必线程安全
 // （pump 是唯一执行者），但仍应避免阻塞——若需读取 state，走线程安全 state API。
 type HeartbeatBuilder func() []byte
 
@@ -25,10 +24,9 @@ type HeartbeatConfig struct {
 
 // heartbeatRuntime 是 connectionPump 持有的心跳运行时状态。
 //
-// 2-C3 起：pump 是心跳 timer + cfg 的唯一 owner（在 pump goroutine 内无锁读写），
-// 旧的独立 runHeartbeat goroutine / heartbeatState.stop / heartbeatState.done 全部下线。
-// hbMu 只保护「pump 外部 goroutine 投递 controlCh 前后的 hb 快照读」（RegisterHeartbeat
-// 的 fail-fast 判断），pump 内部读写 hb 不走这把锁。
+// pump 是心跳 timer + cfg 的唯一 owner（在 pump goroutine 内无锁读写）。
+// hbMu 只保护「pump 外部 goroutine 投递 controlCh 前后的 hb 快照读」，
+// pump 内部读写 hb 不走这把锁。
 type heartbeatRuntime struct {
 	cfg   HeartbeatConfig
 	timer *time.Timer // pump-owned，由 resetHeartbeatTimerLocked / stopHeartbeatTimerLocked 管理
@@ -42,13 +40,12 @@ type heartbeatRuntime struct {
 // RegisterHeartbeat 在连接上注册心跳。
 // 若已有心跳则替换之。连接关闭时由 pump 的 ctx.Done→defer 自动停止 timer。
 //
-// 2-C3 起：本方法**签名保持稳定**（HeartbeatConfig{Interval, Builder func() []byte}），
-// 但实现从「启动独立 runHeartbeat goroutine」改为「投递 pumpCmdHeartbeat 给 connectionPump，
-// 由 pump 在自己的 select 分支里串行安装 cfg + 重置 timer」。这样心跳发送、inbound decode、
-// listen 分发共享同一 pump goroutine，builder 不触碰业务 LState。
+// 实现是「投递 pumpCmdHeartbeat 给 connectionPump，由 pump 在自己的 select 分支里串行
+// 安装 cfg + 重置 timer」。这样心跳发送、inbound decode、listen 分发共享同一 pump goroutine。
 //
-// 必须在 StartPump 之后调用（pump 未启动时 controlCh 为 nil，本方法降级为直接写 c.hb + 启动
-// 临时 timer 的兼容路径——但生产路径 dial 总是先 StartPump 后注册心跳，故该降级路径仅用于测试）。
+// 必须在 StartPump 之后调用：心跳 timer 只有 pump 会消费，pump 未启动时注册无意义，
+// 本方法拒绝注册并记 Error 日志（拨号路径 OnOpen 内 bind → StartPump → 才可能有动作注册心跳，
+// 走到这里说明调用序被破坏，属于需要修代码的缺陷，不是可以静默容忍的运行时状态）。
 func (c *Connection) RegisterHeartbeat(cfg HeartbeatConfig) {
 	if c == nil || c.isClose.Load() == 1 {
 		return
@@ -57,14 +54,11 @@ func (c *Connection) RegisterHeartbeat(cfg HeartbeatConfig) {
 		return
 	}
 
-	// pump 未启动（测试或异常路径）：直接写 hb 字段并启动 timer。
-	// 此时没有 pump goroutine 消费 timer.C，timer 到期后只是个无人读的 channel，
-	// 会在 StopHeartbeat / Close 时被 Stop 回收，无泄漏。生产路径不走这里。
 	if c.controlCh == nil {
-		c.hbMu.Lock()
-		c.hb = &heartbeatRuntime{cfg: cfg}
-		c.hb.timer = time.NewTimer(cfg.Interval)
-		c.hbMu.Unlock()
+		stresslog.Error("[HEARTBEAT] 注册失败：pump 未启动（须先 StartPump 再注册心跳）",
+			zap.String("service", c.serviceName),
+			zap.String("robot", c.robotName),
+			zap.Duration("interval", cfg.Interval))
 		return
 	}
 
@@ -96,20 +90,9 @@ func (c *Connection) StopHeartbeat() {
 	if c == nil {
 		return
 	}
-	// pump 未启动路径（与 RegisterHeartbeat 对称）：直接停 timer + 清 hb。
+	// pump 未启动：hb 只可能由 pump 安装（RegisterHeartbeat 在 pump 未启动时拒绝注册），
+	// 此时必然没有心跳需要停。
 	if c.controlCh == nil {
-		c.hbMu.Lock()
-		hb := c.hb
-		c.hb = nil
-		c.hbMu.Unlock()
-		if hb != nil && hb.timer != nil {
-			if !hb.timer.Stop() {
-				select {
-				case <-hb.timer.C:
-				default:
-				}
-			}
-		}
 		return
 	}
 
