@@ -5,15 +5,15 @@ import (
 	"time"
 )
 
-// fakeNetSender 为 engine 单元测试提供 NetSender 空实现；各测试按需覆盖单个方法。
+// fakeNetSender 为 engine 单元测试提供 ActionNetSender 空实现；各测试按需覆盖单个方法。
 type fakeNetSender struct{}
 
 func (f *fakeNetSender) TCPSend(string, []byte) (int, error) { return 0, nil }
 func (f *fakeNetSender) UDPSend(string, []byte) (int, error) { return 0, nil }
-func (f *fakeNetSender) TCPRequest(string, []byte, string, ...time.Duration) (*NetExchange, error) {
+func (f *fakeNetSender) TCPRequest(context.Context, string, []byte, string, ...time.Duration) (*NetExchange, error) {
 	return nil, nil
 }
-func (f *fakeNetSender) UDPRequest(string, []byte, string, ...time.Duration) (*NetExchange, error) {
+func (f *fakeNetSender) UDPRequest(context.Context, string, []byte, string, ...time.Duration) (*NetExchange, error) {
 	return nil, nil
 }
 func (f *fakeNetSender) TCPListen(context.Context, string, string, time.Duration) (*NetExchange, error) {
@@ -37,3 +37,5 @@ func (f *fakeNetSender) GetTCPSecretKey(string) []byte                { return n
 func (f *fakeNetSender) SetTCPSecretKey(string, []byte)               {}
 func (f *fakeNetSender) GetUDPSecretKey(string) []byte                { return nil }
 func (f *fakeNetSender) SetUDPSecretKey(string, []byte)               {}
+
+var _ ActionNetSender = (*fakeNetSender)(nil)

@@ -32,7 +32,7 @@ func TestSendRequest_RegisterSendAndDeliver(t *testing.T) {
 	defer conn.Close()
 
 	const routeKey = "C2S.Login"
-	pr, err := conn.SendRequest([]byte("hello"), routeKey, 500*time.Millisecond)
+	pr, err := conn.SendRequest(t.Context(), []byte("hello"), routeKey, 500*time.Millisecond)
 	if err != nil {
 		t.Fatalf("SendRequest 失败: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestSendRequest_SendError(t *testing.T) {
 	defer conn.Close()
 
 	const routeKey = "C2S.Fail"
-	pr, err := conn.SendRequest([]byte("x"), routeKey, time.Second)
+	pr, err := conn.SendRequest(t.Context(), []byte("x"), routeKey, time.Second)
 	if err == nil {
 		t.Fatal("无 sendFunc 时 SendRequest 应返回 error")
 	}
@@ -100,7 +100,7 @@ func TestSendRequest_Closed(t *testing.T) {
 	conn, _ := newSendableConn(t)
 	conn.Close()
 
-	pr, err := conn.SendRequest([]byte("x"), "k", time.Second)
+	pr, err := conn.SendRequest(t.Context(), []byte("x"), "k", time.Second)
 	if err == nil {
 		t.Fatal("已关闭连接 SendRequest 应返回 error")
 	}
@@ -114,7 +114,7 @@ func TestSendRequest_DefaultTimeout(t *testing.T) {
 	conn, _ := newSendableConn(t) // requestTimeout = time.Second（newTestConnection）
 	defer conn.Close()
 
-	pr, err := conn.SendRequest([]byte("x"), "k", 0)
+	pr, err := conn.SendRequest(t.Context(), []byte("x"), "k", 0)
 	if err != nil {
 		t.Fatalf("SendRequest 失败: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestSendRequest_DefaultTimeout(t *testing.T) {
 func TestPendingRequest_ConcurrentClose(t *testing.T) {
 	conn, _ := newSendableConn(t)
 	defer conn.Close()
-	pr, err := conn.SendRequest([]byte("x"), "k", time.Second)
+	pr, err := conn.SendRequest(t.Context(), []byte("x"), "k", time.Second)
 	if err != nil {
 		t.Fatalf("SendRequest 失败: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestPendingRequest_ConcurrentClose(t *testing.T) {
 func TestPendingRequest_TimingNilResp(t *testing.T) {
 	conn, _ := newSendableConn(t)
 	defer conn.Close()
-	pr, err := conn.SendRequest([]byte("x"), "k", time.Second)
+	pr, err := conn.SendRequest(t.Context(), []byte("x"), "k", time.Second)
 	if err != nil {
 		t.Fatalf("SendRequest 失败: %v", err)
 	}

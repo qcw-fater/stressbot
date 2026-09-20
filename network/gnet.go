@@ -59,7 +59,7 @@ func (r *connRegistry) get(gconn gnet.Conn) *Connection {
 // EventServer gnet 事件处理器。
 //
 // adp 是 OnTraffic 热路径的元信息源：
-//   - HeaderSize / BodyLength（纯 Go 缓存字段，零 Lua 调用）
+//   - HeaderSize / BodyLength（编译期定型的纯 Go 字段读取，无解析开销）
 //   - decode 使用 DialTCP/DialUDP 注入到 Connection 的 Go SchemaAdapter
 type EventServer struct {
 	gnet.BuiltinEventEngine
@@ -116,8 +116,8 @@ func (es *EventServer) OnOpen(gconn gnet.Conn) ([]byte, gnet.Action) {
 
 // OnClose gnet 连接关闭回调。
 //
-// 把 err 字符串归一化为简短 reason 传给 Connection.onClose，让 inflight RequestResponse
-// 命中 ctx.Done() 时能拼到错误 detail（例如 "cause=EOF" / "cause=RST(forcibly closed)"）。
+// 把 err 字符串归一化为简短 reason（"EOF" / "RST" / "local-close" 等）用于分级日志，
+// 让异常断开与服务端正常 FIN 在日志里区分得开。
 // reason="" 表示无错误的正常关闭（服务端调 close 但底层没报 error，少见）。
 func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 	conn := es.registry.get(gconn)
@@ -141,7 +141,7 @@ func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 				zap.String("reason", reason),
 				zap.Error(err))
 		}
-		conn.onClose(reason)
+		conn.onClose()
 	}
 	return gnet.None
 }
@@ -179,10 +179,10 @@ func closeReasonFromErr(err error) string {
 // OnTraffic gnet 收到数据回调。
 //
 // 设计原则：此函数运行在 gnet 事件循环 goroutine 上，**严禁同步阻塞**
-// （阻塞会让该 loop 上所有连接的 I/O 一起冻结，是 CONN_DROPPED 雪崩的源头）。
+// （阻塞会让该 loop 上所有连接的 I/O 一起冻结，是服务端 RST 断连雪崩的源头）。
 //
 // 因此只做两件纯 Go 操作：
-//  1. 用 adapter 缓存的元信息做帧分割（HeaderSize / BodyLength，零 Lua 调用）
+//  1. 用 adapter 缓存的元信息做帧分割（HeaderSize / BodyLength，纯字段读取）
 //  2. 把 raw msgBuf 投递到 connection 的 inboundCh，由 per-connection 的 connectionPump
 //     goroutine 异步完成 decode + request-response/listen 分发 + 心跳
 //

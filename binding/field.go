@@ -8,9 +8,15 @@ import (
 
 // PreparedCondition 是加载期编译后的只读字段条件。
 // 具体编译产物由 flow 提供，binding 只保存和消费最小求值契约。
+//
+// 字段条件与节点条件同样支持 state: 与 lua: 两种前缀，因此求值契约必须同时暴露
+// 两条路径：EvalState 只能跑 state: 程序，lua: 条件要靠 LuaScript 取出脚本名后
+// 交给持有 Lua 运行时的那一层执行。只用 EvalState 会让 lua: 条件恒为 false。
 type PreparedCondition interface {
 	Source() string
 	EvalState(store *state.Store) bool
+	// LuaScript 返回 Lua 条件引用；第二个返回值仅在条件使用 lua: 前缀时为 true。
+	LuaScript() (string, bool)
 }
 
 // MapEntryBind 定义 proto map 字段中的单个 entry。

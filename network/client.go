@@ -117,8 +117,7 @@ func (c *Client) CloseUDP(serviceName string) {
 }
 
 // CloseAll 关闭所有连接，并等待所有后台 goroutine 退出。
-// 等待顺序：先 decode（OnReceive 的源头）再 listen（OnReceive 的下游），
-// 确保任何回调离开后不再有数据流入 Robot 资源。
+// 返回时任何回调都已离开，不再有数据流入 Robot 资源。
 func (c *Client) CloseAll() {
 	_ = c.CloseAllWithTimeout(0)
 }
@@ -159,26 +158,30 @@ func (c *Client) CloseAllWithTimeout(timeout time.Duration) CloseAllResult {
 		return d
 	}
 
+	// 等待收尾：每条连接只有一个 connectionPump goroutine（inbound decode + listen 分发 +
+	// 心跳都在它上面），它退出即代表两侧收尾都已完成。两轮等待因此落在同一个信号上：
+	// 第一轮成功后第二轮立即返回，超时时两个计数一起上量——保持 CloseAllResult 对上层
+	// （robot 清理超时日志）的既有口径不变。
 	for _, conn := range tcpConns {
-		if !conn.WaitDecodeDoneTimeout(remaining()) {
+		if !conn.WaitPumpDoneTimeout(remaining()) {
 			result.Done = false
 			result.DecodeTimeouts++
 		}
 	}
 	for _, conn := range udpConns {
-		if !conn.WaitDecodeDoneTimeout(remaining()) {
+		if !conn.WaitPumpDoneTimeout(remaining()) {
 			result.Done = false
 			result.DecodeTimeouts++
 		}
 	}
 	for _, conn := range tcpConns {
-		if !conn.WaitListenDoneTimeout(remaining()) {
+		if !conn.WaitPumpDoneTimeout(remaining()) {
 			result.Done = false
 			result.ListenTimeouts++
 		}
 	}
 	for _, conn := range udpConns {
-		if !conn.WaitListenDoneTimeout(remaining()) {
+		if !conn.WaitPumpDoneTimeout(remaining()) {
 			result.Done = false
 			result.ListenTimeouts++
 		}

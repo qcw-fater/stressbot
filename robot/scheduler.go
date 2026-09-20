@@ -96,7 +96,7 @@ func (s *robotScheduler) wait(ctx context.Context, deadline time.Time, wake <-ch
 		}
 	}()
 	for {
-		if (ctx != nil && ctx.Err() != nil) || (s.robot.ctx != nil && s.robot.ctx.Err() != nil) {
+		if canceled(ctx) || canceled(s.robot.ctx) {
 			return script.WaitOutcome{Canceled: true}
 		}
 		if check != nil {
@@ -141,8 +141,19 @@ func (s *robotScheduler) wait(ctx context.Context, deadline time.Time, wake <-ch
 // taskCh 与响应通道在同一个 select 里公平竞争：响应经通道即时命中（不被 drain 批次挡），
 // WireRTT 使用底层消息时间戳计算。命中 / 超时 / 取消 / 发送失败分别返回带 Exchange / Err /
 // Canceled 的 WaitOutcome，由 drive-loop 的 requestResultValues 转 Lua 值。
-func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome {
-	ctx := s.robot.ctx
+//
+// ctx 是调用方的取消域（声明式动作传流程 ctx，Lua 传 Robot ctx），与 Robot 生命周期 ctx
+// 一并进 select——两者任一取消都立刻退出在途请求，不等满超时窗口。与 wait 同一套写法。
+// 退出前 defer pr.Close() 注销 responseMap 条目并关通道，取消路径同样不泄漏。
+func (s *robotScheduler) awaitResponse(ctx context.Context, spec *script.WaitSpec) script.WaitOutcome {
+	var callerDone <-chan struct{}
+	if ctx != nil {
+		callerDone = ctx.Done()
+	}
+	var robotDone <-chan struct{}
+	if s.robot.ctx != nil {
+		robotDone = s.robot.ctx.Done()
+	}
 	var conn *network.Connection
 	if spec.Proto == "udp" {
 		conn = s.robot.client.GetUDPConn(spec.Service)
@@ -153,8 +164,11 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 		return script.WaitOutcome{Err: errcode.NewActionError(errcode.ErrConnNotFound, "service="+spec.Service)}
 	}
 
-	pr, err := conn.SendRequest(spec.Packet, spec.RouteKey, spec.Duration)
+	pr, err := conn.SendRequest(ctx, spec.Packet, spec.RouteKey, spec.Duration)
 	if err != nil {
+		if canceled(ctx) || canceled(s.robot.ctx) {
+			return script.WaitOutcome{Canceled: true}
+		}
 		return script.WaitOutcome{Err: err}
 	}
 	defer pr.Close()
@@ -163,7 +177,7 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 	timer := timerpool.GetTimer(pr.Timeout())
 	defer timerpool.PutTimer(timer)
 	for {
-		if ctx.Err() != nil {
+		if canceled(ctx) || canceled(s.robot.ctx) {
 			return script.WaitOutcome{Canceled: true}
 		}
 		select {
@@ -180,13 +194,31 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 				RecvWireBytes: resp.WireBytes,
 				Timing:        engine.RequestTiming(pr.Timing(resp)),
 			}}
-		case <-ctx.Done():
+		case <-callerDone:
+			return script.WaitOutcome{Canceled: true}
+		case <-robotDone:
 			return script.WaitOutcome{Canceled: true}
 		case <-timer.C:
 			return script.WaitOutcome{Err: errcode.NewActionError(errcode.ErrRecvTimeout,
 				"service="+spec.Service+" route="+spec.RouteKey+" timeout="+pr.Timeout().String())}
 		}
 	}
+}
+
+// canceled 判断一个可空 ctx 是否已取消。
+func canceled(ctx context.Context) bool {
+	return ctx != nil && ctx.Err() != nil
+}
+
+// firstCanceledCause 按传入顺序返回第一个已取消 ctx 的 Err（调用方 ctx 优先于 Robot ctx），
+// 都未取消返回 nil。用于给取消错误挂上原因，保留 errors.Is(context.Canceled) 判定。
+func firstCanceledCause(ctxs ...context.Context) error {
+	for _, ctx := range ctxs {
+		if canceled(ctx) {
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // runIO 协作式执行一次 Class B 阻塞 I/O（share.* Redis / http / 拨号）：把 job 投递到协程池

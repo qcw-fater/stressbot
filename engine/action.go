@@ -192,10 +192,9 @@ func (t *ActionTiming) WireRTTSum() time.Duration {
 //
 // encode 侧（protocolEncode / ExpectedRouteKey / DescribeError）通过 resolver 按
 // "<proto>:<service>"（proto 由 pattern 推导，service=def.Service）Resolve 出该连接的
-// Go SchemaAdapter。Resolve nil 时由调用方 fail loud（ErrEncodeFailed），不静默兜底；
-// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 全程经 CodecResolver，无 Lua codec 生产路径。
+// Go SchemaAdapter。Resolve nil 时由调用方 fail loud（ErrEncodeFailed），不静默兜底。
 type ActionExecutor struct {
-	netSender   NetSender              // 网络发送委托，由 Robot 层实现
+	netSender   ActionNetSender        // 网络发送委托，由 Robot 层实现
 	store       *state.Store           // Robot 状态存储，保存服务器响应字段和中间变量
 	factory     *protox.Factory        // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
 	resolver    protocol.CodecResolver // 按 "<proto>:<service>" 解析每连接的 Go codec adapter
@@ -205,6 +204,9 @@ type ActionExecutor struct {
 	// 与 Lua await_*（share/http/connect）同源（同一 runIO 原语），声明式与脚本两条路径协作式语义一致。
 	// nil（engine 独立运行/测试）时直接同步调 job，保持 engine 对 robot 解耦。
 	coopIO func(job func()) error
+	// luaCondition 执行字段绑定上的 lua: 条件脚本（由 Robot 层注入，与节点条件走同一个
+	// executeLuaBoolean）。engine 自身不持有 Lua 运行时，nil 时 lua: 字段条件 fail loud 拒绝。
+	luaCondition func(script string) bool
 }
 
 // SetCooperativeIO 注入协作式阻塞 I/O 后端（Robot 调度器 sched.runIO）。
@@ -214,15 +216,45 @@ func (ae *ActionExecutor) SetCooperativeIO(f func(job func()) error) {
 	ae.coopIO = f
 }
 
+// SetLuaConditionEvaluator 注入字段绑定 lua: 条件的求值后端（Robot 层的 executeLuaBoolean）。
+// 未注入时 lua: 字段条件报错并按拒绝处理，不会静默当成 false。
+func (ae *ActionExecutor) SetLuaConditionEvaluator(f func(script string) bool) {
+	ae.luaCondition = f
+}
+
 // runIO 协作式执行一次阻塞 I/O：注入了 coopIO 则走调度器（后台跑 + drain mailbox），否则直接
 // 同步调 job（engine 独立运行无 mailbox 可 drain）。job 的结果经其自身闭包捕获，调用方在 runIO
 // 返回后读取。
-func (ae *ActionExecutor) runIO(job func()) error {
+//
+// ctx 已取消时不再投递作业：停止阶段不该再发起新的拨号 / HTTP 往返。作业一旦投递就等它跑完
+// ——调度器的 runIO 刻意不在等待处 select ctx.Done（提前返回会让后台作业的结果无人接收，声明式
+// 路径拿不到 Go 侧产物），取消的响应性由作业自身持有的 ctx 保证：HTTP 请求绑 Robot ctx、拨号
+// 经 Dialer.dial 的 ctx 检查。
+func (ae *ActionExecutor) runIO(ctx context.Context, job func()) error {
+	if err := ctxCanceled(ctx); err != nil {
+		return err
+	}
 	if ae.coopIO != nil {
 		return ae.coopIO(job)
 	}
 	job()
 	return nil
+}
+
+// ctxCanceled 把「流程已取消」翻译成上层可识别的取消错误；ctx 未取消返回 nil。
+//
+// 统一用 errcode.ErrActionCanceled（与 network / robot 的取消路径同码，且 Unwrap 保留
+// context.Canceled），保证 monitor 归类为 Canceled 而不是 Timeout / Failure——
+// 停止一批机器人时，在途动作若被算成失败会在监控面堆出假故障。
+func ctxCanceled(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	err := ctx.Err()
+	if err == nil {
+		return nil
+	}
+	return errcode.NewActionError(errcode.ErrActionCanceled, "流程已取消", err)
 }
 
 // NetExchange 单次 TCP/UDP 请求或监听得到的网络交换结果。
@@ -253,21 +285,16 @@ type HTTPExchange struct {
 // NetSender 网络发送委托接口。
 // 由 Robot 层实现，封装 TCP/UDP 连接管理和 HTTP 请求能力。
 //
-// 注意：TCPRequest / UDPRequest 返回的 Timing.WireRTT 表示
-// "Send 完成 → 收到完整响应帧"，不含 decode、响应解析和 state 写入等客户端开销。
+// 本接口是声明式动作与 Lua 运行时（script.Context.NetSender）共用的基础能力面；
+// 只有声明式动作用得到的「取消感知请求-响应」另见 ActionNetSender。
 type NetSender interface {
-	// ── 发送 / 请求-响应 ─────────────────────────────────────────────────
+	// ── 发送 ──────────────────────────────────────────────────────────────
 
 	// TCPSend 向指定服务发送 TCP 数据包（不等响应），返回发送字节数。
+	// 不阻塞：数据挂进 gnet 待写队列即返回，故无需 ctx。
 	TCPSend(service string, packet []byte) (int, error)
-	// UDPSend 向指定服务发送 UDP 数据包（不等响应），返回发送字节数。
+	// UDPSend 向指定服务发送 UDP 数据包（不等响应），返回发送字节数。语义同 TCPSend。
 	UDPSend(service string, data []byte) (int, error)
-	// TCPRequest 发送 TCP 请求并等待匹配 routeKey 的响应。
-	// 返回发送 WireBytes、接收 WireBytes、响应体、协议头错误码和网络耗时。timeout 可选，覆盖默认超时。
-	TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error)
-	// UDPRequest 发送 UDP 请求并等待匹配 routeKey 的响应。
-	// 返回值语义同 TCPRequest。
-	UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error)
 	// TCPListen 等待已预注册 routeKey 的 TCP 推送。nil, nil 表示超时。
 	TCPListen(ctx context.Context, service, routeKey string, timeout time.Duration) (*NetExchange, error)
 	// UDPListen 等待已预注册 routeKey 的 UDP 推送。nil, nil 表示超时。
@@ -311,10 +338,35 @@ type NetSender interface {
 	SetUDPSecretKey(service string, key []byte)
 }
 
+// ActionNetSender 是 ActionExecutor 需要的网络委托：NetSender 之上补两个取消感知的
+// 请求-响应方法。
+//
+// 拆成两层而不是直接给 NetSender 全体方法加 ctx：请求-响应只有声明式动作在用
+// （Lua 侧的请求走 script.Waiter 协作式路径，不碰这两个方法），而它是本层唯一
+// 「发出去后要等对端」的阻塞点，必须绑定流程 ctx 才能在任务停止时立刻退出在途请求，
+// 故首参强制 ctx；NetSender 其余能力被 Lua 运行时共用，保持原签名。
+//
+// 实现方契约：ctx 取消时必须尽快返回，且返回的错误要能被上层识别为「取消」而非
+// 「超时」（errcode.ErrActionCanceled 或包 context.Canceled 的错误），否则
+// monitor 会把停止流量算成超时失败。
+//
+// 注意：TCPRequest / UDPRequest 返回的 Timing.WireRTT 表示
+// "Send 完成 → 收到完整响应帧"，不含 decode、响应解析和 state 写入等客户端开销。
+type ActionNetSender interface {
+	NetSender
+
+	// TCPRequest 发送 TCP 请求并等待匹配 routeKey 的响应。
+	// 返回发送 WireBytes、接收 WireBytes、响应体、协议头错误码和网络耗时。timeout 可选，覆盖默认超时。
+	TCPRequest(ctx context.Context, service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error)
+	// UDPRequest 发送 UDP 请求并等待匹配 routeKey 的响应。
+	// 返回值语义同 TCPRequest。
+	UDPRequest(ctx context.Context, service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error)
+}
+
 // NewActionExecutor 创建声明式动作执行器。
-// resolver 按 "<proto>:<service>" 解析每连接的 Go codec adapter（T2-C2 起 encode 侧）。
+// resolver 按 "<proto>:<service>" 解析每连接的 Go codec adapter。
 // timingLevel: 0=仅 RTT, 1=含编解码, 2=完整客户端细分。
-func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, resolver protocol.CodecResolver, timingLevel int) *ActionExecutor {
+func NewActionExecutor(store *state.Store, sender ActionNetSender, factory *protox.Factory, resolver protocol.CodecResolver, timingLevel int) *ActionExecutor {
 	return &ActionExecutor{
 		netSender:   sender,
 		store:       store,
@@ -328,14 +380,27 @@ func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Fac
 //
 // timing 仅在确实发生 send→recv 网络窗口的 pattern 中填充（request/listen/http）；
 // send-only / connect / close / state 类动作 timing 为零值，monitor 据此跳过 latency 直方图。
+//
+// ctx 取消语义（全 pattern 统一）：
+//   - 入口一次早退：ctx 已取消则直接返回 ErrActionCanceled，一个字节都不再发出去。
+//     本地瞬时动作（setState / clearState / close）也走这条——它们不会阻塞，但停止阶段
+//     没有理由再写 state 或关连接制造新的副作用，早退让 14 个 pattern 的取消表现一致。
+//   - 阻塞点响应取消：listen 经 NetSender.TCPListen/UDPListen 的 ctx；request 经
+//     ActionNetSender.TCPRequest/UDPRequest 的 ctx；connect / httpRequest 经 runIO 的
+//     投递前检查 + 作业自身持有的 ctx。
+//   - 不额外接 ctx 的分支只有 send 与 state 两类：它们没有等待窗口（send 挂进 gnet
+//     待写队列即返回），入口早退已是它们能响应取消的全部位置。
 func (ae *ActionExecutor) Execute(ctx context.Context, def *flowdef.ActionDef) (sendBytes, recvBytes int, timing ActionTiming, err error) {
+	if err = ctxCanceled(ctx); err != nil {
+		return 0, 0, ActionTiming{}, err
+	}
 	switch def.Pattern {
 	case flowdef.PatternTCPSend:
 		sendBytes, timing, err = ae.execSend("tcp", def)
 	case flowdef.PatternTCPRequest:
-		sendBytes, recvBytes, timing, err = ae.execRequest("tcp", def)
+		sendBytes, recvBytes, timing, err = ae.execRequest(ctx, "tcp", def)
 	case flowdef.PatternTCPConnect:
-		err = ae.execTCPConnect(def)
+		err = ae.execTCPConnect(ctx, def)
 	case flowdef.PatternTCPClose:
 		ae.execTCPClose(def)
 	case flowdef.PatternTCPListen:
@@ -343,19 +408,19 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *flowdef.ActionDef) (
 	case flowdef.PatternUDPSend:
 		sendBytes, timing, err = ae.execSend("udp", def)
 	case flowdef.PatternUDPRequest:
-		sendBytes, recvBytes, timing, err = ae.execRequest("udp", def)
+		sendBytes, recvBytes, timing, err = ae.execRequest(ctx, "udp", def)
 	case flowdef.PatternUDPConnect:
-		err = ae.execUDPConnect(def)
+		err = ae.execUDPConnect(ctx, def)
 	case flowdef.PatternUDPClose:
 		ae.execUDPClose(def)
 	case flowdef.PatternUDPListen:
 		recvBytes, timing, err = ae.execListen(ctx, "udp", def)
 	case flowdef.PatternHTTPRequest:
-		sendBytes, recvBytes, timing, err = ae.execHTTPRequest(def)
+		sendBytes, recvBytes, timing, err = ae.execHTTPRequest(ctx, def)
 	case flowdef.PatternClearState:
 		err = ae.execClearState(def)
 	case flowdef.PatternSetState:
-		ae.execSetState(def)
+		err = ae.execSetState(def)
 	default:
 		err = errcode.NewActionError(errcode.ErrUnknownPattern, "pattern="+def.Pattern)
 	}
@@ -377,7 +442,7 @@ func (ae *ActionExecutor) buildBody(def *flowdef.ActionDef) ([]byte, error) {
 // BuildProtoBody 按 c2sProto + bindings 构造 proto 消息并序列化为 body 字节。
 //
 // 复用现有 binding 解析（bindFields 同语义），供 tcpSend/tcpRequest（经 buildBody）
-// 与心跳 proto 模式（HeartbeatConfig.C2SProto + Bindings）共享。Go-only，不碰 Lua。
+// 与心跳 proto 模式（HeartbeatConfig.C2SProto + Bindings）共享。
 //
 // 参数：
 //   - c2sProto：proto 全名；空串 → 返回 (nil, false, nil)（空 body，与 buildBody 旧行为对齐）；
@@ -404,7 +469,7 @@ func BuildProtoBody(c2sProto string, bindings []binding.FieldBind, store *state.
 //
 // 复用 ae.bindFields 的完整 binding 解析语义（condition/optional/required/map 等），
 // 供 tcpSend/tcpRequest（经 buildBody）与心跳 proto 模式共享，且可复用同一执行器实例，
-// 消除每次发送 / 每个心跳 tick 新建临时 ActionExecutor 的分配。Go-only，不碰 Lua。
+// 消除每次发送 / 每个心跳 tick 新建临时 ActionExecutor 的分配。
 //
 //   - c2sProto 为空 → 返回 (nil,false,nil)（空 body，与旧 buildBody 行为对齐）；
 //   - skip 恒为 false（保留给未来 binding 缺失「跳过」语义）；
@@ -479,40 +544,78 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []binding.Field
 	return nil
 }
 
+// resolveFieldValueStrict 解析 proto 字段绑定值：map 绑定按 proto map 形态构造，其余类型直取。
 func (ae *ActionExecutor) resolveFieldValueStrict(fb *binding.FieldBind, actionName, fieldName string) (any, error) {
 	if fb.Type != binding.BindMap {
-		return ae.resolveFieldValue(fb), nil
+		return ae.resolveFieldValue(fb, actionName)
 	}
 
 	return ae.resolveMapValueStrict(fb, actionName, fieldName)
 }
 
+// resolveStateValue 解析 setState / HTTP body 的绑定值。
+// 与 proto 侧的唯一差别在 map 形态：这两侧的消费方（state.Store 的 map 取值、json.Marshal）
+// 只认 string key，故 map 绑定走 string key 构造，而不是 proto 的 map[any]any。
+func (ae *ActionExecutor) resolveStateValue(fb *binding.FieldBind, actionName string) (any, error) {
+	if fb.Type == binding.BindMap {
+		return ae.resolveMapValueStringKeyed(fb, actionName, fb.Field)
+	}
+	return ae.resolveFieldValue(fb, actionName)
+}
+
+// resolveMapValueStrict 构造 proto map 字段值：key 保持配置声明的原始类型
+// （proto map key 允许整数 / 布尔），由 Factory.SetField 归一到字段描述符类型。
 func (ae *ActionExecutor) resolveMapValueStrict(fb *binding.FieldBind, actionName, fieldName string) (any, error) {
 	result := make(map[any]any, len(fb.Entries))
+	if err := ae.walkMapEntries(fb, actionName, fieldName, func(key, value any) {
+		result[key] = value
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// resolveMapValueStringKeyed 构造 state / HTTP JSON body 用的 map 值，key 按 %v 归一为字符串。
+func (ae *ActionExecutor) resolveMapValueStringKeyed(fb *binding.FieldBind, actionName, fieldName string) (any, error) {
+	result := make(map[string]any, len(fb.Entries))
+	if err := ae.walkMapEntries(fb, actionName, fieldName, func(key, value any) {
+		result[fmt.Sprintf("%v", key)] = value
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// walkMapEntries 按声明顺序求值 map 绑定的 entries，每条有效 entry 回调一次 emit。
+// 条件为假与 optional 缺失是跳过，其余非法配置（不可比较 key、嵌套 map、必需值缺失）一律报错。
+func (ae *ActionExecutor) walkMapEntries(fb *binding.FieldBind, actionName, fieldName string, emit func(key, value any)) error {
 	for _, entry := range fb.Entries {
 		if !isComparableMapKey(entry.Key) {
-			return nil, errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v key 不可比较", actionName, fieldName, entry.Key))
+			return errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v key 不可比较", actionName, fieldName, entry.Key))
 		}
 		if !ae.bindingConditionSatisfied(&entry.Value) {
 			continue
 		}
 		if entry.Value.Type == binding.BindMap {
-			return nil, errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v 不支持嵌套 map", actionName, fieldName, entry.Key))
+			return errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v 不支持嵌套 map", actionName, fieldName, entry.Key))
 		}
 
-		value := ae.resolveFieldValue(&entry.Value)
+		value, err := ae.resolveFieldValue(&entry.Value, actionName)
+		if err != nil {
+			return err
+		}
 		if value == nil {
 			if entry.Value.Optional {
 				continue
 			}
 			if entry.Value.Required || binding.IsImplicitRequired(entry.Value.Type) {
-				return nil, errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v value 缺失", actionName, fieldName, entry.Key))
+				return errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v value 缺失", actionName, fieldName, entry.Key))
 			}
 			continue
 		}
-		result[entry.Key] = value
+		emit(entry.Key, value)
 	}
-	return result, nil
+	return nil
 }
 
 func isComparableMapKey(key any) bool {
@@ -523,7 +626,11 @@ func isComparableMapKey(key any) bool {
 }
 
 // resolveFieldValue 解析字段绑定值，返回 Go 原生类型。
-func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
+//
+// 返回 (nil, nil) 表示取值缺失（由调用方按 optional/required 决定跳过还是报错）；
+// 返回 error 表示绑定配置本身非法（未知 type、随机区间反向），这类问题必须打断动作，
+// 否则字段悄悄变成 nil，压测数据看起来"成功"但内容是错的。
+func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind, actionName string) (any, error) {
 	var val any
 
 	switch fb.Type {
@@ -532,7 +639,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 
 	case binding.BindState:
 		if fb.Source == "" {
-			return nil
+			return nil, nil
 		}
 		val = ae.store.Get(fb.Source)
 
@@ -540,7 +647,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 		// 零拷贝取首元素（不再 GetList 全表拷贝）。
 		v, ok := ae.store.PickFromList(fb.Source, func(int) int { return 0 })
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		val = v
 
@@ -549,18 +656,18 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 			// 无过滤器：读锁内直接随机取一个，避免 GetList 全表拷贝。
 			v, ok := ae.store.PickFromList(fb.Source, rand.Intn)
 			if !ok {
-				return nil
+				return nil, nil
 			}
 			val = v
 		} else {
 			// 有过滤器：需先拿到（快照）列表再筛选。
 			list := ae.store.GetList(fb.Source)
 			if len(list) == 0 {
-				return nil
+				return nil, nil
 			}
 			filtered := ae.applyFilters(list, fb.Filters)
 			if len(filtered) == 0 {
-				return nil
+				return nil, nil
 			}
 			val = filtered[rand.Intn(len(filtered))]
 		}
@@ -568,11 +675,11 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 	case binding.BindStateRandomN:
 		list := ae.store.GetList(fb.Source)
 		if len(list) == 0 {
-			return nil
+			return nil, nil
 		}
 		filtered := ae.applyFilters(list, fb.Filters)
 		if len(filtered) == 0 {
-			return nil
+			return nil, nil
 		}
 		n := fb.Count
 		if n <= 0 {
@@ -587,31 +694,31 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 					result = append(result, v)
 				}
 			}
-			return result
+			return result, nil
 		}
-		return picked
+		return picked, nil
 
 	case binding.BindStateMapKey:
 		// 零拷贝随机取一个 key（不再构造 keys 切片）。
 		k, ok := ae.store.PickMapKey(fb.Source, rand.Intn)
 		if !ok {
-			return nil
+			return nil, nil
 		}
-		return k
+		return k, nil
 
 	case binding.BindStateMapValue:
 		if len(fb.Filters) == 0 {
 			// 无过滤器：读锁内直接随机取一个 value，避免 GetMap 全表拷贝。
 			v, ok := ae.store.PickMapValue(fb.Source, rand.Intn)
 			if !ok {
-				return nil
+				return nil, nil
 			}
 			val = v
 		} else {
 			// 有过滤器：需全量 values 再筛选。
 			m := ae.store.GetMap(fb.Source)
 			if len(m) == 0 {
-				return nil
+				return nil, nil
 			}
 			values := make([]any, 0, len(m))
 			for _, v := range m {
@@ -619,34 +726,34 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 			}
 			values = ae.applyFilters(values, fb.Filters)
 			if len(values) == 0 {
-				return nil
+				return nil, nil
 			}
 			val = values[rand.Intn(len(values))]
 		}
 
 	case binding.BindRandomPick:
 		if len(fb.Values) == 0 {
-			return nil
+			return nil, nil
 		}
 		val = fb.Values[rand.Intn(len(fb.Values))]
 
 	case binding.BindRandomPickN:
 		if len(fb.Values) == 0 {
-			return nil
+			return nil, nil
 		}
 		n := fb.Count
 		if n <= 0 {
 			n = 1
 		}
-		return pickN(fb.Values, n)
+		return pickN(fb.Values, n), nil
 
 	case binding.BindRandomPickMap:
 		if len(fb.Values) == 0 || fb.KeySource == "" {
-			return nil
+			return nil, nil
 		}
 		keyVal := ae.store.Get(fb.KeySource)
 		if keyVal == nil {
-			return nil
+			return nil, nil
 		}
 		keyStr := fmt.Sprintf("%v", keyVal)
 		for _, entry := range fb.Values {
@@ -660,11 +767,11 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 			}
 			items, ok := m["values"].([]any)
 			if !ok || len(items) == 0 {
-				return nil
+				return nil, nil
 			}
-			return items[rand.Intn(len(items))]
+			return items[rand.Intn(len(items))], nil
 		}
-		return nil
+		return nil, nil
 
 	case binding.BindRandomExclude:
 		var pool []any
@@ -674,7 +781,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 			pool = ae.store.GetList(fb.Source)
 		}
 		if len(pool) == 0 {
-			return nil
+			return nil, nil
 		}
 		var exclude any
 		if fb.ExcludeSource != "" {
@@ -687,21 +794,25 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 			}
 		}
 		if len(filtered) == 0 {
-			return nil
+			return nil, nil
 		}
 		val = filtered[rand.Intn(len(filtered))]
 
 	case binding.BindRandomInt:
-		lo, hi := fb.Min, fb.Max
-		if lo >= hi {
-			return lo
+		if fb.Min > fb.Max {
+			return nil, errcode.NewActionError(errcode.ErrBindField,
+				fmt.Sprintf("action=%s field=%s randomInt 区间反向 min=%d > max=%d", actionName, fb.Field, fb.Min, fb.Max))
 		}
-		return rand.Intn(hi-lo+1) + lo
+		return randomIntInRange(fb.Min, fb.Max), nil
 
 	case binding.BindRandomFloat:
+		if fb.Min > fb.Max {
+			return nil, errcode.NewActionError(errcode.ErrBindField,
+				fmt.Sprintf("action=%s field=%s randomFloat 区间反向 min=%d > max=%d", actionName, fb.Field, fb.Min, fb.Max))
+		}
 		lo, hi := float64(fb.Min), float64(fb.Max)
-		if lo >= hi {
-			return lo
+		if lo == hi {
+			return lo, nil
 		}
 		prec := fb.Precision
 		if prec <= 0 {
@@ -709,10 +820,10 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 		}
 		v := lo + rand.Float64()*(hi-lo)
 		scale := math.Pow10(prec)
-		return math.Round(v*scale) / scale
+		return math.Round(v*scale) / scale, nil
 
 	case binding.BindRandomBool:
-		return rand.Intn(2) == 1
+		return rand.Intn(2) == 1, nil
 
 	case binding.BindRandomString:
 		length := fb.Length
@@ -720,18 +831,20 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 			length = 8
 		}
 		charset := resolveRandomStringCharset(fb.Charset)
-		return randomStringCharset(length, charset)
+		return randomStringCharset(length, charset), nil
 
 	case binding.BindListSize:
-		return ae.store.ListLen(fb.Source)
+		return ae.store.ListLen(fb.Source), nil
 
 	case binding.BindMap:
-		return nil
+		// map 绑定必须经 resolveFieldValueStrict / resolveStateValue 路由到 map 构造。
+		// 走到这里说明新增了绕过路由的调用点——静默返回 nil 会让整份 map 悄悄消失。
+		return nil, errcode.NewActionError(errcode.ErrBindField,
+			fmt.Sprintf("action=%s field=%s map 绑定未经 map 构造路径求值", actionName, fb.Field))
 
 	default:
-		stresslog.Debug("[ACTION] 未知 binding type，按 fixed 处理",
-			zap.String("type", fb.Type), zap.String("field", fb.Field))
-		val = fb.Value
+		return nil, errcode.NewActionError(errcode.ErrBindField,
+			fmt.Sprintf("action=%s field=%s type=%s 未知 binding type", actionName, fb.Field, fb.Type))
 	}
 
 	if fb.Path != "" && val != nil {
@@ -739,10 +852,35 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 	}
 
 	if fb.Wrap && val != nil {
-		return []any{val}
+		return []any{val}, nil
 	}
 
-	return val
+	return val, nil
+}
+
+// randomIntInRange 在 [lo, hi] 闭区间上均匀取整数（要求 lo <= hi）。
+func randomIntInRange(lo, hi int) int {
+	return int(randomInt64InRange(int64(lo), int64(hi)))
+}
+
+// randomInt64InRange 在 [lo, hi] 闭区间上均匀取整数（要求 lo <= hi）。
+//
+// 区间宽度用 uint64 中间量算：hi-lo 在极端配置（如 min=MinInt64、max=MaxInt64）下会溢出成
+// 负数，直接喂给 rand.Intn/Int63n 会 panic，把一条坏配置放大成全体机器人崩溃。
+func randomInt64InRange(lo, hi int64) int64 {
+	span := uint64(hi) - uint64(lo) // 补码相减，宽度本身不会溢出
+	count := span + 1               // 0 表示区间覆盖整个 int64 值域
+	var offset uint64
+	switch {
+	case count == 0:
+		offset = rand.Uint64()
+	case count <= math.MaxInt64:
+		offset = uint64(rand.Int63n(int64(count)))
+	default:
+		// 区间宽于 int63 才走这里，取模偏差 < 2^-63，对压测取值无影响。
+		offset = rand.Uint64() % count
+	}
+	return int64(uint64(lo) + offset)
 }
 
 // navigatePath 按点分路径从嵌套 map/list 中提取值。
@@ -807,14 +945,14 @@ func (ae *ActionExecutor) resolveAddress(addr string) string {
 }
 
 // execTCPConnect 建立 TCP 连接
-func (ae *ActionExecutor) execTCPConnect(def *flowdef.ActionDef) error {
+func (ae *ActionExecutor) execTCPConnect(ctx context.Context, def *flowdef.ActionDef) error {
 	addr := ae.resolveAddress(def.Address)
 	if addr == "" {
 		return errcode.NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
 	}
 	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
 	var err error
-	if submitErr := ae.runIO(func() { err = ae.netSender.ConnectTCP(def.Service, addr) }); submitErr != nil {
+	if submitErr := ae.runIO(ctx, func() { err = ae.netSender.ConnectTCP(def.Service, addr) }); submitErr != nil {
 		return submitErr
 	}
 	if err != nil {
@@ -825,14 +963,14 @@ func (ae *ActionExecutor) execTCPConnect(def *flowdef.ActionDef) error {
 }
 
 // execUDPConnect 建立 UDP 连接
-func (ae *ActionExecutor) execUDPConnect(def *flowdef.ActionDef) error {
+func (ae *ActionExecutor) execUDPConnect(ctx context.Context, def *flowdef.ActionDef) error {
 	addr := ae.resolveAddress(def.Address)
 	if addr == "" {
 		return errcode.NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
 	}
 	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
 	var err error
-	if submitErr := ae.runIO(func() { err = ae.netSender.ConnectUDP(def.Service, addr) }); submitErr != nil {
+	if submitErr := ae.runIO(ctx, func() { err = ae.netSender.ConnectUDP(def.Service, addr) }); submitErr != nil {
 		return submitErr
 	}
 	if err != nil {
@@ -866,8 +1004,9 @@ func (ae *ActionExecutor) execClearState(def *flowdef.ActionDef) error {
 	return nil
 }
 
-// execSetState 从 bindings 设置 StateStore
-func (ae *ActionExecutor) execSetState(def *flowdef.ActionDef) {
+// execSetState 从 bindings 设置 StateStore。
+// map 绑定按 string key 形态写入，与 state.Store 的 map 消费面（GetMap/PickMapKey）一致。
+func (ae *ActionExecutor) execSetState(def *flowdef.ActionDef) error {
 	for i := range def.Bindings {
 		fb := &def.Bindings[i]
 
@@ -875,16 +1014,20 @@ func (ae *ActionExecutor) execSetState(def *flowdef.ActionDef) {
 			continue
 		}
 
-		val := ae.resolveFieldValue(fb)
+		val, err := ae.resolveStateValue(fb, def.Name)
+		if err != nil {
+			return err
+		}
 		if val == nil {
 			continue
 		}
 		ae.store.SetPath(fb.Field, val)
 	}
+	return nil
 }
 
 // execHTTPRequest HTTP 请求
-func (ae *ActionExecutor) execHTTPRequest(def *flowdef.ActionDef) (int, int, ActionTiming, error) {
+func (ae *ActionExecutor) execHTTPRequest(ctx context.Context, def *flowdef.ActionDef) (int, int, ActionTiming, error) {
 	resolvedURL := ae.resolveAddress(def.URL)
 	if resolvedURL == "" {
 		return 0, 0, ActionTiming{}, errcode.NewActionError(errcode.ErrURLEmpty, "action="+def.Name)
@@ -909,7 +1052,10 @@ func (ae *ActionExecutor) execHTTPRequest(def *flowdef.ActionDef) (int, int, Act
 				if !ae.bindingConditionSatisfied(fb) {
 					continue
 				}
-				val := ae.resolveFieldValue(fb)
+				val, err := ae.resolveStateValue(fb, def.Name)
+				if err != nil {
+					return 0, 0, ActionTiming{}, err
+				}
 				if val == nil {
 					continue
 				}
@@ -929,7 +1075,16 @@ func (ae *ActionExecutor) execHTTPRequest(def *flowdef.ActionDef) (int, int, Act
 				if !ae.bindingConditionSatisfied(fb) {
 					continue
 				}
-				val := ae.resolveFieldValue(fb)
+				// form 是「一个字段一个标量」的扁平编码，map 绑定没有无歧义的表示：
+				// 按 %v 打进去会发出 "map[k:v]" 这种服务端无法解析的串，故直接拒绝。
+				if fb.Type == binding.BindMap {
+					return 0, 0, ActionTiming{}, errcode.NewActionError(errcode.ErrMarshalBody,
+						fmt.Sprintf("action=%s field=%s contentType=form 不支持 map 绑定，请改用 json", def.Name, fb.Field))
+				}
+				val, err := ae.resolveFieldValue(fb, def.Name)
+				if err != nil {
+					return 0, 0, ActionTiming{}, err
+				}
 				if val == nil {
 					continue
 				}
@@ -946,7 +1101,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *flowdef.ActionDef) (int, int, Act
 	// mailbox。后续 timing/store/parse 均在 runIO 返回后于执行器 goroutine 串行处理。
 	var exchange *HTTPExchange
 	var err error
-	if submitErr := ae.runIO(func() {
+	if submitErr := ae.runIO(ctx, func() {
 		exchange, err = ae.netSender.HTTPRequest(resolvedURL, method, contentType, body)
 	}); submitErr != nil {
 		return 0, 0, ActionTiming{}, submitErr
@@ -1148,9 +1303,9 @@ func (ae *ActionExecutor) storeResponseProto(mappings []binding.StoreMapping, re
 }
 
 // handleHeaderError 处理服务端返回的非零 headerErr：解析响应、构造错误描述。
-// 将 4 处重复的 headerErr 处理逻辑统一收敛到此方法。
+// 由请求（execRequest）与监听（execListen）两条路径共用。
 //
-// T2-C2 起 DescribeError 按 def.Service + pattern(proto) 推 server 串 Resolve 取 adapter。
+// DescribeError 按 def.Service + pattern(proto) 推 server 串 Resolve 取 adapter。
 // Resolve nil 时 DescribeError 返回空串（与未配置 errors.json 等价），不在此 fail loud——
 // headerErr 描述缺失不致命，仅 detail 不含人类可读前缀；上层仍按 NewActionError 上抛原错误码。
 func (ae *ActionExecutor) handleHeaderError(proto string, def *flowdef.ActionDef, headerErr uint64, routeKey string, respBody []byte) *errcode.ActionError {
@@ -1276,6 +1431,14 @@ func (ae *ActionExecutor) bindingConditionSatisfied(binding *binding.FieldBind) 
 			zap.String("condition", binding.Condition), zap.Error(errConditionNotPrepared))
 		return false
 	}
+	if script, ok := condition.LuaScript(); ok {
+		if ae.luaCondition == nil {
+			stresslog.Error("[ENGINE] 字段绑定使用 lua: 条件但未注入 Lua 求值器，条件默认拒绝",
+				zap.String("condition", binding.Condition), zap.String("script", script))
+			return false
+		}
+		return ae.luaCondition(script)
+	}
 	return condition.EvalState(ae.store)
 }
 
@@ -1367,11 +1530,12 @@ func (ae *ActionExecutor) protocolSecretKey(protocol, service string) []byte {
 }
 
 // protocolRequest sends a request and waits for response.
-func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error) {
+// ctx 透传到网络委托：等待响应期间流程被取消时立即返回，不必等满动作超时窗口。
+func (ae *ActionExecutor) protocolRequest(ctx context.Context, protocol, service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error) {
 	if protocol == "udp" {
-		return ae.netSender.UDPRequest(service, packet, routeKey, timeout...)
+		return ae.netSender.UDPRequest(ctx, service, packet, routeKey, timeout...)
 	}
-	return ae.netSender.TCPRequest(service, packet, routeKey, timeout...)
+	return ae.netSender.TCPRequest(ctx, service, packet, routeKey, timeout...)
 }
 
 // ── 统一执行方法 ─────────────────────────────────────────────────────
@@ -1431,7 +1595,7 @@ func (ae *ActionExecutor) execSend(protocol string, def *flowdef.ActionDef) (int
 }
 
 // execRequest sends a request and waits for response.
-func (ae *ActionExecutor) execRequest(protocol string, def *flowdef.ActionDef) (int, int, ActionTiming, error) {
+func (ae *ActionExecutor) execRequest(ctx context.Context, protocol string, def *flowdef.ActionDef) (int, int, ActionTiming, error) {
 	var buildStart time.Time
 	if ae.timingLevel >= TimingLevelFull {
 		buildStart = time.Now()
@@ -1486,7 +1650,7 @@ func (ae *ActionExecutor) execRequest(protocol string, def *flowdef.ActionDef) (
 	if def.Timeout > 0 {
 		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
 	}
-	exchange, err := ae.protocolRequest(protocol, def.Service, packet, routeKey, reqTimeout...)
+	exchange, err := ae.protocolRequest(ctx, protocol, def.Service, packet, routeKey, reqTimeout...)
 	if exchange == nil {
 		exchange = &NetExchange{SendWireBytes: len(packet)}
 	}
@@ -1499,7 +1663,12 @@ func (ae *ActionExecutor) execRequest(protocol string, def *flowdef.ActionDef) (
 	if err != nil {
 		// 请求层失败（超时 / 断连 / 发送失败）：没有响应帧就没有 WireRTT，
 		// 但必须进 RTT Apdex 的分母记 frustrated，否则最慢的样本集体缺席。
-		timing.AddFailedRequest()
+		//
+		// 客户端主动取消除外（ActionTiming.FailedRequests 的既有契约）：停止任务与服务端
+		// 表现无关，记成 frustrated 会让每次停止都把 Apdex 拉低一截。
+		if !isCanceledError(err) {
+			timing.AddFailedRequest()
+		}
 		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, err
 	}
 

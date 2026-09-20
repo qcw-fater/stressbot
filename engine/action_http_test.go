@@ -2,11 +2,13 @@ package engine
 
 import (
 	"errors"
+	"stressbot/binding"
 	flowdef "stressbot/flow"
 	"strings"
 	"testing"
 
 	"stressbot/errcode"
+	json "stressbot/internal/jsonx"
 	"stressbot/internal/stresslog"
 	"stressbot/state"
 
@@ -25,6 +27,86 @@ type httpStatusNetSender struct {
 func (f *httpStatusNetSender) HTTPRequest(string, string, string, []byte) (*HTTPExchange, error) {
 	f.httpReq++
 	return &HTTPExchange{StatusCode: f.statusCode, Body: f.body}, nil
+}
+
+// bodyCapturingNetSender 记录最后一次 HTTP 请求的 contentType 与 body，用于校验请求体编码。
+type bodyCapturingNetSender struct {
+	*fakeNetSender
+	gotContentType string
+	gotBody        []byte
+}
+
+func (f *bodyCapturingNetSender) HTTPRequest(_, _, contentType string, body []byte) (*HTTPExchange, error) {
+	f.gotContentType = contentType
+	f.gotBody = body
+	return &HTTPExchange{StatusCode: 200}, nil
+}
+
+// httpRequest 的 JSON body 必须带上 map 绑定：resolveFieldValue 不认 map，
+// 早期实现让 map 字段整块从请求体里消失，服务端只会看到缺参。
+func TestHTTPRequest_JSONBodyIncludesMapBinding(t *testing.T) {
+	stresslog.ReplaceLogger(zap.NewNop())
+
+	fake := &bodyCapturingNetSender{fakeNetSender: &fakeNetSender{}}
+	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
+
+	_, _, _, err := ae.execHTTPRequest(t.Context(), &flowdef.ActionDef{
+		Name: "report",
+		URL:  "http://x/y",
+		Bindings: []binding.FieldBind{{
+			Field: "params",
+			Type:  binding.BindMap,
+			Entries: []binding.MapEntryBind{
+				{Key: "kind", Value: binding.FieldBind{Type: binding.BindFixed, Value: "guild"}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("含 map 绑定的 httpRequest 不应失败: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(fake.gotBody, &decoded); err != nil {
+		t.Fatalf("请求体不是合法 JSON: %v（body=%s）", err, fake.gotBody)
+	}
+	params, ok := decoded["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("请求体缺少 params map：%s", fake.gotBody)
+	}
+	if params["kind"] != "guild" {
+		t.Errorf(`params["kind"] = %#v, want "guild"`, params["kind"])
+	}
+}
+
+// form 是扁平的 k=v 编码，map 绑定没有无歧义表示，必须报错而不是发出 "map[k:v]" 串。
+func TestHTTPRequest_FormRejectsMapBinding(t *testing.T) {
+	stresslog.ReplaceLogger(zap.NewNop())
+
+	fake := &bodyCapturingNetSender{fakeNetSender: &fakeNetSender{}}
+	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
+
+	_, _, _, err := ae.execHTTPRequest(t.Context(), &flowdef.ActionDef{
+		Name:        "report",
+		URL:         "http://x/y",
+		ContentType: flowdef.ContentForm,
+		Bindings: []binding.FieldBind{{
+			Field:   "params",
+			Type:    binding.BindMap,
+			Entries: []binding.MapEntryBind{{Key: "kind", Value: binding.FieldBind{Type: binding.BindFixed, Value: "guild"}}},
+		}},
+	})
+	if err == nil {
+		t.Fatal("form + map 绑定应报错")
+	}
+	actionErr, ok := errors.AsType[*errcode.ActionError](err)
+	if !ok || actionErr.Code != errcode.ErrMarshalBody {
+		t.Fatalf("err=%v，期望 ErrMarshalBody", err)
+	}
+	if !strings.Contains(actionErr.Detail, "不支持 map 绑定") {
+		t.Errorf("detail=%q 应说明 form 不支持 map 绑定", actionErr.Detail)
+	}
+	if fake.gotBody != nil {
+		t.Error("配置非法时不应发出请求")
+	}
 }
 
 // TestHTTPRequest_Non2xx_DetailIncludesStatusAndBody 声明式 httpRequest 收到非 2xx 响应时，
@@ -47,7 +129,7 @@ func TestHTTPRequest_Non2xx_DetailIncludesStatusAndBody(t *testing.T) {
 	}
 	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
 
-	_, _, _, err := ae.execHTTPRequest(&flowdef.ActionDef{Name: actionName, URL: "http://x/y"})
+	_, _, _, err := ae.execHTTPRequest(t.Context(), &flowdef.ActionDef{Name: actionName, URL: "http://x/y"})
 	if err == nil {
 		t.Fatal("非 2xx 应返回 error")
 	}

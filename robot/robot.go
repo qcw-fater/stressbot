@@ -86,7 +86,7 @@ type Config struct {
 	Account        string            // 账号名
 	StateExtra     map[string]string // 初始状态额外键值对
 	HTTPTimeout    time.Duration     // HTTP 请求超时
-	RequestTimeout time.Duration     // 网络请求超时（TCP/UDP RequestResponse）
+	RequestTimeout time.Duration     // 网络请求超时（TCP/UDP 请求-响应未显式指定时的回退值）
 	MainService    string            // 主连接服务名，意外断开时停止机器人
 	Shared         shared.Store      // 任务级共享状态后端（可为 nil，表示未启用）
 }
@@ -162,18 +162,28 @@ func NewRobot(parent context.Context, cfg Config, flow *flowdef.TaskFlow, factor
 		return nil, errors.New("NewRobot: Lua 运行时池未提供 LState")
 	}
 
+	// stateExtra 先写，保留键后写：id / index / account 由框架按机器人身份分配，
+	// 被配置覆盖后整批机器人会共用同一身份，日志与服务端会话全部对不上。
+	for k, v := range cfg.StateExtra {
+		if _, reserved := reservedStateKeys[k]; reserved {
+			stresslog.Warn("[ROBOT] stateExtra 键与框架保留键冲突，已忽略",
+				zap.Int("id", cfg.ID), zap.String("key", k))
+			continue
+		}
+		r.state.Set(k, v)
+	}
 	r.state.Set("id", cfg.ID)
 	r.state.Set("index", cfg.Index)
 	r.state.Set("account", cfg.Account)
-	for k, v := range cfg.StateExtra {
-		r.state.Set(k, v)
-	}
 
 	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.resolver, engineTimingLevel)
 	// 注入协作式阻塞 I/O：声明式 httpRequest / tcpConnect / udpConnect 走调度器 runIO（后台跑 +
 	// drain mailbox），与 Lua await_*（share/http/connect）同一原语，两条路径协作式语义统一。
 	r.actionExec.SetCooperativeIO(r.sched.runIO)
-	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
+	handler := &robotActionHandler{robot: r, flow: flow}
+	// 字段绑定上的 lua: 条件与节点条件共用同一求值实现，避免两处语义漂移。
+	r.actionExec.SetLuaConditionEvaluator(handler.executeLuaBoolean)
+	r.executor = engine.NewExecutor(flow, handler, r.account)
 
 	return r, nil
 }
@@ -288,6 +298,13 @@ func (r *Robot) Wait() {
 // 进程退出时由 OS 回收，轻微资源泄漏可接受。
 const robotCloseTimeout = 10 * time.Second
 
+// reservedStateKeys 由框架按机器人身份写入、不允许 stateExtra 覆盖的 state 键。
+var reservedStateKeys = map[string]struct{}{
+	"id":      {},
+	"index":   {},
+	"account": {},
+}
+
 // defaultListenQueueSize 监听缓存队列默认容量，缺省等价于旧单槽语义。
 // 与 network.defaultListenQueueSize 保持一致（同值，独立定义避免跨包依赖未导出符号）。
 const defaultListenQueueSize = 1
@@ -325,7 +342,7 @@ func (w *robotWaiter) Await(spec *script.WaitSpec) (script.WaitOutcome, error) {
 	case script.WaitListen:
 		return w.netSender.waitListen(w.robot.ctx, spec.Proto, spec.Service, spec.RouteKey, spec.Duration), nil
 	case script.WaitResponse:
-		return w.robot.sched.awaitResponse(spec), nil
+		return w.robot.sched.awaitResponse(w.robot.ctx, spec), nil
 	case script.WaitIO:
 		outcome := w.robot.sched.awaitIO(spec)
 		return outcome, outcome.Err
@@ -887,17 +904,16 @@ func (h *robotActionHandler) RegisterListen(refs []flowdef.ListenRef) error {
 			return err
 		}
 
+		// server 写错格式是配置错误，跳过注册只会让推送永远收不到、且只剩一条 Warn，
+		// 与下面 Resolve 失败同属"缺配置"，一样 fail loud。
 		proto, service, ok := parseServer(ref.Server)
 		if !ok {
-			stresslog.Warn("[ROBOT] 监听引用的 server 解析失败，跳过注册",
-				zap.Int("id", h.robot.id),
-				zap.String("account", h.robot.account),
-				zap.String("server", ref.Server), zap.String("listen", ref.Listen))
-			continue
+			return fmt.Errorf("监听注册失败：server=%q 格式非法（期望 \"tcp:<service>\" 或 \"udp:<service>\"），listen=%q",
+				ref.Server, ref.Listen)
 		}
 		key := connKey{proto: proto, service: service}
 
-		// T2-C2：listen routeKey 按 "<proto>:<service>" Resolve 出该连接的 Go SchemaAdapter
+		// listen routeKey 按 "<proto>:<service>" Resolve 出该连接的 Go SchemaAdapter
 		// 后计算（server=ref.Server 即 proto:service）。Resolve nil → fail loud（中文 error，
 		// 带上下文），不静默兜底——与 dial/decode 侧的 fail-loud 一致（缺 codec 配置即报错）。
 		serverAdp := h.robot.resolver.Resolve(ref.Server)
@@ -911,14 +927,11 @@ func (h *robotActionHandler) RegisterListen(refs []flowdef.ListenRef) error {
 		if ref.Listen == "" {
 			cb = nil
 		} else {
+			// 引用了不存在的 listen 定义同样是配置错误：继续跑只会得到一个永远不触发的监听。
 			cbDef, ok := h.flow.Listen(ref.Listen)
 			if !ok {
-				stresslog.Error("[ROBOT] 回调定义不存在",
-					zap.Int("id", h.robot.id),
-					zap.String("account", h.robot.account),
-					zap.String("server", ref.Server),
-					zap.String("listen", ref.Listen))
-				continue
+				return fmt.Errorf("监听注册失败：listen=%q 在 flow.listens 中无定义（server=%q）",
+					ref.Listen, ref.Server)
 			}
 			if err := validateListenDef(ref.Listen, cbDef); err != nil {
 				return err
@@ -937,7 +950,9 @@ func (h *robotActionHandler) RegisterListen(refs []flowdef.ListenRef) error {
 			conn = h.robot.client.GetTCPConn(key.service)
 		}
 		if conn == nil {
-			stresslog.Debug("[ROBOT] 无连接可注册监听",
+			// 连接尚未建立就注册监听是合法编排顺序问题而非配置非法（流程可能稍后才 connect），
+			// 所以不中断流程；但这条监听事实上丢了，推送永远收不到，必须 Warn 级可见。
+			stresslog.Warn("[ROBOT] 连接未建立，监听注册被跳过（该服务的推送将收不到）",
 				zap.Int("id", h.robot.id),
 				zap.String("account", h.robot.account),
 				zap.String("proto", key.proto), zap.String("service", key.service))
@@ -1270,8 +1285,6 @@ type netSenderAdapter struct {
 	robot *Robot // 关联的机器人实例
 }
 
-var _ engine.NetSender = (*netSenderAdapter)(nil)
-
 // TCPSend 通过 TCP 发送数据包。
 func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) {
 	conn := ns.robot.client.GetTCPConn(service)
@@ -1287,13 +1300,13 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) 
 //
 // 唯一调用方是 engine.ActionExecutor.execRequest（执行器 goroutine = 业务 LState 唯一所有者），
 // 故在此 drain mailbox 安全。
-func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
-	return ns.cooperativeRequest("tcp", service, packet, routeKey, timeout...)
+func (ns *netSenderAdapter) TCPRequest(ctx context.Context, service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
+	return ns.cooperativeRequest(ctx, "tcp", service, packet, routeKey, timeout...)
 }
 
 // UDPRequest 发送 UDP 请求并协作式等待响应（与 TCPRequest 同源，经 sched.awaitResponse）。
-func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
-	return ns.cooperativeRequest("udp", service, packet, routeKey, timeout...)
+func (ns *netSenderAdapter) UDPRequest(ctx context.Context, service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
+	return ns.cooperativeRequest(ctx, "udp", service, packet, routeKey, timeout...)
 }
 
 // TCPListen 通过队列边沿通知等待 TCP 推送；nil, nil 表示到达 deadline 仍未命中。
@@ -1312,11 +1325,8 @@ func (ns *netSenderAdapter) cooperativeListen(ctx context.Context, proto, servic
 	case outcome.Err != nil:
 		return outcome.Exchange, outcome.Err
 	case outcome.Canceled:
-		if ctx != nil && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if ns.robot.ctx != nil && ns.robot.ctx.Err() != nil {
-			return nil, ns.robot.ctx.Err()
+		if cause := firstCanceledCause(ctx, ns.robot.ctx); cause != nil {
+			return nil, cause
 		}
 		return nil, context.Canceled
 	case outcome.TimedOut:
@@ -1329,13 +1339,13 @@ func (ns *netSenderAdapter) cooperativeListen(ctx context.Context, proto, servic
 // cooperativeRequest 声明式请求-响应的协作式实现：构建 WaitSpec → sched.awaitResponse
 // （发送 + select 响应通道 + drain mailbox）。与 Lua await_*_request 完全同一路径，保证
 // 声明式与脚本两条请求路径行为/计时一致。命中 / 超时 / 取消 / 发送失败经 WaitOutcome 映射回
-// (*NetExchange, error)，与旧 RequestResponse 返回契约对齐（execRequest 下游 HeaderErr/parse 不变）。
-func (ns *netSenderAdapter) cooperativeRequest(proto, service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
+// (*NetExchange, error)（execRequest 下游 HeaderErr/parse 不变）。
+func (ns *netSenderAdapter) cooperativeRequest(ctx context.Context, proto, service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
 	var d time.Duration
 	if len(timeout) > 0 {
 		d = timeout[0]
 	}
-	outcome := ns.robot.sched.awaitResponse(&script.WaitSpec{
+	outcome := ns.robot.sched.awaitResponse(ctx, &script.WaitSpec{
 		Kind:     script.WaitResponse,
 		Proto:    proto,
 		Service:  service,
@@ -1351,8 +1361,15 @@ func (ns *netSenderAdapter) cooperativeRequest(proto, service string, packet []b
 		}
 		return ex, outcome.Err
 	case outcome.Canceled:
-		return &engine.NetExchange{SendWireBytes: len(packet)},
-			errcode.NewActionError(errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
+		// 包住 ctx.Err() 保留 errors.Is(context.Canceled) 判定；SendWireBytes 照实返回，
+		// 取消时已挂进待写队列的字节仍要计入发送量。
+		detail := "service=" + service + " route=" + routeKey
+		cause := firstCanceledCause(ctx, ns.robot.ctx)
+		exchange := &engine.NetExchange{SendWireBytes: len(packet)}
+		if cause == nil {
+			return exchange, errcode.NewActionError(errcode.ErrActionCanceled, detail)
+		}
+		return exchange, errcode.NewActionError(errcode.ErrActionCanceled, detail, cause)
 	default:
 		if stresslog.DebugEnabled() && outcome.Exchange != nil {
 			stresslog.Debug("[ACTION] 协作请求收到响应",
@@ -1770,8 +1787,8 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	// 闭包持有：双模式入参、state、私有计数器、resolver/factory/route、transport、conn（取 secretKey）、skip 标志。
 	// 字段布局 / bindings 拷贝一份避免共享 cfg 切片头被外部修改（ActionDef 生命周期内不可变，防御性拷贝）。
 	//
-	// T2-C2 起 encode 走 resolver：每 tick 按 cfg.Transport+":"+cfg.Service Resolve 出该连接的 Go
-	// SchemaAdapter 后 Encode。Resolve nil（codec 未映射）→ Warn+skip 本 tick（不 fail 流程，
+	// encode 走 resolver：每 tick 按 cfg.Transport+":"+cfg.Service Resolve 出该连接的 Go
+	// SchemaAdapter 后 Encode。Resolve nil（codec 未映射）→ Warn+skip 本 tick——
 	// 单 tick encode 失败不应终止整条心跳 goroutine。
 	fields := append([]engine.HeartbeatField(nil), cfg.Fields...)
 	bindings := append([]binding.FieldBind(nil), cfg.Bindings...)
@@ -1861,7 +1878,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 			return nil
 		}
 		key := conn.GetSecretKey()
-		// T2-C2：按 "<transport>:<service>" Resolve 出该连接的 Go SchemaAdapter 后 encode。
+		// 按 "<transport>:<service>" Resolve 出该连接的 Go SchemaAdapter 后 encode。
 		// 单 tick encode 失败不应终止整条心跳 goroutine。
 		adp := cachedAdp
 		if adp == nil {
@@ -2008,8 +2025,10 @@ func cloneFloat64Ptr(v *float64) *float64 {
 	return &vv
 }
 
-// 编译时接口断言
+// 编译时接口断言。
+// ActionNetSender 内含 NetSender：声明式执行器要取消感知的请求-响应，script 运行时只要基础面。
 var (
-	_ engine.NetSender     = (*netSenderAdapter)(nil)
-	_ engine.ActionHandler = (*robotActionHandler)(nil)
+	_ engine.ActionNetSender = (*netSenderAdapter)(nil)
+	_ engine.NetSender       = (*netSenderAdapter)(nil)
+	_ engine.ActionHandler   = (*robotActionHandler)(nil)
 )

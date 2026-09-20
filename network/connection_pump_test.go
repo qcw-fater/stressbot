@@ -137,14 +137,14 @@ func TestStartPumpBuffersFirstFrameBeforeWorkerRuns(t *testing.T) {
 
 // --- pump 消费 inbound → dispatch（request-response）---
 
-// TestPump_InboundDispatch_RequestResponse 验证：pump 消费 inboundCh → decode → 命中
-// responseMap → 响应投递到 RequestResponse 的 channel。
-func TestPump_InboundDispatch_RequestResponse(t *testing.T) {
+// TestPump_InboundDispatch_Response 验证：pump 消费 inboundCh → decode → 命中
+// responseMap → 响应投递到在途请求的 channel。
+func TestPump_InboundDispatch_Response(t *testing.T) {
 	adp := newFakeAdapter()
 	conn, _ := startPumpedConnection(t, adp)
 	defer conn.Close()
 
-	// 预埋 responseMap（模拟 inflight RequestResponse）。
+	// 预埋 responseMap（模拟 SendRequest 登记的在途请求）。
 	const routeKey = "test.route"
 	ch := make(chan *Message, 1)
 	conn.mu.Lock()
@@ -355,36 +355,50 @@ func TestPump_BoundedBatch_DoesNotStarveHeartbeat(t *testing.T) {
 	}
 }
 
-// --- RegisterHeartbeat 在 pump 未启动时的兼容路径 ---
+// --- RegisterHeartbeat 在 pump 未启动时拒绝注册 ---
 
-// TestRegisterHeartbeat_PumpNotStarted 验证：pump 未启动（controlCh==nil）时，
-// RegisterHeartbeat 走降级路径直接写 hb + 启动 timer，不 panic、不泄漏。
-// 生产路径 dial 总是先 StartPump，此分支主要服务于测试与异常态。
-func TestRegisterHeartbeat_PumpNotStarted(t *testing.T) {
+// TestRegisterHeartbeat_RejectedWhenPumpNotStarted 验证：pump 未启动（controlCh==nil）时
+// RegisterHeartbeat 拒绝注册（不写 hb、不建 timer、不 panic）。心跳 timer 只有 pump 会消费，
+// 没有 pump 的注册只会留下无人读的 timer，生产路径必须先 StartPump 再注册。
+func TestRegisterHeartbeat_RejectedWhenPumpNotStarted(t *testing.T) {
 	conn := newTestConnection(t)
 	defer conn.Close()
 
 	builder := func() []byte { return []byte("ping") }
-	// 不调 StartPump；RegisterHeartbeat 走 controlCh==nil 分支。
 	conn.RegisterHeartbeat(HeartbeatConfig{Interval: 50 * time.Millisecond, Builder: builder})
 
-	// hb 字段应已写入（带 timer）。
 	conn.hbMu.Lock()
 	hb := conn.hb
 	conn.hbMu.Unlock()
-	if hb == nil {
-		t.Fatal("pump 未启动时 RegisterHeartbeat 应直接写 hb 字段")
-	}
-	if hb.timer == nil {
-		t.Fatal("hb.timer 未创建")
+	if hb != nil {
+		t.Fatal("pump 未启动时 RegisterHeartbeat 应拒绝注册，不得写 hb 字段")
 	}
 
-	// StopHeartbeat 也走 controlCh==nil 分支，应停 timer。
+	// StopHeartbeat 在同样状态下是安全的 no-op。
 	conn.StopHeartbeat()
 	conn.hbMu.Lock()
 	hb2 := conn.hb
 	conn.hbMu.Unlock()
 	if hb2 != nil {
 		t.Fatal("StopHeartbeat 后 hb 应为 nil")
+	}
+}
+
+// TestRegisterHeartbeat_AfterStartPump 验证生产调用序（先 StartPump 再注册）下
+// 心跳正常安装并按间隔发送——与拒绝分支成对，防止拒绝逻辑误伤正常路径。
+func TestRegisterHeartbeat_AfterStartPump(t *testing.T) {
+	adp := newFakeAdapter()
+	conn, sent := startPumpedConnection(t, adp)
+	defer conn.Close()
+
+	builder := func() []byte { return []byte("ping") }
+	conn.RegisterHeartbeat(HeartbeatConfig{Interval: 20 * time.Millisecond, Builder: builder})
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) && atomic.LoadInt32(sent) == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := atomic.LoadInt32(sent); got < 1 {
+		t.Fatalf("StartPump 后注册的心跳发送次数 = %d, want >= 1", got)
 	}
 }
