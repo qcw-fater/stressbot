@@ -63,7 +63,6 @@ jobs:
             cp "$staging/stressbot$suffix" "$staging/agent$suffix" "$staging/admin$suffix" "build/$pkgname/"
             cp -r conf "build/$pkgname/conf"
             cp -r cmd/web/dist "build/$pkgname/dist"
-            cp cmd/web/nginx.conf "build/$pkgname/nginx.conf"
 
             if [ "$goos" = "windows" ]; then
               test -f "build/$pkgname/stressbot.exe"
@@ -82,7 +81,7 @@ jobs:
             test -d "build/$pkgname/conf/scripts"
             test -d "build/$pkgname/conf/adapter"
             test -f "build/$pkgname/dist/index.html"
-            test -f "build/$pkgname/nginx.conf"
+            test -f "build/$pkgname/conf/deploy/nginx/nginx.conf"
 
             if [ "$goos" = "windows" ]; then
               (cd build && zip -qr "$pkgname.zip" "$pkgname")
