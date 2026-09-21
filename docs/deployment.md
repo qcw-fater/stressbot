@@ -69,7 +69,7 @@ go build -o admin.exe      ./cmd/admin      # Admin 服务器
 
 - 三个二进制：`stressbot` / `agent` / `admin`（Windows 带 `.exe`）；
 - `conf/` 全量（含 `stressbot.toml`、`agent.toml`、`admin.toml`、`flow/`、`proto/`、`scripts/`、`adapter/`）；
-- `cmd/web/dist/`（前端构建产物）；
+- 包根 `dist/`（前端构建产物，由 `cmd/web/dist` 拷入）；
 - `nginx.conf`（取自 `cmd/web/nginx.conf`，放包根）。
 
 Windows 打 zip、其余打 tar.gz，`softprops/action-gh-release` 附自动生成说明上传。
