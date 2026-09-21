@@ -27,7 +27,7 @@ Admin 同时承担六类职责：
 2. **任务编排**：接收前端请求 → 单例校验 → 分配 → 组装命令 → 投递 → 汇总完成报告
 3. **命令可靠性**：有界命令日志 + 会话投递窗口 + ACK/回执 + 重连重放
 4. **指标聚合**：摄取 Agent 上报的压测窗口/系统指标，合并为集群快照供前端轮询
-5. **历史归档**：运行期 10s 时序采样 + 终态归档至 MySQL，支持回查、对比、克隆、标签；流程/动作/监听模板库
+5. **历史归档**：运行期 10s 时序采样 + 终态归档至 MySQL，支持回查、对比、标签；流程/动作/监听模板库
 6. **运维支持**：节点远程关机命令、前端静态资源托管、基线资源读写、codec 预览
 
 不做的事：
@@ -82,7 +82,7 @@ admin/
     sampler.go          -- Sampler：运行期 10s 时序采样
     types.go            -- HistoryTrendPoint 等展示类型
   history/
-    store.go            -- MySQL 归档/查询/对比/克隆/标签/清理
+    store.go            -- MySQL 归档/查询/对比/标签/清理
     types.go            -- Record/Detail/Filter 等归档模型
     policy.go           -- 归档策略
   template/
@@ -400,9 +400,9 @@ type Registry struct {
 
 `GET /sbot/metrics`（集群压测聚合 + 覆盖率）、`/sbot/metrics/summary`（文本摘要）、`/sbot/metrics/agents`、`/sbot/metrics/agents/{id}`、`/sbot/system`（集群系统聚合）、`/sbot/system/agents`、`/sbot/system/agents/{id}`。
 
-### 5.4 历史归档（11）
+### 5.4 历史归档（10）
 
-`GET /sbot/history`（分页过滤）、`/sbot/history/tags`、`/sbot/history/compare`（多任务对比）；`GET/PUT/DELETE /sbot/history/{id}`（PUT 更新 starred/tags/note，DELETE starred 需 force=true）；`GET /sbot/history/{id}/agents`、`/config`（摘要）、`/config/archive`（原始归档）、`/timeseries`（maxPoints 采样降采样）；`POST /sbot/history/{id}/clone`（创建 pending 新任务，不自动启动）。
+`GET /sbot/history`（分页过滤）、`/sbot/history/tags`、`/sbot/history/compare`（多任务对比）；`GET/PUT/DELETE /sbot/history/{id}`（PUT 更新 starred/tags/note，DELETE starred 需 force=true）；`GET /sbot/history/{id}/agents`、`/config`（摘要）、`/config/archive`（原始归档）、`/timeseries`（maxPoints 采样降采样）。
 
 ### 5.5 基线资源（7）
 

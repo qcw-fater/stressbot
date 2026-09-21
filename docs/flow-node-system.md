@@ -125,7 +125,7 @@ type TaskFlow struct {
 | `Action` | string | `action` | 引用 `actions` 表中的动作名称 |
 | `OnError` | `*OnErrorDef` | `onError` | 动作失败后的错误链路：ignoreCodes / handler / retry / strategy |
 | `ListenRefs` | `[]ListenRef` | `listenRefs` | 动作执行后注册的持久化推送监听引用 |
-| `DelayMs` | int | `delayMs` | 节点级延迟覆盖（>0 使用此值，=0 使用 DefaultDelayMs，<0 禁用） |
+| `DelayMs` | int | `delayMs` | 节点级延迟覆盖（>0 使用此值，=0 使用全局间隔（任务级运行参数，未配置 = 1000ms），<0 禁用） |
 
 **行为**（`engine/executor.go:249-322`）：
 - `Action` 为空但 `ListenRefs` 非空是合法的「纯注册监听」节点，走 `executeListenOnly`：只注册监听、不执行动作，注册成功后照常执行节点延迟（`engine/executor.go:250-253,305-322`）
@@ -457,12 +457,12 @@ func (e *Executor) nodeDelay(ctx context.Context, node *flowdef.Node) error {
 }
 ```
 
-**延迟优先级**：`node.DelayMs` > `TaskFlow.DefaultDelayMs`（0 时引擎默认 1000）
+**延迟优先级**：`node.DelayMs` > 任务级全局间隔（`ManagerConfig.DefaultDelayMs`，未配置时引擎默认 1000ms）
 
 | DelayMs 值 | 行为 |
 |------------|------|
 | > 0 | 使用此值作为延迟毫秒数 |
-| = 0 | 使用 `TaskFlow.DefaultDelayMs`（本身为 0 则 1000） |
+| = 0 | 使用任务级全局间隔（未配置则 1000） |
 | < 0 | 禁用延迟 |
 
 **注意**：
@@ -1111,7 +1111,7 @@ ActionError 统一放在 `errcode` 包，实现 `monitor.CodedError` 接口供�
 | `DefaultRequestTimeoutSec` | 10 | tcpRequest/udpRequest 默认超时（秒） |
 | `DefaultListenTimeoutSec` | 60 | tcpListen/udpListen 默认超时（秒） |
 | `DefaultHeartbeatMs` | 3000 | 心跳默认间隔（毫秒） |
-| 全局节点间隔兜底 | 1000 | 未注入 `TaskFlow.DefaultDelayMs` 时的引擎默认节点延迟（`engine/executor.go:64-70`） |
+| 全局节点间隔兜底 | 1000 | 任务未配置全局节点执行间隔（`ManagerConfig.DefaultDelayMs` 为 0）时的引擎默认节点延迟（`engine/executor.go`） |
 
 ## 19. 完整 JSON 示例
 
