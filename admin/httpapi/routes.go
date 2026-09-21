@@ -59,7 +59,6 @@ func (s *Handler) registerManagementRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/history/{id}/config", s.handleGetHistoryConfig)
 	mux.HandleFunc("GET /sbot/history/{id}/config/archive", s.handleGetHistoryConfigArchive)
 	mux.HandleFunc("GET /sbot/history/{id}/timeseries", s.handleGetHistoryTimeseries)
-	mux.HandleFunc("POST /sbot/history/{id}/clone", s.handleCloneHistory)
 	mux.HandleFunc("GET /sbot/history/compare", s.handleCompareHistory)
 
 	// ── 基线资源读取 ──

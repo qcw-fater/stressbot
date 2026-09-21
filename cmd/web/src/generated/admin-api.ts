@@ -415,24 +415,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sbot/history/{id}/clone": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: components["parameters"]["Id"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["cloneHistory"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/sbot/baseline/proto/index.json": {
         parameters: {
             query?: never;
@@ -873,13 +855,6 @@ export interface components {
             };
         };
         JsonObject: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        OptionalJsonObject: {
             content: {
                 "application/json": {
                     [key: string]: unknown;
@@ -1328,23 +1303,6 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["JsonOK"];
-            400: components["responses"]["BadRequest"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["ServerError"];
-        };
-    };
-    cloneHistory: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: components["parameters"]["Id"];
-            };
-            cookie?: never;
-        };
-        requestBody?: components["requestBodies"]["OptionalJsonObject"];
-        responses: {
-            201: components["responses"]["JsonCreated"];
             400: components["responses"]["BadRequest"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["ServerError"];

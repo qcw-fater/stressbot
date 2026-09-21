@@ -2,7 +2,6 @@ import { App, Button, Empty, Input, Spin, Table, Tag, Timeline, Tooltip } from '
 import {
   BugOutlined,
   CheckCircleOutlined,
-  CopyOutlined,
   DownloadOutlined,
   FileTextOutlined,
   StarFilled,
@@ -186,14 +185,7 @@ export function HistoryDetailView({
     }
   };
 
-  const cloneTask = async () => {
-    try {
-      const resp = await historyApi.cloneHistory(id);
-      message.success(`已克隆为新任务 ${resp.id.slice(0, 8)}`);
-    } catch (err) {
-      showApiError(err);
-    }
-  };
+
 
   const theme = useEditorStore((s) => s.theme);
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
@@ -314,11 +306,6 @@ export function HistoryDetailView({
           <Tooltip title="下载完整任务配置归档 JSON（含全部阶段）">
             <Button size="small" icon={<DownloadOutlined />} onClick={downloadConfig}>
               下载
-            </Button>
-          </Tooltip>
-          <Tooltip title="将完整任务配置（含全部阶段）克隆为新任务">
-            <Button size="small" icon={<CopyOutlined />} onClick={cloneTask}>
-              克隆
             </Button>
           </Tooltip>
         </div>
@@ -671,6 +658,16 @@ export function HistoryDetailView({
             <Fact label="机器人" value={detail.totalBots.toLocaleString()} />
             <Fact label="并发" value={cs.concurrency.toLocaleString()} />
             <Fact label="超时" value={`${cs.timeoutSec}s`} />
+            <Fact
+              label="节点间隔"
+              value={
+                (configInfo?.robotConfig?.defaultDelayMs ?? 0) === 0
+                  ? '默认 1000ms'
+                  : configInfo?.robotConfig?.defaultDelayMs === -1
+                    ? '禁用等待'
+                    : `${configInfo?.robotConfig?.defaultDelayMs}ms`
+              }
+            />
             <Fact label="流程" value={`${cs.flowSizeKB}KB`} />
             <Fact label="Proto" value={`${cs.protoCount} 个`} />
             <Fact label="Lua 脚本" value={`${cs.scriptCount} 个`} />
@@ -680,10 +677,8 @@ export function HistoryDetailView({
                 detail.stageCount && detail.stageCount > 0 ? `${detail.stageCount} 阶段` : '无'
               }
             />
-            <Fact
-              label="带宽"
-              value={`${fmtBytes(finalBandwidth.totalSendBytes)} / ${fmtBytes(finalBandwidth.totalRecvBytes)}`}
-            />
+            <Fact label="发送流量" value={fmtBytes(finalBandwidth.totalSendBytes)} />
+            <Fact label="接收流量" value={fmtBytes(finalBandwidth.totalRecvBytes)} />
             <Fact
               label="开始"
               value={detail.startedAt ? dayjs(detail.startedAt).format('MM-DD HH:mm') : '—'}

@@ -2,9 +2,8 @@
  * 历史压测记录 API 封装（对应 docs/api-monitor.md §10）。
  */
 
-import { buildQuery, del, getJson, postJson, putJson } from './api';
+import { buildQuery, del, getJson, putJson } from './api';
 import type {
-  HistoryCloneRequest,
   HistoryCompareResponse,
   HistoryConfigArchive,
   HistoryConfigSummary,
@@ -67,10 +66,6 @@ export function getHistoryConfig(id: string, init?: RequestInit): Promise<Histor
 
 export function getHistoryConfigArchive(id: string): Promise<HistoryConfigArchive> {
   return getJson<HistoryConfigArchive>(`/history/${encodeURIComponent(id)}/config/archive`);
-}
-
-export function cloneHistory(id: string, req: HistoryCloneRequest = {}): Promise<{ id: string }> {
-  return postJson<{ id: string }>(`/history/${encodeURIComponent(id)}/clone`, req);
 }
 
 /** 对比目标：整体（仅 id）或阶段段落（id + stageIndex）。 */

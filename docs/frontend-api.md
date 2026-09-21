@@ -513,16 +513,7 @@ GET /sbot/history/{id}/config/archive  // 完整归档（proto/scripts 文件内
 - `getHistoryConfig(id, init?): Promise<HistoryConfigSummary>`
 - `getHistoryConfigArchive(id): Promise<HistoryConfigArchive>`
 
-### 8.7 克隆历史任务
-
-```
-POST /sbot/history/{id}/clone
-Content-Type: application/json
-```
-
-**前端函数**：`cloneHistory(id, req?): Promise<{ id: string }>`
-
-### 8.8 多任务对比
+### 8.7 多任务对比
 
 ```
 GET /sbot/history/compare?ids=task-a,task-b,task-c
@@ -533,7 +524,7 @@ GET /sbot/history/compare?targets=task-a:-1,task-b:2   // 支持阶段段落对�
 
 2~5 个对比目标。`targets=id:stageIndex` 中 `stageIndex=-1` 表示整体、`>0` 表示该 reset 段落；任一目标带段号即走 `targets=`，否则沿用旧 `ids=`。响应每项附带 `parentId` / `stageIndex` / `stageLabel`。
 
-### 8.9 历史标签列表
+### 8.8 历史标签列表
 
 ```
 GET /sbot/history/tags
@@ -541,7 +532,7 @@ GET /sbot/history/tags
 
 **响应**：`{ tags: string[] }`
 
-### 8.10 历史 Agent 报告
+### 8.9 历史 Agent 报告
 
 ```
 GET /sbot/history/{id}/agents
@@ -823,7 +814,6 @@ proto / script / adapter 各有一组 CRUD（`addXxx` / `addXxxFromBaseline` / `
 | GET | `/sbot/history/{id}/config` | `handleGetHistoryConfig` |
 | GET | `/sbot/history/{id}/config/archive` | `handleGetHistoryConfigArchive` |
 | GET | `/sbot/history/{id}/timeseries` | `handleGetHistoryTimeseries` |
-| POST | `/sbot/history/{id}/clone` | `handleCloneHistory` |
 
 **基线资源（只读）**：
 
@@ -859,7 +849,7 @@ Agent 上行（注册/心跳/指标上报/任务完成）不走这些 HTTP 路�
 | ResourcesDrawer / ProtocolConfigEditor | `baselineApi` (基线同步), `resourcesStore` (IDB) | — |
 | FlowManagerModal | `flowsApi`（服务器流程库） | — |
 | NodePalette 模板区 | `templatesApi`（服务器模板库） | `capabilities` |
-| HistoryModal / HistoryDetailView | `history` (list/detail/clone/compare/timeseries/config/archive) | — |
+| HistoryModal / HistoryDetailView | `history` (list/detail/compare/timeseries/config/archive) | — |
 | AgentsPanel | `agents` (list/delete/shutdown) | — |
 | NotepadTab | 本地（无后端 API） | — |
 

@@ -29,8 +29,8 @@ func TestManagementOpenAPIFreezesCurrentRoutes(t *testing.T) {
 			operationIDs[operation.OperationID] = struct{}{}
 		}
 	}
-	if got := len(operationIDs); got != 62 {
-		t.Fatalf("operation count = %d, want 62", got)
+	if got := len(operationIDs); got != 61 {
+		t.Fatalf("operation count = %d, want 61", got)
 	}
 	for _, removed := range []string{
 		"getAdminLogs",
@@ -39,6 +39,7 @@ func TestManagementOpenAPIFreezesCurrentRoutes(t *testing.T) {
 		"downloadAdminLogFile",
 		"listManagedAgentLogFiles",
 		"downloadManagedAgentLogFile",
+		"cloneHistory",
 	} {
 		if _, exists := operationIDs[removed]; exists {
 			t.Errorf("removed log operation %q remains in management OpenAPI", removed)

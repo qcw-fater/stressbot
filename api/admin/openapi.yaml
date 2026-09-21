@@ -76,12 +76,6 @@ paths:
   /sbot/history/{id}/timeseries:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get: { operationId: getHistoryTimeseries, responses: { '200': { $ref: '#/components/responses/JsonOK' }, '400': { $ref: '#/components/responses/BadRequest' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } } }
-  /sbot/history/{id}/clone:
-    parameters: [{ $ref: '#/components/parameters/Id' }]
-    post:
-      operationId: cloneHistory
-      requestBody: { $ref: '#/components/requestBodies/OptionalJsonObject' }
-      responses: { '201': { $ref: '#/components/responses/JsonCreated' }, '400': { $ref: '#/components/responses/BadRequest' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } }
   /sbot/baseline/proto/index.json:
     get: { operationId: getBaselineProtoIndex, responses: { '200': { $ref: '#/components/responses/JsonOK' }, '500': { $ref: '#/components/responses/ServerError' } } }
   /sbot/baseline/proto/{name}:
@@ -201,11 +195,6 @@ components:
             additionalProperties: true
     JsonObject:
       required: true
-      content:
-        application/json:
-          schema: { type: object, additionalProperties: true }
-    OptionalJsonObject:
-      required: false
       content:
         application/json:
           schema: { type: object, additionalProperties: true }

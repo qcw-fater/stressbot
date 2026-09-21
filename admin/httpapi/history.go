@@ -9,7 +9,6 @@ import (
 
 	"stressbot/admin/apierror"
 	"stressbot/admin/history"
-	admintask "stressbot/admin/task"
 )
 
 // compareTarget 对比目标：任务 ID + 可选阶段段落号（-1 表示整体）。
@@ -246,62 +245,6 @@ func (s *Handler) handleDeleteHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Handler) handleCloneHistory(w http.ResponseWriter, r *http.Request) {
-	if s.history == nil {
-		writeError(w, apierror.ErrHistoryDisabled)
-		return
-	}
-
-	id := r.PathValue("id")
-
-	// 解析可选的 name 覆盖
-	var body struct {
-		Name string `json:"name"`
-	}
-	if err := decodeJSONBody(w, r, &body, jsonBodyMaxBytes, "请求体不是合法 JSON"); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	cfg, err := s.history.GetConfig(r.Context(), id)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	// 查找原始任务获取名称和 totalBots
-	origName := ""
-	totalBots := 0
-	if orig, err := s.history.GetRecord(r.Context(), id); err == nil {
-		origName = orig.Name
-		totalBots = orig.TotalBots
-	}
-
-	if origName == "" {
-		origName = id[:8]
-	}
-
-	cloneName := origName + " (clone)"
-	if body.Name != "" {
-		cloneName = body.Name
-	}
-
-	newTask := &admintask.Task{
-		ID:        s.nextID(),
-		Name:      cloneName,
-		State:     admintask.Pending,
-		TotalBots: totalBots,
-		Config:    *cfg,
-		CreatedAt: time.Now(),
-	}
-	if err := s.tasks.Create(newTask); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, map[string]string{"id": newTask.ID})
 }
 
 func (s *Handler) handleCompareHistory(w http.ResponseWriter, r *http.Request) {
