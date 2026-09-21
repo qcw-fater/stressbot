@@ -11,6 +11,7 @@ import (
 	"stressbot/config"
 	"stressbot/internal/stresslog"
 	"stressbot/monitor"
+	"stressbot/network"
 	"stressbot/robot"
 	"stressbot/runner"
 	"stressbot/state/shared"
@@ -50,6 +51,7 @@ type Runner struct {
 	assignment *Assignment
 	collector  *monitor.MetricsCollector
 	workDir    string
+	engine     network.EngineConfig
 
 	// OnStageReset reset 边界阶段段落上报回调，由调用方（Agent.executeTask）注入。
 	// 在 resetBots() 完成后调用，用于上报刚结束段落的累计指标并重置采集器。
@@ -57,11 +59,12 @@ type Runner struct {
 	OnStageReset func(nextStageIdx int)
 }
 
-// NewRunner 创建任务执行器。
-func NewRunner(assignment *Assignment, collector *monitor.MetricsCollector) *Runner {
+// NewRunner 创建任务执行器。engine 是节点本地的 gnet 引擎调优参数（agent.toml [network]）。
+func NewRunner(assignment *Assignment, collector *monitor.MetricsCollector, engine network.EngineConfig) *Runner {
 	return &Runner{
 		assignment: assignment,
 		collector:  collector,
+		engine:     engine,
 	}
 }
 
@@ -157,7 +160,7 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 
 	// 8. 启动 gnet 网络引擎
 	// Dialer 元信息源：resolver 任一 Go SchemaAdapter（HeaderSize 全局一致，T1.6 同源）。
-	dialer, err := runner.StartDialer(resources, hbInterval)
+	dialer, err := runner.StartDialer(resources, hbInterval, r.engine)
 	if err != nil {
 		stresslog.Error("[TASK] 启动网络引擎失败", zap.String("taskID", taskID), zap.Error(err))
 		return runFailed(fmt.Sprintf("启动网络引擎失败: %v", err))

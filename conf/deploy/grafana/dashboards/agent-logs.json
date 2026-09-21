@@ -1,0 +1,147 @@
+{
+  "dashboard": {
+    "uid": "agent-logs",
+    "title": "Agent 日志监控",
+    "description": "Vector 采集的 Agent 节点日志：总量/级别/节点趋势 + 错误警告明细。数据源 Loki。",
+    "tags": ["stressbot", "agent-logs"],
+    "timezone": "browser",
+    "schemaVersion": 40,
+    "version": 1,
+    "refresh": "10s",
+    "graphTooltip": 1,
+    "time": { "from": "now-1h", "to": "now" },
+    "templating": {
+      "list": [
+        {
+          "name": "node",
+          "label": "节点",
+          "type": "query",
+          "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+          "query": { "refId": "VariableQueryEditor-Query-0", "stream": "", "label": "agent_id", "type": 1 },
+          "regex": "",
+          "includeAll": true,
+          "allValue": ".+",
+          "multi": true,
+          "refresh": 1,
+          "sort": 1,
+          "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+          "options": []
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "近 15 分钟错误数",
+        "description": "level=error 的日志条数（当前筛选范围内）",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+          },
+          "overrides": []
+        },
+        "options": { "colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+        "targets": [{ "expr": "sum(count_over_time({job=\"stressbot-agent\",agent_id=~\"$node\",level=\"error\"}[15m])) or vector(0)", "queryType": "instant", "refId": "A" }]
+      },
+      {
+        "id": 2,
+        "type": "stat",
+        "title": "近 15 分钟警告数",
+        "description": "level=warn 的日志条数（当前筛选范围内）",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] }
+          },
+          "overrides": []
+        },
+        "options": { "colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+        "targets": [{ "expr": "sum(count_over_time({job=\"stressbot-agent\",agent_id=~\"$node\",level=\"warn\"}[15m])) or vector(0)", "queryType": "instant", "refId": "A" }]
+      },
+      {
+        "id": 3,
+        "type": "stat",
+        "title": "近 15 分钟日志总量",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+        "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+        "options": { "colorMode": "value", "graphMode": "area", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+        "targets": [{ "expr": "sum(count_over_time({job=\"stressbot-agent\",agent_id=~\"$node\"}[15m])) or vector(0)", "queryType": "instant", "refId": "A" }]
+      },
+      {
+        "id": 4,
+        "type": "stat",
+        "title": "近 5 分钟上报节点数",
+        "description": "有日志流入的 Agent 节点数量",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+          },
+          "overrides": []
+        },
+        "options": { "colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+        "targets": [{ "expr": "count(sum by (agent_id) (count_over_time({job=\"stressbot-agent\",agent_id=~\"$node\"}[5m]))) or vector(0)", "queryType": "instant", "refId": "A" }]
+      },
+      {
+        "id": 5,
+        "type": "timeseries",
+        "title": "日志量趋势（按级别）",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": { "fillOpacity": 15, "lineWidth": 2, "showPoints": "never", "spanNulls": false },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "error" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+              { "matcher": { "id": "byName", "options": "warn" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+              { "matcher": { "id": "byName", "options": "info" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+            ]
+          }
+        },
+        "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+        "targets": [{ "expr": "sum by (level) (count_over_time({job=\"stressbot-agent\",agent_id=~\"$node\"}[$__auto]))", "queryType": "range", "refId": "A", "legendFormat": "{{level}}" }]
+      },
+      {
+        "id": 6,
+        "type": "timeseries",
+        "title": "日志量趋势（按节点）",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+        "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 15, "lineWidth": 2, "showPoints": "never", "spanNulls": false } }, "overrides": [] },
+        "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+        "targets": [{ "expr": "sum by (agent_id) (count_over_time({job=\"stressbot-agent\",agent_id=~\"$node\"}[$__auto]))", "queryType": "range", "refId": "A", "legendFormat": "{{agent_id}}" }]
+      },
+      {
+        "id": 7,
+        "type": "logs",
+        "title": "错误与警告日志",
+        "description": "level 为 error 或 warn 的明细，新日志在前；行内 JSON 可展开查看 robot/taskID 等字段",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 10, "w": 24, "x": 0, "y": 13 },
+        "options": { "sortOrder": "Descending", "showTime": true, "wrapLogMessage": true, "prettifyLogMessage": false, "enableLogDetails": true, "dedupStrategy": "none" },
+        "targets": [{ "expr": "{job=\"stressbot-agent\",agent_id=~\"$node\",level=~\"error|warn\"}", "queryType": "range", "refId": "A" }]
+      },
+      {
+        "id": 8,
+        "type": "logs",
+        "title": "全部日志",
+        "description": "全部级别的明细，新日志在前",
+        "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
+        "gridPos": { "h": 10, "w": 24, "x": 0, "y": 23 },
+        "options": { "sortOrder": "Descending", "showTime": true, "wrapLogMessage": true, "prettifyLogMessage": false, "enableLogDetails": true, "dedupStrategy": "none" },
+        "targets": [{ "expr": "{job=\"stressbot-agent\",agent_id=~\"$node\"}", "queryType": "range", "refId": "A" }]
+      }
+    ]
+  },
+  "overwrite": true
+}

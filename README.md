@@ -32,7 +32,7 @@ stressbot/
 ├── monitor/              指标采集（原子计数器、延迟直方图、Apdex、CSV/HTTP 导出）
 ├── network/              TCP/UDP 连接、声明式心跳（基于 gnet）
 ├── robot/                机器人实例、Manager、ActionHandler
-├── script/               Lua 运行时池（7 模块 86 函数）
+├── script/               Lua 运行时池（7 模块 87 函数）
 ├── state/                单机器人状态；shared/ 为 Redis 跨节点共享状态
 ├── internal/             daemon/debughttp/jsonx/lru/retry/stresslog/timerpool/workpool
 └── conf/
@@ -40,15 +40,16 @@ stressbot/
     ├── agent.toml        Agent 节点配置
     ├── admin.toml        Admin 服务器配置
     ├── flow/
-    │   └── flow.json     流程图与动作（声明式）
+    │   └── *.json        流程图与动作（声明式；可放多份场景，-flow 切换）
     ├── adapter/
     │   ├── <proto>_<service>_codec.json  声明式 codec 配置（每连接一份）
     │   └── errors.json                   共享错误码描述（业务码 ≥ 100）
     ├── proto/            .proto 文件（动态加载）
-    └── scripts/          Lua 脚本（复杂行为）
+    ├── scripts/          Lua 脚本（复杂行为）
+    └── deploy/           部署中间件配置（nginx / Loki / Grafana / Vector）
 ```
 
-> `data/`（运行时数据）、`log/`（日志输出）、`docs/`（设计文档）、`plans/`（重构计划）、`deploy/`（部署）为辅助目录。
+> `data/`（运行时数据）、`log/`（日志输出）、`docs/`（技术知识库，入口见 [docs/README.md](docs/README.md)；`docs/superpowers/` 为历史归档不随代码维护）为辅助目录。
 
 ---
 
@@ -72,8 +73,11 @@ go run ./cmd/agent -config conf/agent.toml
 go run ./cmd/admin -config conf/admin.toml
 
 # 前端开发
-cd cmd/web && npm install && npm run dev   # http://localhost:5173
+cd cmd/web && npm install && npm run dev   # http://localhost:5173/stressbot/
 ```
+
+> 也可用 Makefile：`make frontend build` 交叉编译 Agent / Admin 到 `bin/`，`make check` 全仓编译 + 前端类型检查，`make test` 前端测试。
+> `docker-compose.yml` 提供一键本地演示栈：MySQL + Redis + nginx（托管前端 dist）+ Vector → Loki → Grafana 日志观测。
 
 ---
 
@@ -130,6 +134,7 @@ Executor 遍历节点图 → 命中 action 节点
 
 - `defaultDelayMs`：全局节点间默认延迟（毫秒）。`0` = 引擎默认 1000ms，`< 0` = 禁用。
 - `nodes` / `actions` / `listens`：均为 JSON 对象，key 即对应 ID/名称。
+- 入口约定：引擎从 `nodes` 中 ID 为 **`main`** 的节点开始执行。
 
 ## 可视化编辑器
 
@@ -139,7 +144,7 @@ Executor 遍历节点图 → 命中 action 节点
 - **节点编辑抽屉**：action 编辑（pattern / proto / bindings / store / delay）；switch 编辑（分支增删/排序）
 - **Proto 浏览器**：浏览已加载的 proto 消息类型和字段，用于动作编辑
 - **校验报告**：实时检查 flow.json 引用完整性和语义错误（画布节点显示错误标记）
-- **模板库**：可复用的 action / listen 模板
+- **模板库**：可复用的流程 / action / listen 模板（保存到 Admin 模板库，跨浏览器共享）
 - **撤销重做**：Ctrl+Z / Ctrl+Shift+Z
 - **自动保存**：编辑稿 localStorage 持久化
 
@@ -150,7 +155,7 @@ Executor 遍历节点图 → 命中 action 节点
 | type | 行为 |
 | ---------- | -------------------------------------------------------------------- |
 | `sequence` | 顺序执行 `next` 中列出的所有子节点 |
-| `action`   | 执行 `action` 所引用的 `actions[name]`，唯一产生副作用的节点 |
+| `action`   | 执行 `action` 所引用的 `actions[name]`，唯一产生副作用的节点；`action` 留空而只配 `listenRefs` 时为合法的纯监听节点 |
 | `loop`     | 循环执行单个 `body` 节点，支持次数/前置条件/后置条件 |
 | `boolean`  | 对 `condition` 求值，跳转到 `trueNext` 或 `falseNext` |
 | `switch`   | 按 `cases` 顺序匹配条件，命中则跳转其 `next`；全不命中跳 `defaultNext` |
@@ -176,7 +181,7 @@ Executor 遍历节点图 → 命中 action 节点
 // action — 执行动作
 { "type": "action", "action": "Login", "onError": { "strategy": "abort" }, "listenRefs": [...] }
 
-// loop — 循环（loopCount ≤ 0 视为无限）
+// loop — 循环（loopCount < 0 无限；= 0 跳过循环体；condition false 退出循环）
 // body 为单个节点 ID；多步骤循环体用 sequence 节点包装后填入 body
 {
   "type": "loop", "loopCount": -1,
@@ -217,8 +222,8 @@ Executor 遍历节点图 → 命中 action 节点
 | ----------------- | -------------- | ----------------------------------------------------------------------- |
 | `next`            | sequence       | 子节点 ID 列表：`["id1", "id2"]` |
 | `body`            | loop           | 循环体节点 ID（单个）；多步骤时指向 sequence 节点 |
-| `loopCount`       | loop           | 循环次数；`≤ 0` 为无限循环 |
-| `condition`       | loop / boolean | loop：前置条件（false 时跳过本次）；boolean：分支判断条件 |
+| `loopCount`       | loop           | 循环次数；`< 0` 无限循环，`= 0` 跳过循环体 |
+| `condition`       | loop / boolean | loop：前置条件（false 时退出循环）；boolean：分支判断条件 |
 | `breakCondition`  | loop           | 后置条件（true 时退出循环） |
 | `trueNext`        | boolean        | 条件为 true 时跳转的节点 ID |
 | `falseNext`       | boolean        | 条件为 false 时跳转的节点 ID |
@@ -232,7 +237,13 @@ Executor 遍历节点图 → 命中 action 节点
 | `waitMin`         | wait           | 随机等待下界（毫秒，与 `waitMax` 配合使用） |
 | `waitMax`         | wait           | 随机等待上界（毫秒） |
 | `then`            | wait           | 等待完成后执行的唯一后继节点 ID（可选） |
-| `delayMs`         | action 等      | 节点执行后延迟；`> 0` 使用此值，`= 0` 使用 defaultDelayMs，`< 0` 禁用 |
+| `delayMs`         | action         | 节点执行后延迟（含失败收束路径）；`> 0` 使用此值，`= 0` 使用 defaultDelayMs，`< 0` 禁用 |
+
+### 边界与加载期校验
+
+- `weighted`：负权重 warn 后按 0 计；权重总和 ≤ 0 直接报错（无可选分支）。
+- `wait`：`waitMin ≥ waitMax` 时用 `waitMin` 并 warn；只配置一界或 `waitMs < 0` 时 warn 且不等待。
+- `listenRefs` 引用的 listen 不存在 → 加载期报错；action 节点 `action` 与 `listenRefs` 都为空 → warn「节点空转」。
 
 ### action.onError
 
@@ -262,9 +273,9 @@ Executor 遍历节点图 → 命中 action 节点
 | `udpConnect`        | 建立 UDP 连接（`service` + `address`） |
 | `udpClose`          | 关闭 UDP 连接（`service`） |
 | `udpListen`         | 事件等待 UDP 推送（需 listenRefs 预注册，超时 `timeout` 秒） |
-| `httpRequest`       | HTTP 请求（`url` + `method` + `contentType` + body） |
+| `httpRequest`       | HTTP 请求（`url` + `method` + `contentType` + body）；非 2xx 状态码视为动作失败 |
 | `setState`          | 从 bindings 写入 state |
-| `clearState`        | 清除 state（`keys` 列表） |
+| `clearState`        | 清除 state（`keys` 列表；内置身份键 `id` / `index` / `account` 受保护不可清除） |
 | `lua`               | 执行 `script` 指定的 Lua 脚本（`execute(r)` 返回 nil 表示成功，err table 表示失败） |
 
 ### ActionDef 全字段
@@ -286,7 +297,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `method`       | HTTP 方法（`httpRequest`，默认 POST） |
 | `contentType`  | HTTP 内容类型（`httpRequest`，`json`（默认）/ `form`） |
 
-> `optional` / `required` / `wrap` 等属于 **FieldBind**（见 bindings 通用属性），不属于 ActionDef。
+> `optional` / `required` / `wrap` 等属于 **FieldBind**（见 bindings 通用属性），不属于 ActionDef。`httpRequest` 响应仅在 `contentType` 为 `json` 时解析并按 `store` 存储；`form` 模式不支持 `map` binding。
 
 ## bindings — 字段绑定
 
@@ -303,21 +314,23 @@ Executor 遍历节点图 → 命中 action 节点
 
 | `type` | 取值 |
 | --------------- | ------------------------------------------------------------------------ |
-| `stateFirst`    | 从 state list 取第一个元素，空列表触发跳过 |
+| `stateFirst`    | 从 state list 取第一个元素 |
 | `stateRandom`   | 从 `source` state list 随机选一个（可选 `path`、`filters` 过滤） |
-| `stateRandomN`  | 从 state list 随机选 `count` 个不重复 |
+| `stateRandomN`  | 从 state list 随机选 `count` 个不重复（可选 `path` 投影） |
 | `stateMapKey`   | 从 state map 随机选一个 key |
 | `stateMapValue` | 从 state map 随机选一个 value（可选 `path`） |
 | `randomPick`    | 从 `values` 列表随机选一个 |
 | `randomPickN`   | 从 `values` 列表随机选 `count` 个 |
 | `randomPickMap` | 按 `keySource` 查 state 得 key，再按 key 查 `values` 得列表，随机选一个 |
-| `randomExclude` | 从 list 随机选，排除 `excludeSource` 当前值 |
+| `randomExclude` | 随机选一个并排除 `excludeSource` 当前值；候选池来自 `values` 字面量列表（优先）或 `source` state list |
 | `randomInt`     | `[min, max]` 随机整数 |
 | `randomBool`    | 随机布尔 |
 | `randomString`  | 随机字符串（`length`，可选 `charset`；支持 `lower`/`upper`/`alpha`/`numeric`/`alphanum` 或自定义字符集） |
 | `randomFloat`   | `[min, max]` 随机浮点数（可选 `precision` 小数位数） |
 
 `randomString.charset` 支持别名：`lower`（a-z）、`upper`（A-Z）、`alpha`（a-zA-Z）、`numeric`（0-9）、`alphanum`（a-zA-Z0-9，默认）。其他非空字符串按自定义字符集字面量处理，例如 `"ABC-123_"`。
+
+> state 系 binding（`state` / `stateFirst` / `stateRandom` / `stateRandomN` / `stateMapKey` / `stateMapValue`）在值缺失时**默认等同 required**（中止整个动作），配置 `optional: true` 才降级为跳过该字段。
 
 ### 辅助类
 
@@ -351,7 +364,7 @@ Executor 遍历节点图 → 命中 action 节点
 - `required: true` — 值缺失时跳过整个动作
 - `wrap: true` — 将单个值包装为列表，用于 repeated 字段赋单个元素
 - `storeAs: "key"` — 将解析结果存入 state（中间变量），后续 binding 可通过 `source` 引用
-- `path: "a.b"` — 取嵌套字段，支持 `|` 分隔多条候选路径
+- `path: "a.b"` — 取嵌套字段路径（点分 + `[N]` 数组索引）
 - `filters` — 过滤器数组（见 filters）
 - `condition` — **条件表达式字符串**（`state:`/`lua:` 前缀），不满足时跳过本绑定
 
@@ -408,6 +421,7 @@ Executor 遍历节点图 → 命中 action 节点
 - `server`：连接名，格式 `<协议>:<服务名>`（如 `tcp:logic`、`udp:battle`）。
 - `listen`：引用 `listens` 表的 key；空 = 仅缓存，不执行回调。
 - `queueSize`：监听缓存队列容量。未写 → 默认 1；显式 `> 0` → 按该值；显式 `≤ 0` → 注册时报错（不静默 clamp）。
+- `listen` 引用不存在的 listens key → 加载期报错。
 
 ## filters — 过滤器
 
@@ -483,14 +497,14 @@ FilterDef 共 5 个字段，比较运算符 **12 种**（每种均支持符号�
 }
 ```
 
-`heartbeatFields` 每项 `source` 取值：`fixed` / `state` / `stateCounter` / `counter` / `timestamp` / `randomInt`；`type` 为小端宽度 `u8/i8/u16/i16/u32/i32/u64/i64/f32/f64`（浮点仅 `fixed`/`state`）。也可用 `c2sProto + bindings` 构造 protobuf body；`c2sProto` 与 `heartbeatFields` 互斥。心跳运行时不调用业务 Lua，主流程阻塞等待时心跳仍会继续发送。
+`heartbeatFields` 每项 `source` 取值：`fixed` / `state` / `stateCounter` / `counter` / `timestamp` / `randomInt`，配套属性按 source 而定：`value` / `floatValue`（fixed）、`key`（state）、`start` / `step`（计数器）、`min` / `max`（randomInt）、`unit`（timestamp，`ms` / `s`）；`type` 为小端宽度 `u8/i8/u16/i16/u32/i32/u64/i64/f32/f64`（浮点仅 `fixed`/`state`）。也可用 `c2sProto + bindings` 构造 protobuf body；`c2sProto` 与 `heartbeatFields` 互斥。心跳运行时不调用业务 Lua，主流程阻塞等待时心跳仍会继续发送。
 
 ## 条件表达式
 
 `boolean` 节点、`switch` 分支、`loop` 的 `condition` / `breakCondition`，以及 FieldBind 的 `condition`，都是**字符串表达式**，支持两种前缀：
 
-- **内置**：`state:key op value`，如 `state:heroId > 0`。比较运算符 `== != > >= < <=`，算术运算符 `+ - * / %`（仅数值，`%` 仅整数，严格类型无隐式转换）。支持 `|| && !` 和括号嵌套（递归下降解析：`or → and → unary → comparison → arith → term → factor`）。裸 key（无运算符）仅对 **bool** 值做真值判断，数值/字符串裸用会 warn 并视为 false（须显式比较如 `count != 0`）；空表达式视为 `true`。字面量只有数字和带引号字符串——**无 `nil`/`true`/`false` 关键字**，裸标识符恒为 state 路径，判空须改用 filter 的 `isNil`/`notNil`。
-- **Lua**：`lua:script_name.lua`，执行 Lua boolean 脚本，`return true/false`（true 满足）。脚本执行失败或缺 `lua:` 前缀时按 `false` 处理。
+- **内置**：`state:key op value`，如 `state:heroId > 0`（key 支持点分嵌套与 `[N]` 下标）。比较运算符 `== != > >= < <=`，算术运算符 `+ - * / %`（仅数值，`%` 仅整数，严格类型无隐式转换）。支持 `|| && !` 和括号嵌套（递归下降解析：`or → and → unary → comparison → arith → term → factor`）。裸 key（无运算符）仅对 **bool** 值做真值判断，数值/字符串裸用会 warn 并视为 false（须显式比较如 `count != 0`）；空表达式视为 `true`。字面量只有数字和带引号字符串——**无 `nil`/`true`/`false` 关键字**，裸标识符恒为 state 路径，判空须改用 filter 的 `isNil`/`notNil`。
+- **Lua**：`lua:script_name.lua`，执行 Lua boolean 脚本，`return true/false`（true 满足）。缺前缀在**加载期**报错（不会运行期静默恒 false）；脚本执行失败按 `false` 处理。
 
 ---
 
@@ -516,10 +530,12 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`protocol/codec_resolver.
 
 每条命名连接对应一份 codec 配置，由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `protocol/codec/` Go 引擎驱动编解码。核心字段：
 
-- `header`：消息头字段布局，每个字段带 `name` / `size` / `role`（如 `route` / `length` / `flags` / `checksumOut` / `value` / `errorCode` / `reserved`）。
-- `frame`：帧参数（`lengthIncludesHeader` / `lengthIncludesTrailer` 等），决定 `length` 字段的字节范围。
+- `version`：配置版本，当前必须为 `1`；`endianDefault`：默认字节序（`le` / `be`）。
+- `header`：消息头字段布局。每个字段带 `name` / `size` / `role`（`route` / `length` / `flags` / `checksumOut` / `value` / `errorCode` / `reserved`），可选 `type`（`u8…f64` / `bytes`）、`endian`、`offset`、`bits`（flags 命名位）、`from`（checksumOut 引用 `<pipeline 步名>.<输出>`）、`source`（value 取值源）、`repr`。
+- `frame`：帧参数（`headerSize` 必填、`trailerSize`、`lengthIncludesHeader` / `lengthIncludesTrailer`），决定 `length` 字段的字节范围。
 - `routeKeyTemplate`：路由键模板，如 `"{cmd}:{act}"`，占位符对应 `role:"route"` 字段。
-- `pipeline`：encode/decode 管线步骤数组（每步 `op` + `algo` + `params` + `produces`）；decode 由后端自动反序执行。
+- `pipeline`：encode/decode 管线步骤数组；`op` 取 `compress` / `encrypt` / `checksum` / `hash`，每步含必填且唯一的 `name` + `algo` + `params`，可选 `produces` / `flag` / `keyLen` / `over`（独立 checksum / hash 作用域）/ `onError`（`fail` / `keep`）/ `when`（条件执行）。decode 由后端自动反序执行。
+- 已注册算法：cipher `none`/`xor`/`xor_carry_rol`/`rc4`/`aes_ecb`/`aes_cbc`/`aes_ctr`/`xxtea`；checksum `none`/`xor8`/`sum8`/`crc16`/`crc32`/`crc32c`；compress `none`/`gzip`；hash `md5`/`sha1`/`sha256`。
 - `encrypt.offset.{encode,decode}`：单向偏移加密配置（如 `udp:battle` 发送偏移 11、接收偏移 0），前 N 字节保持明文供服务端查密钥表。
 - `heartbeat`：可选连接级心跳（见第一部分「心跳」）。
 - 共享 `errors.json`：`DescribeError` 读取，把服务端错误码映射为中文描述。
@@ -530,7 +546,14 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`protocol/codec_resolver.
 
 # 第三部分：Lua API 参考
 
-加载方式：`local mod = require("<name>")`。**7 个模块共 86 个函数**。
+## 脚本执行模式
+
+- **lua 动作**：入口函数 `execute(r)`，返回 `nil` 表示成功，返回 err table `{code, detail}` 表示失败（`robot.error(code, detail)` 构造）。
+- **监听回调**：入口函数 `on_message(r, msg)`，返回值忽略；`msg` 为字段表（listen 配了 `s2cProto`）或原始二进制 string（未配时）。
+- **robot 句柄**：`r` 支持 `r:get("key")` / `r:set(k, v)` 等方法调用形式（与 `robot` 模块函数等价）。
+- **协程约束**：协作式等待 API（网络请求 / 监听 / `utils.sleep` / `share.*`）只能在脚本顶层直接调用；包进用户 `pcall` 或 `coroutine.create` 会直接报错（框架自身对脚本异常的 pcall 保护不受影响）。
+
+加载方式：`local mod = require("<name>")`。**7 个模块共 87 个函数**。
 
 ## network（21 函数）
 
@@ -596,7 +619,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`protocol/codec_resolver.
 | `set(key, value)`                         | 写入 state |
 | `has(key)`                                | 检查 key 是否存在 |
 | `delete(key)`                             | 删除单个 key |
-| `clear([key])`                            | 无参数清空全部；有参数删除指定 key |
+| `clear([key])`                            | 无参数清空全部（保留身份键 `id`/`index`/`account`）；有参数删除指定 key（身份键不可删） |
 | `increment(key)`                          | 原子自增，返回新值 |
 | `keys()`                                  | 返回所有 key 列表 |
 | `get_path("a.b[0].c")`                   | 按路径读取嵌套值 |
@@ -642,7 +665,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`protocol/codec_resolver.
 | `unpack_le(data, fmt1, ...)`             | 小端二进制解包，大整数超 2^53 以字符串返回 |
 | `sleep(ms)`                              | 毫秒休眠（响应取消，仅暂停当前机器人主流程） |
 | `time_ms()`                              | 当前时间戳（毫秒） |
-| `fnv_hash(str)`                          | FNV-1a 64 位哈希（返回 hex 字符串） |
+| `fnv_hash(str)`                          | FNV-1a 64 位哈希（返回 hex 字符串；输入先去空白、剥 `v`/`V` 前缀并转小写） |
 
 ## log（4 函数）
 
@@ -664,7 +687,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`protocol/codec_resolver.
 
 Redis 支撑的跨机器人/跨节点共享态。单机在 `stressbot.toml`、Admin 在 `admin.toml` 配置 `[redis]`；未配置时所有调用返回 `ErrNotEnabled`。实现位于 `state/shared`，全部协作式（等待网络时仅暂停当前机器人主流程）。
 
-返回约定：写/判定类返回 `(value_or_ok, err)`；读类返回 `(value, ok, err)`，`ok=false` 用于区分「缺失」与「存了 nil」。
+返回约定：写/判定类返回 `(value_or_ok, err)`；读类返回 `(value, ok, err)`，`ok=false` 用于区分「缺失」与「存了 nil」。两个例外：`owner(key)` 与 `hash_get_all(key)` 返回二值 `(value, err)`。
 
 | 命名空间 | 函数 |
 | --- | --- |
@@ -718,7 +741,7 @@ pending → starting → running → stopping → stopped
 | 进程 | 配置文件 | 顶层配置 |
 | --- | --- | --- |
 | `cmd/stressbot` | `conf/stressbot.toml` | `log` / `monitor` / `pprof` / `standalone` / 可选 `redis` / `network` / `daemon` |
-| `cmd/agent` | `conf/agent.toml` | `log` / `monitor` / `pprof` / `agent` / `daemon` |
+| `cmd/agent` | `conf/agent.toml` | `log` / `monitor` / `pprof` / `agent` / `network` / `daemon` |
 | `cmd/admin` | `conf/admin.toml` | `server` / `controlPlane` / 可选 `mysql` / `redis` / `log` / `pprof` / `daemon` |
 
 配置采用 TOML 严格解码，未知字段会导致启动失败；支持 `${VAR}`、`${VAR:-default}` 环境变量展开和 `$$` 字面转义。完整字段、默认值和安全说明直接见三份 `conf/*.toml` 样例。
@@ -743,7 +766,7 @@ version = "0.31.49.171222"
 channel = "mine"
 ```
 
-`[standalone.rampUp]` 可配置 `[[standalone.rampUp.stages]]`；各阶段 `count` 之和必须等于 `standalone.bot.totalBots`。脚本使用 `share` 时配置 `[redis]`，实现位于 `state/shared`。
+`[standalone.rampUp]` 可配置 `[[standalone.rampUp.stages]]`；各阶段 `count` 之和必须等于 `standalone.bot.totalBots`。脚本使用 `share` 时配置 `[redis]`，实现位于 `state/shared`。`[standalone.stateExtra]` 不得覆盖框架保留键 `id` / `index` / `account`（命中 Warn 并忽略，否则整批机器人共用同一身份）。
 
 ### Agent 配置要点
 
@@ -799,6 +822,7 @@ staticDir = "cmd/web/dist"
 listenHost = "127.0.0.1"
 port = 7720
 heartbeatInterval = "10s"
+leaseDuration = "45s"
 unhealthyAfter = "30s"
 offlineAfter = "60s"
 
@@ -811,7 +835,7 @@ database = "stressbot"
 retentionDays = 90
 ```
 
-Admin 启动时按代码内嵌的当前版本 DDL 创建所需表；首版不维护数据库版本迁移链。`[mysql]` 省略或 `host` 为空时禁用历史归档。
+`controlPlane` 三个时长在加载期强校验 `heartbeatInterval < leaseDuration < offlineAfter`（租约时长是 Admin 判定 Agent 失联前允许的最大静默窗口）。Admin 启动时按代码内嵌的当前版本 DDL 创建所需表；首版不维护数据库版本迁移链。`[mysql]` 省略或 `host` 为空时禁用历史归档。
 
 ---
 
@@ -853,15 +877,15 @@ Admin 启动时按代码内嵌的当前版本 DDL 创建所需表；首版不维
 
 ### 请求-响应机制
 
-`Connection.responseMap` 注册一次性 channel → 发送请求 → select 三路等待（ctx.Done / 响应 / 超时）→ defer 清理 channel。
+`Connection.responseMap` 注册一次性 channel → 发送请求 → `robotScheduler.awaitResponse` 五路 select 等待（协作式任务队列 / 响应 channel / 调用方与机器人双 ctx 取消 / 超时）→ defer 清理 channel。
 
 ### 持久化监听
 
-connectionPump 解码后按 routeKey 分发：优先唤醒一次性请求响应，其次写入监听队列并执行回调（声明式 store 直接写线程安全 state；Lua 回调投递到机器人任务队列串行执行）；没有匹配项则丢弃。
+connectionPump 解码后按 routeKey 分发：先唤醒一次性请求响应，再查合表 `listenRoutes` 一次取齐回调与队列——有回调只执行回调、无回调才入队（二者互斥，不再有「有回调却没队列」的偏斜状态）。声明式 store 由 pump 解析物化后经 `SetPath` 投递执行器任务队列写入（单写方）；Lua 回调同样投递任务队列串行执行；没有匹配项则丢弃。
 
 ### 帧解析
 
-gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame → adapter Decode → dispatch。
+gnet `OnTraffic`（事件线程）：peek header → `BodyLength()` 纯 Go 计算 → read frame → 投递 inboundCh；decode 与 dispatch 在 `connectionPump` goroutine 中异步执行。
 
 ### 连接生命周期
 
@@ -879,7 +903,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 | `GetInt / GetInt32 / GetInt64 / GetString` | 类型化读取 |
 | `GetList / GetMap` | 列表/映射读取 |
 | `ListLen / PickFromList / PickMapKey / PickMapValue` | 列表/映射长度与零拷贝随机选取（供 `stateRandom`/`stateMapKey` 等 binding） |
-| `SetPath / GetPath / NavigatePath` | 嵌套路径写入/读取（支持 `a.b[0].c`） |
+| `SetPath / GetPath` | 嵌套路径写入/读取（支持 `a.b[0].c`；包级函数 `NavigatePath(v, path)` 可对任意值导航） |
 | `Increment / IncrementInt64` | 原子自增 |
 | `Delete / Clear / Has / Keys` | 管理 |
 
@@ -900,7 +924,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 ### Manager 批量启动
 
 - `StartAll`：全量 + 限速（每 concurrency 个暂停 1 秒）
-- `StartWithRampUp`：分阶段（每阶段独立 `count` / `concurrency` / `holdSec` / `reset`；`holdSec` 配置 `< 30` 会被提升到 30；`reset: true` 表示进入本阶段前清空所有已有机器人）
+- `StartWithRampUp`：分阶段（每阶段独立 `count` / `concurrency` / `holdSec` / `reset`；`holdSec` 未填（0）回退默认 30s，显式配置的值一律照办、不做下限钳制；`reset: true` 表示进入本阶段前清空所有已有机器人）
 
 ### 优雅关闭
 
@@ -935,8 +959,8 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 
 | 策略 | 说明 |
 |------|------|
-| `proportional` | 按 Agent maxBots 比例分配 |
-| `debug-single` | 全部分配给单个 Agent（调试用） |
+| 比例分配（默认） | 按 Agent maxBots 比例分配，余数按最大剩余小数补齐 |
+| 单机调试 | 任务配置 `debugMode: true` 时分配给「容量够且 maxBots 最小」的单个 Agent；无单节点容量足够时降级为比例分配 |
 
 ### HTTP 管理 API
 
@@ -1017,6 +1041,9 @@ Admin 不提供日志查询、代理或下载 API。Admin/Agent 只写本地 JSO
 | GET | `/sbot/flows/{id}` | 模板详情 |
 | PUT | `/sbot/flows/{id}` | 更新模板 |
 | DELETE | `/sbot/flows/{id}` | 删除模板 |
+| GET / PUT | `/sbot/flows/snapshot` | 画布快照（含布局）读取 / 保存 |
+
+**动作 / 监听模板库：**与流程模板同构，各 7 个操作——`GET|POST /sbot/action-templates`（列表 / 创建）、`GET|PUT|DELETE /sbot/action-templates/{id}`（详情 / 更新 / 删除）、`GET|PUT /sbot/action-templates/snapshot`（快照读取 / 保存）；`/sbot/listen-templates` 路径完全同构。
 
 **其它：**
 
@@ -1056,7 +1083,7 @@ Admin 不提供日志查询、代理或下载 API。Admin/Agent 只写本地 JSO
 浏览器 → Admin HTTP (:7718)；多 Agent → Admin gRPC (:7720)；Agent → 目标游戏服务器
 ```
 
-- MySQL 历史归档：6 表 + 周期采样 + 自动裁剪
+- MySQL 历史归档：11 表（6 张归档主表 + `task_agent_events` + `task_meta` + 流程 / 动作 / 监听 3 张模板表）+ 周期采样 + 自动裁剪
 - 前端历史面板：搜索 / 标签 / 详情 / P99 对比 / 克隆重跑
 
 ---
@@ -1069,6 +1096,8 @@ Admin 不提供日志查询、代理或下载 API。Admin/Agent 只写本地 JSO
 
 每个动作维度记录：**成功 / 失败 / 超时 / 取消 / 执行中 / 发送字节 / 接收字节 / 错误分布**（无独立「跳过」计数器；`ResultCanceled` 与 `ResultFailure` 分离）。
 
+监听等待独立成列：`ListenWait` 直方图从帧内核可读时刻（`RecvFrameAt`）起算、避开轮询唤醒的量化误差；队列中已有消息记 `ListenReadyCount`（不产生 0ms 样本）；超时记 `ListenTimeoutCount` 并单独给出超时率。
+
 ### RecordAction 签名
 
 ```
@@ -1079,7 +1108,7 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 
 ### 延迟直方图
 
-延迟分布使用 DataDog DDSketch：相对精度 1%，每个分布最多 2048 个 bin。`count/sum/min/max` 精确保存，P50/P90/P95/P99 从 sketch 计算；Agent、时间窗口和跨动作汇总都先合并 sketch 再计算分位数，不平均各节点的 P99。
+延迟分布使用 DataDog DDSketch：相对精度 1%，每个分布最多 2048 个 bin（默认值，可经 `monitor.sketch.relativeAccuracy` / `monitor.sketch.maxBins` 调整）。`count/sum/min/max` 精确保存，P50/P90/P95/P99 从 sketch 计算；Agent、时间窗口和跨动作汇总都先合并 sketch 再计算分位数，不平均各节点的 P99。
 
 内部 Agent/Admin 报告携带 sketch 字节，公共 HTTP 与历史详情只暴露计算结果。空分布的 min/max/avg/P50/P90/P95/P99 为 `null`，不能解释成 0ms。
 
@@ -1110,7 +1139,7 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 
 | 范围 | 层级 | 包含 |
 |------|------|------|
-| 1–10 | 网络层 | `ConnNotFound` / `ConnClosed` / `SendFailed` / `RecvTimeout` / `ConnDropped` / `ActionCanceled` |
+| 1–10 | 网络层 | `ConnNotFound`(1) / `ConnClosed`(2) / `SendFailed`(3) / `RecvTimeout`(4) / `ActionCanceled`(6)；码 5 曾用于 `CONN_DROPPED`，已退役且不得复用（历史归档可能仍有按 5 记录的样本） |
 | 11–20 | 协议层 | `EncodeFailed` / `ParseFailed` |
 | 21–30 | 构建层 | `CreateMsg` / `BindField` / `Serialize` / `ExecFailed` |
 | 31–40 | 监听层 | `ListenTimeout` / `ListenRegister` |
@@ -1138,10 +1167,11 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 
 | 方式 | 说明 |
 |------|------|
-| Console Reporter | 单机模式每 5s 输出格式化表格 |
-| HTTP JSON | `monitor.http.port`（如 6061）下的 `/metrics` |
+| Console Reporter | 单机模式周期输出格式化表格（`monitor.reportInterval`，默认 5s） |
+| HTTP JSON | `monitor.http.port`（如 6061）下的 `/metrics` 与 `/metrics/summary` |
 | CSV | 任务结束自动导出到 `metrics/metrics_<时间戳>.csv`（路径自动生成，非配置） |
 | pprof | `pprof.port`（如 6060）下 `/debug/pprof/` |
+| 调优观测 | 同挂 pprof 端口：`/debug/sched`（Go 调度延迟分位数）、`/debug/statekeys`（`robot.get`/`get_path` 按 key 计数，`?enable=1` 开启）、`/debug/dedup`（wire 去重缓存）、`/debug/wire`（wire 消费影子验证） |
 
 ## 日志系统
 
@@ -1182,22 +1212,28 @@ stressbot 不内置日志环形缓冲、日志 HTTP API 或前端日志面板。
 | luaparse | ^0.3 | Lua 语法解析（校验） |
 | nanoid | ^5.0 | ID 生成 |
 | react-rnd | ^10.5 | 可拖拽/缩放面板 |
+| @tanstack/react-query | 5.101 | 服务端状态与轮询 |
+| openapi-fetch | 0.17 | OpenAPI 类型安全客户端（`npm run generate:api` 从契约生成类型） |
+| ajv | 8.20 | flow / codec JSON Schema 校验 |
+| echarts-for-react | 3.0 | ECharts React 封装 |
+| @monaco-editor/react | 4.6 | Monaco React 封装 |
 
 ## 开发与构建
 
 ```bash
 cd cmd/web
 npm install
-npm run dev    # http://localhost:5173，开发服务器将 /sbot/ 代理到 Admin
+npm run dev    # http://localhost:5173/stressbot/，开发服务器将 /sbot/ 代理到 Admin（默认 127.0.0.1:7718，可用 STRESSBOT_ADMIN 覆盖）
 npm run build  # → dist/，Admin 静态托管
 npm run test   # Vitest
 ```
 
 ## 主题与配置
 
-- 暗色 / 亮色切换
+- 暗色 / 亮色切换（localStorage 记忆）
 - antd 中文 locale
-- Vite `confMountPlugin` 挂载 conf 目录
+- 请求统一收拢在 `src/services/`（按域拆分的 API 模块 + openapi-fetch 生成客户端），组件禁止直接 fetch；proto 文件经编译期内联兜底加载
+- 功能全景、页面架构与 FlowEditor 交互详见 [cmd/web/README.md](cmd/web/README.md)
 
 ---
 
@@ -1207,6 +1243,5 @@ npm run test   # Vitest
 - Lua 脚本异常会被 `pcall` 捕获，不会导致整个机器人崩溃。
 - 任何 `tcpRequest` / `tcpListen` 都可用 `optional: true` 避免非致命错误终止业务循环。
 - `mainService` 配置的连接断开时自动停止该机器人（防止僵尸连接）。
-- Admin 重启后，活跃状态的任务自动重置为 `failed`。
-- Agent 控制会话断开或任务租约失效后会取消当前任务；Admin 重启后活跃任务会重置为 `failed`。
+- Agent 控制会话断开或任务租约失效后会取消当前任务；Admin 重启后活跃任务自动重置为 `failed`。
 - 跨机器人共享数据用 `share` 模块（需配置 `redis` 段）。

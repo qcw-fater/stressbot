@@ -1,11 +1,13 @@
 # 分布式异常处理机制
 
-> **历史说明（2026-08-13）**：本文基于旧 HTTP 控制面和重构前文件路径，仅供追溯。现行控制面契约与包布局请以 `controlplane/proto/control.proto`、`AGENTS.md` 和 `docs/superpowers/specs/2026-08-13-package-architecture-design.md` 为准。
-
 > 本文档描述 stressbot 在分布式（1 个 Admin + N 个 Agent）部署下的完整异常处理实现。
-> 全部以代码为准，不写"应该怎样"，只写"实际怎样"。每处行为描述均标注源码文件与关键函数，便于对照阅读。
+> 全部以代码为准，不写"应该怎样"，只写"实际怎样"。每处行为描述均标注源码文件与行号，便于对照阅读。
 
-**设计前提**：Admin 是单点的指标聚合 / 任务调度中心，运维上保证其足够稳定；Agent 是水平扩展的执行节点，假设会随时上下线。因此整体策略偏向 **"Admin 不可达 → Agent 主动收缩；Agent 异常 → Admin 兜底容错"**。
+**设计前提**：Admin 是单点的任务调度 / 指标聚合中心，运维上保证其足够稳定；Agent 是水平扩展的执行节点，允许随时上下线。整体策略：
+
+- **Admin 不可达 → Agent 侧收缩**：gRPC 会话断开即刻感知，任务生死由**租约倒计时**决定（断连超过 `leaseDuration` 才取消任务，期间持续重连，恢复后任务无感继续）
+- **Agent 异常 → Admin 侧兜底容错**：心跳超时分级（unhealthy/offline）、任务完成报告合成、停止超时安全网、全节点失效自动停止
+- **控制面消息不丢**：命令走持久化命令日志 + 至少一次投递 + ACK/回执；最终报告走 Agent 侧待确认队列 + 重放
 
 ---
 
@@ -16,18 +18,17 @@
   - [1.2 顶层 recover 层级](#12-顶层-recover-层级)
   - [1.3 配置化的超时与重连参数](#13-配置化的超时与重连参数)
 - [2. Admin 异常退出 → Agent 端处理](#2-admin-异常退出--agent-端处理)
-  - [2.1 心跳循环核心逻辑](#21-心跳循环核心逻辑)
-  - [2.2 Idle 状态 Admin 挂掉](#22-idle-状态-admin-挂掉)
-  - [2.3 Busy 状态 Admin 挂掉](#23-busy-状态-admin-挂掉)
-  - [2.4 Admin 重启 → 心跳收到 404](#24-admin-重启--心跳收到-404)
-  - [2.5 注册重连策略](#25-注册重连策略)
-  - [2.6 任务完成上报的"丢弃后上报"细节](#26-任务完成上报的丢弃后上报细节)
-  - [2.7 Agent 优雅关闭](#27-agent-优雅关闭)
+  - [2.1 会话断开与重连](#21-会话断开与重连)
+  - [2.2 租约判活](#22-租约判活)
+  - [2.3 Admin 重启](#23-admin-重启)
+  - [2.4 Admin 主动关闭](#24-admin-主动关闭)
+  - [2.5 任务完成报告的至少一次语义](#25-任务完成报告的至少一次语义)
+  - [2.6 Agent 优雅关闭](#26-agent-优雅关闭)
 - [3. Agent 异常退出 → Admin 端处理](#3-agent-异常退出--admin-端处理)
   - [3.1 Admin 感知 Agent 状态的通道](#31-admin-感知-agent-状态的通道)
   - [3.2 心跳超时阈值与状态扫描](#32-心跳超时阈值与状态扫描)
   - [3.3 单节点离线 → 任务级处理](#33-单节点离线--任务级处理)
-  - [3.4 Agent 进程重启（已分配节点重新注册）](#34-agent-进程重启已分配节点重新注册)
+  - [3.4 Agent 进程重启（实例变化）](#34-agent-进程重启实例变化)
   - [3.5 自然完成路径](#35-自然完成路径)
   - [3.6 用户手动停止任务](#36-用户手动停止任务)
   - [3.7 自动停止（autoStopTask）](#37-自动停止autostoptask)
@@ -36,14 +37,9 @@
   - [4.2 持久化原子性](#42-持久化原子性)
   - [4.3 终态归档异步化](#43-终态归档异步化)
 - [5. 实现细节与陷阱](#5-实现细节与陷阱)
-  - [5.1 注册版本号 regGeneration](#51-注册版本号-reggeneration)
-  - [5.2 锁顺序约定](#52-锁顺序约定)
-  - [5.3 所有 Transition 错误都已检查](#53-所有-transition-错误都已检查)
-  - [5.4 协程池容量与 Shutdown](#54-协程池容量与-shutdown)
-- [6. 任务分配失败回滚](#6-任务分配失败回滚)
+- [6. 任务启动/停止失败回滚](#6-任务启动停止失败回滚)
 - [7. 故障行为速查表](#7-故障行为速查表)
 - [8. 前端可观察项](#8-前端可观察项)
-- [9. 与计划的差异](#9-与计划的差异)
 
 ---
 
@@ -51,734 +47,282 @@
 
 ### 1.1 协程池与 panic 恢复
 
-所有业务 goroutine 必须走 `utils.GetWorkPool()`（通过 `Go` / `GoWithStop` 方法提交）。代码位置：`utils/work_pool.go`。
+所有业务 goroutine 走 `internal/workpool`（`workpool.Default()`，方法 `Go` / `GoWithStop` / `Submit` / `SubmitWithStop`；`internal/workpool/workpool.go:184-202`）。工程规范约束**禁止裸 `go func`**。
 
-**双层 panic 恢复机制**：
+**双层 panic 恢复**（`internal/workpool/workpool.go:61-70`、`:145-152`）：
 
-1. **ants 池级 PanicHandler**：在 `InitWorkPool` 中设置 `ants.Options.PanicHandler`，捕获 panic 后写 `DPanic` 日志（含 stack trace）。
-2. **任务级 defer recover**：在 `submit` 方法中，每个提交到 ants 的闭包都有 `defer` 块调用 `recover()`，再次捕获并记录。
+1. **ants 池级 PanicHandler**：`Init()` 时设置，捕获 panic 写 DPanic 日志（含 stack）
+2. **任务级 defer recover**：`submit` 中每个提交到 ants 的闭包自带 `recover()`，再次捕获并记录
 
-两层恢复确保即使一层遗漏，另一层也能兜底。DPanic+ 级别日志会触发企业微信 webhook 告警（如果配置了 `utils/log` 中的 webhook 地址）。
+实现要点：
 
-工程中通过规范约束 **禁止裸 `go func`**，所有 goroutine 必须通过协程池提交。协程池单例由 `utils.InitWorkPool` 创建（`sync.Once` 保护），Admin / Agent 进程关闭时调用 `Shutdown()` 等待最长 5s 让池中任务自然结束。
-
-**协程池实现细节**（`utils/work_pool.go`）：
-
-- 底层使用 `github.com/panjf2000/ants/v2` 协程池库。
-- `WorkPool` 结构体包装了 ants.Pool，额外维护 `sync.WaitGroup`（wg）和 `sync.Map`（goroutines 追踪）。
-- 每个 goroutine 在启动时分配唯一 ID（`goID` 原子递增），记录启动时间、caller 信息到 `sync.Map`。
-- `Shutdown()` 关闭 `stopCh` 通道通知所有带停止通知的任务退出，然后 `wg.Wait()` 等待所有任务完成，超时后打印泄漏 goroutine 列表（含 caller 文件:行号 + 运行时长）。
-- `Cap == 0`（默认）表示无限制，业务上极少触发 `MaxBlockingTasks`。
+- 底层 `github.com/panjf2000/ants/v2`，`Pool` 维护 `sync.WaitGroup` 与停止通道
+- `submit` 先登记 wg 再二次检查 stopped（`:111-113`），保证 Shutdown 的 `wg.Wait()` 不因竞态遗留计数而永久阻塞
+- `Shutdown()` 等待最长 5s（`poolShutdownTimeout`，`:23`），超时后放弃；`GoWithStop` 型任务可通过 `StopChan()` 提前退出
+- 池容量默认无限制（ants 语义），Admin / Agent 进程退出时统一调用 `Shutdown`
 
 ### 1.2 顶层 recover 层级
 
 | 层级 | 文件 / 函数 | 行为 |
 |------|------------|------|
-| 进程级 | `cmd/agent/main.go`、`cmd/admin/main.go` | 顶层 `defer recover()`，捕获 panic 后写 stderr + 日志，`os.Exit(2)` |
-| HTTP 层 | `admin/handlers.go::recoverMiddleware`、`agent/http_server.go::recoverMiddleware` | 包裹整个 mux，捕获 handler panic 后写日志 + 返回 500 JSON（避免连接重置） |
-| 协程池层 | `utils/work_pool.go::PanicHandler` + 每个任务 defer | 捕获 goroutine panic 后写 `DPanic` 日志 |
-| 业务任务级 | `agent/agent.go::executeTask`、`agent/agent.go::Run` 等关键函数 | 局部 `defer recover()`，确保单个任务崩溃不影响其他任务 |
-
-**HTTP recover 中间件**的具体实现：
-
-Admin 端（`admin/handlers.go::recoverMiddleware`）：
-```go
-func recoverMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        defer func() {
-            if rec := recover(); rec != nil {
-                stresslog.Error("[ADMIN] HTTP handler panic",
-                    zap.String("path", r.URL.Path),
-                    zap.String("method", r.Method),
-                    zap.Any("panic", rec),
-                    zap.String("stack", string(debug.Stack())))
-                writeError(w, ErrInternal.WithMessage("internal server error"))
-            }
-        }()
-        next.ServeHTTP(w, r)
-    })
-}
-```
-
-Agent 端（`agent/http_server.go::recoverMiddleware`）：
-```go
-func recoverMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        defer func() {
-            if rec := recover(); rec != nil {
-                stresslog.Error("[AGENT] HTTP handler panic",
-                    zap.String("path", r.URL.Path),
-                    zap.String("method", r.Method),
-                    zap.Any("panic", rec),
-                    zap.String("stack", string(debug.Stack())))
-                writeJSONError(w, http.StatusInternalServerError, "internal server error")
-            }
-        }()
-        next.ServeHTTP(w, r)
-    })
-}
-```
-
-两端的实现几乎相同，区别仅在于日志前缀 `[ADMIN]` / `[AGENT]` 和错误响应构造函数。不依赖 `net/http` 默认的 per-request recover（仅写 stderr 且会断开连接），而是主动捕获后返回结构化 500 JSON 错误。
+| 进程级 | `cmd/agent/main.go:51-64`、`cmd/admin/main.go:51-64` | 顶层 `defer recover()`，stderr + 日志，exit 2 |
+| HTTP 层 | `admin/httpapi/routes.go:114-126`（Wrap 中间件） | 捕获 handler panic → 日志（path/method/panic/stack）→ 标准 500 JSON；请求体先经 OpenAPI Schema 校验，非法返回 `REQUEST_SCHEMA_INVALID` |
+| 协程池层 | `internal/workpool/workpool.go`（PanicHandler + 任务级 defer） | goroutine panic 写 DPanic 日志，不外泄 |
+| 业务任务级 | `agent/app.go:271-275`（executeTask）、`agent/task/runner.go` 各错误分支 | 单任务崩溃不影响主循环与后续任务 |
 
 ### 1.3 配置化的超时与重连参数
 
-Agent 与 Admin 通信的所有时间参数都可在 `agent-config.json` 配置；未配置或非法时使用默认值并打 Warn 日志。默认值解析由 `utils.ParseDurationDefault`（`utils/duration.go`）完成。
+三进程配置均为 TOML：`conf/stressbot.toml`、`conf/agent.toml`、`conf/admin.toml`。加载走 `config.LoadTOML`（严格模式：未知字段启动失败，`config/load.go:30-46`）+ 环境变量展开（`${VAR}` 未定义报错 / `${VAR:-default}` / `$$`，`config/load.go:68` 起）。
 
-**Agent 配置项**（`agent/config.go::ResolvedConfig`）：
+**时长纪律**：时长类配置统一 `config.ParseDuration` / `config.ParsePositiveDuration`（`config/duration.go:21-50`）——**留空回退默认，写错一律报错**，不允许"解析失败打 Warn 退默认"。
 
-| 配置项 | 默认值 | 含义 |
-|--------|--------|------|
-| `HBInterval` | `10s` | 心跳成功时的下一次间隔 |
-| `HBFailInterval` | 同 `HBInterval` | 心跳失败时的下一次重试间隔 |
-| `HBRequestTimeout` | `5s` | 单次心跳请求超时（独立于 RequestTimeout，快失败快重试） |
-| `HBFailThreshold` | `3` | 任务运行中容忍的连续心跳失败次数；达到阈值才取消任务 |
-| `RequestTimeout` | `30s` | Agent → Admin 单次 HTTP 请求超时 |
-
-**Agent 与 Admin 心跳阈值的联动约束（重要）**：
-
-| 关系 | 必须满足 | 默认值 | 说明 |
-|---|---|---|---|
-| Admin unhealthy 阈值 ≥ Agent 容忍窗口 | `admin.unhealthyAfter ≥ HBFailThreshold × HBInterval` | 30s ≥ 3×10s ✓ | 否则节点已被 admin 标 unhealthy（触发任务回调），agent 端任务还在跑，状态错乱 |
-| Admin offline 阈值 > Admin unhealthy 阈值 | `admin.offlineAfter > admin.unhealthyAfter` | 60s > 30s ✓ | 节点先经过 unhealthy 过渡，再被删除 |
-
-**调参时务必同步**：把 `HBFailThreshold` 从 3 调到 6 后，需要把 `admin.unhealthyAfter` 也从 30s 调到 ≥60s、`admin.offlineAfter` 调到 ≥120s。
-| `ReconnectInterval` | `5s` | 注册重试的初始退避间隔（硬编码） |
-| `ReconnectMaxInterval` | `60s` | 注册重试的退避上限（硬编码） |
-| `ReconnectMaxRetries` | `-1` | 注册重试最大次数。`-1` = 持续重连永不放弃；`0` 视为未配置 → 走默认 `-1` |
-| `TaskReportTimeout` | `30s` | 任务完成上报的整体超时（硬编码） |
-| `StressInterval` | `5s` | 压测指标上报周期 |
-| `SystemInterval` | 同 `StressInterval` | 系统指标上报周期 |
-| `Port` | `7719` | Agent 本地 HTTP 监听端口 |
-| `MaxBots` | `5000` | 单节点最大机器人数量 |
-
-**Admin 配置项**（`admin-config.json::agentRegistry`）：
+**Agent 侧参数**（`agent/config.go:59-93`、`agent/config.go:108-157`）：
 
 | 配置项 | 默认值 | 含义 |
 |--------|--------|------|
-| `UnhealthyAfter` | `30s` | 超过此时间无心跳 → 标记 unhealthy |
-| `OfflineAfter` | `60s` | 超过此时间无心跳 → 标记 offline 并从注册表删除 |
+| `agent.heartbeatInterval` | 10s | 心跳生产兜底间隔（Welcome 下发值优先） |
+| `agent.metricsInterval` | 5s | 压测/系统指标上报周期 |
+| `agent.reconnect.initialInterval` | 5s | 重连退避初始间隔 |
+| `agent.reconnect.maxInterval` | 30s | 重连退避上限（实际等待在此值基础上 [0, 2×] 抖动） |
+| `agent.reconnect.taskReportTimeout` | 30s | 最终报告确认等待超时 |
+| `agent.reconnectMaxRetries` | -1 | 0 视为 -1（JSON/TOML 零值歧义修正，`resolveReconnectRetries`，`agent/config.go:159-164`） |
 
-**resolveReconnectRetries 的特殊处理**（`agent/config.go::resolveReconnectRetries`）：
-```go
-func resolveReconnectRetries(v int) int {
-    if v == 0 {
-        return -1 // JSON 零值视为未配置，回退持续重连
-    }
-    return v
-}
+**Admin 侧 controlPlane 参数**（`admin/config.go:48-55`）：
+
+| 配置项 | 默认值 | 含义 |
+|--------|--------|------|
+| `heartbeatInterval` | 10s | 期望心跳间隔，随 Welcome 下发 |
+| `unhealthyAfter` | 30s | 心跳超时标记 unhealthy 阈值 |
+| `leaseDuration` | **45s** | 任务租约：Agent 断连超过该时长才取消任务 |
+| `offlineAfter` | 60s | 标记 offline 并从注册表删除的阈值 |
+
+**联动强校验**（`admin/config.go:189-219`，写错启动失败）：
+
+```
+heartbeatInterval < unhealthyAfter < offlineAfter
+heartbeatInterval < leaseDuration  < offlineAfter
 ```
 
-这个函数处理了 JSON 零值歧义问题：用户不填该字段时 JSON 反序列化结果为 0，如果不做处理会被当作"不重试"，与用户期望的"持续重连"不符。
+设计意图：`leaseDuration` 必须明显大于 Agent 重连最坏耗时（`reconnect.maxInterval` 的 2 倍抖动上界 + 拨号握手），且小于 `offlineAfter`——让 **Agent 侧租约先于 Admin 离线清理接管任务生死**，两套判定窗口不重叠，避免"Admin 已把节点删了，Agent 任务还在跑"的状态错乱。
+
+**调参联动**：把 `reconnect.maxInterval` 从 30s 调大后，必须同步调大 `leaseDuration` 并保持其小于 `offlineAfter`；调大 `offlineAfter` 需同步评估 `unhealthyAfter`。
 
 ---
 
 ## 2. Admin 异常退出 → Agent 端处理
 
-> 用户需求：Admin 是核心、原则上不应该挂；一旦挂掉，Agent 行为统一为"丢弃当前任务 + 走重连 = 等价于新的注册"，不补档。
+> 总原则：Admin 挂掉时 Agent 行为统一为"断连感知 → 重连；租约到期才取消任务，取消后不补档"。
 
-### 2.1 心跳循环核心逻辑
+### 2.1 会话断开与重连
 
-**代码位置**：`agent/agent.go::heartbeatLoop`
+**代码位置**：`agent/session/supervisor.go:31-85`、`agent/session.go:28-87`
 
-心跳循环是 Agent 与 Admin 保持联系的核心机制。每次心跳失败（含网络超时、连接拒绝、非 2xx 响应）的处理流程：
+每条 gRPC 连接上并行四路循环（发送 / 接收 / 指标流 / 心跳生产，`agent/session.go:64-76`），任一路返回错误即会话结束，进入 `RunSupervisor` 重连：
 
-1. `consecutiveFailures` 递增。
-2. 日志级别随次数递进：
-   - Busy 状态首次失败：Error 级别（`"[AGENT] 任务运行中与 Admin 断联，立即取消当前任务"`）
-   - 其他场景 `≤3` 次：Warn 级别
-   - `>3` 次：Error 级别
-3. 心跳间隔切换到 `HBFailInterval`（默认与 `HBInterval` 一致）。
-4. 心跳恢复后 `consecutiveFailures` 归零并打 Info `"[AGENT] 心跳恢复"`。
-5. **不**主动退出进程；只有"重新注册超出最大重试次数"才会退出。
+1. `grpc.NewClient` 建连 → `runConnection`（Hello → Welcome 握手 → 四路循环）
+2. 会话结束：**存活 ≥ `maxInterval` 的会话视为健康连接**，断线是新一次偶发故障的首次失败——退避策略与重试计数重置回初始间隔（`supervisor.go:46-54`）；更短存活的断线按既有退避继续升级
+3. 退避：指数倍增（factor 2）+ 抖动，5s 起、30s 封顶，实际等待在 `[0, 2×maxInterval]` 内
+4. 不可恢复错误（Unauthenticated / PermissionDenied / FailedPrecondition，如协议版本不匹配）直接返回 → Agent 进程退出（`supervisor.go:59-62`）
+5. `reconnectMaxRetries >= 0` 且超次数 → 放弃退出；默认 -1 持续重连
 
-心跳请求的构造包含以下字段（`agent/agent.go::heartbeatLoop`）：
-```go
-req := HeartbeatRequest{
-    AgentID:       a.id,
-    Timestamp:     time.Now().Format(time.RFC3339),
-    Status:        string(status),      // "idle" 或 "busy"
-    CurrentTaskID: taskID,               // 当前任务 ID（空闲时为空）
-    CurrentBots:   bots,                 // 当前 bot 数量
-    AppVersion:    a.cfg.AppVersion,     // 应用版本号
-}
+**指标不丢账**：会话断开期间 `LatestMetrics` 单槽继续收新帧，未发送的被覆盖帧累计 `droppedIntervals`，随重连后第一帧带给 Admin 补账（`agent/metrics/stream.go:41-54`）。
+
+**命令不丢**：重连后 `Commands.Replay` 唤醒会话发送循环，按投递游标重放未 ACK 命令（`admin/grpcapi/control_service.go:143-145`、`admin/command/bus.go:88-94`）；命令 `delivery_generation` 与新会话不匹配时 Admin 不投递旧代命令。
+
+### 2.2 租约判活
+
+**代码位置**：`agent/session.go:128-143`
+
+```
+leaseLoop（每秒）:
+  deadline = leaseDeadline.Load()          // Welcome 初始化，每条 HeartbeatAck 续期
+  if deadline 已过 && 当前 busy:
+      cancelCurrentTask("Admin 控制面租约已过期")
+      leaseDeadline.Store(0)               // 只触发一次
 ```
 
-### 2.2 Idle 状态 Admin 挂掉
+- 断连后租约倒计时**继续**：重连成功即续期，任务无感继续；持续失联超过 `leaseDuration`（默认 45s）才取消任务
+- 任务取消经 `taskCancelCause` 携带原因，`StopAll` 后按 `context.Canceled` 归类为 `Stopped` 结果（`agent/task/runner.go:275-277`）
+- 空闲（idle）状态下租约过期无动作——没有任务可取消
 
-当 Agent 处于 Idle 状态（无活跃任务）且 Admin 不可达时：
+**任务取消后的清理链**（`agent/app.go:277-284` defer）：
 
-- 心跳持续失败，日志按 `heartbeatLoop` 的递进规则输出。
-- 没有任务可丢弃，Agent 保持存活。
-- Admin 恢复后心跳自动恢复，`consecutiveFailures` 归零，Agent 回到正常工作状态。
-- 不触发 `registerWithRetry`，仅在收到 404 时才触发重新注册。
+1. `taskCancelCause(err)` → Runner 的 `select <-ctx.Done()` → `mgr.StopAll()`（采集 `CleanupStatus`）
+2. `stressReporter.Stop()`（幂等，冲刷最后一帧窗口）
+3. 最终报告（result=stopped + finalSnapshot + cleanupStatus）进入 outbox 尝试上报与重放
+4. `currentTask = nil`、`status = idle`，Agent 回到空闲态等待新命令
 
-### 2.3 Busy 状态 Admin 挂掉
+### 2.3 Admin 重启
 
-**核心规则：累计 `HBFailThreshold`（默认 3）次心跳失败才取消任务，丢弃，不补档。**
+Admin 重启后命令日志（内存）丢失、任务从磁盘恢复为 failed（见 §4.1）。Agent 侧重连后：
 
-> 早期实现是"第 1 次失败立刻取消"，但测试环境本地多开 agent 时 ephemeral port 偶发瞬时阻塞，会让单次 dial 在 10~20s 才能恢复。为避免环境抖动误伤压测任务，改为累计阈值；容忍窗口 ≈ `HBFailThreshold × HBFailInterval`（默认 3 × 10s = 30s）。
+1. Hello 携带 `current_task_id`（若任务仍在跑）
+2. Admin `OwnsActiveTask` 判定该任务已不是活跃任务 → 立即 `ScheduleStop("Admin 不再持有该任务，停止孤儿压测")` 并标记 orphanStop 防重复（`admin/grpcapi/control_service.go:106-123`）
+3. Agent 收到 StopTask → 取消任务 → 上报 stopped 报告（Admin 侧任务已终态，报告被静默丢弃并终态 NACK）
 
-代码位置：`agent/agent.go::heartbeatLoop`
+无任务运行时，Hello 即普通重注册，节点回到 idle 等待分配。
 
-```go
-if status == StatusBusy && consecutiveFailures >= a.cfg.HBFailThreshold {
-    stresslog.Error("[AGENT] 任务运行中与 Admin 断联，达到容忍阈值，取消当前任务",
-        zap.String("taskID", taskID),
-        zap.Int("consecutiveFailures", consecutiveFailures),
-        zap.Int("threshold", a.cfg.HBFailThreshold),
-        zap.Error(err))
-    a.cancelCurrentTask("心跳失败 / Admin 断联")
-}
+### 2.4 Admin 主动关闭
+
+**代码位置**：`admin/grpcapi/session.go:229-241`、`admin/app.go:293-320`、`admin/server.go:101-131`
+
+Admin 收到退出信号后：
+
+1. `sessions.Close("Admin 正在关闭")`：向全部会话广播 `ServerClosing{reason}` 并取消其 context
+2. Agent `ReceiveLoop` 收到 ServerClosing → 以 `Unavailable` 结束会话（`agent/session/transport.go:147-148`）→ 进入正常重连流程（Unavailable 是可恢复错误）
+3. gRPC `GracefulStop`（10s 上限）→ HTTP 管理面 `Shutdown`（10s 超时）→ 协程池 → 存储
+
+关闭顺序的防死锁设计：先 `runtimeCancel` + `close(stopCh)` 再等待各服务（若把 cancel 留在 Run 的 defer 中，Shutdown 会先等指标 worker，而 worker 只能在 Shutdown 返回后收到 cancel，形成关闭死锁；`admin/app.go:294-299` 注释）。
+
+### 2.5 任务完成报告的至少一次语义
+
+**代码位置**：`agent/session/report_outbox.go`、`agent/app.go:305-324`
+
+`executeTask` 在 Runner 返回后组装最终报告并 `reportOutbox.Offer`：
+
+- 报告以 `report_id`（agentID-taskID-stageIndex-时间戳）为键，容量 128
+- 在 `taskReportTimeout`（默认 30s）内等待确认通道；**超时只是放弃等待**，报告保留在 outbox
+- 会话发送循环在报告入队与会话重建时重放全部未确认报告（`agent/session/transport.go:95-100`）
+- `ReportAck.accepted=true` → 移除并通知等待方；`accepted=false` → 传递拒绝原因（永久性拒绝如"节点不属于该任务"，Agent 不再重发）
+- Admin 侧对迟到报告的兜底：`CompletionService.Accept` 校验汇报者在预期名单内，不在则返回 `PermanentReportError`，gRPC 层终态 NACK（`admin/task/completion.go:26-40`）
+
+### 2.6 Agent 优雅关闭
+
+**代码位置**：`agent/app.go:335-366`
+
+```
+shutdown():
+  1. triggerStop（sync.Once）+ shuttingDown = true（拒绝新任务预留）
+  2. cancelCurrentTask("agent shutdown")
+  3. 协程池内 taskWG.Wait()，主流程最多等 taskReportTimeout + 5s
+     （Wait 放在协程池里执行、主流程用 timerpool 计时等待——避免全部协程互相等待且池满的死锁）
+  4. stressReporter.Stop()（保护性）/ sysReporter.Stop()
+  5. cancel 全局 ctx → 四路会话循环、监督循环、系统采集循环退出
 ```
 
-为什么是第一次就取消，不是等几次：
-
-- Admin 是唯一的指标聚合点。StressReporter 默认 5s 上报，Admin 挂了上报全部失败。
-- 如果等 6 次 × 10s = 60s 再决定，这 60s 的压测流量完全无观测：前端看不到、历史不记录。
-- 与其产生无意义的压测流量，不如立刻停止，等 Admin 恢复后再走"全新连接"重连流程。
-
-**任务取消后的清理**（`agent/agent.go::executeTask` 的 defer 链）：
-
-1. `taskCancel()` → `TaskRunner.Run` 收到 `<-ctx.Done()` → `Manager.StopAll()` 停所有机器人。
-2. `stressReporter.Stop()` 停止指标上报（内部 `sync.Once` 保护，幂等调用安全）。
-3. 任务结束的 `finalSnapshot` 仍会通过 `context.Background() + TaskReportTimeout` 尝试上报一次；Admin 不可达时 30s 后放弃。
-4. `currentTask = nil`、`status = StatusIdle`、`runner = nil`、`taskCancel = nil`，Agent 回到 Idle 态。
-
-`executeTask` 的 defer 链确保无论 `runner.Run` 如何退出（正常完成、context 取消、panic），清理逻辑都会执行：
-```go
-defer func() {
-    a.mu.Lock()
-    a.currentTask = nil
-    a.taskCancel = nil
-    a.status = StatusIdle
-    a.mu.Unlock()
-}()
-```
-
-心跳继续重试，直到 Admin 恢复（情况 A：网络恢复）或 Admin 重启被发现（情况 B：见 §2.4）。
-
-### 2.4 Admin 重启 → 心跳收到 404
-
-**代码位置**：`agent/http_client.go::Heartbeat`、`agent/agent.go::heartbeatLoop`
-
-`AdminClient.Heartbeat` 检测到 `404` 返回特殊错误 `errNotRegistered`：
-
-```go
-// agent/http_client.go
-var errNotRegistered = errors.New("agent not registered on admin")
-
-func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
-    // ...
-    if resp.StatusCode == http.StatusNotFound {
-        return errNotRegistered
-    }
-    // ...
-}
-```
-
-Agent 处理流程（`agent/agent.go::heartbeatLoop`）：
-
-1. 如果 Busy → 先 `cancelCurrentTask("Admin 报告未注册，可能重启")`（同 §2.3）。
-2. 调用 `registerWithRetry(ctx)` 重新注册。
-3. 注册成功 → `regGeneration.Add(1)`，继续心跳，Agent 保持 Idle，等待 Admin 重新分配任务。
-4. 注册失败（超出 `reconnectMaxRetries`）→ `triggerStop()`，Agent 进程退出。
-
-```go
-if errors.Is(err, errNotRegistered) {
-    if status == StatusBusy {
-        a.cancelCurrentTask("Admin 报告未注册，可能重启")
-    }
-    stresslog.Warn("[AGENT] Admin 报告未注册，尝试重新注册")
-    if regErr := a.registerWithRetry(ctx); regErr != nil {
-        stresslog.Error("[AGENT] 重新注册失败，退出 Agent", zap.Error(regErr))
-        a.triggerStop()
-        return
-    }
-    stresslog.Info("[AGENT] 重新注册成功，继续心跳")
-    a.regGeneration.Add(1)
-    consecutiveFailures = 0
-    interval = a.cfg.HBInterval
-    timer.Reset(interval)
-    continue
-}
-```
-
-**用户需求满足证明**：
-- 无任务运行：心跳失败走重试，收到 404 走重连。
-- 有任务运行：取消任务（等价于丢弃）→ 转 Idle → 重连。
-- 重连后 Admin 视为新 Idle 节点，不补档。
-
-### 2.5 注册重连策略
-
-**代码位置**：`agent/http_client.go::RetryWithRetriesAndBackoff`、`agent/agent.go::registerWithRetry`
-
-`RetryWithRetriesAndBackoff` 的完整逻辑：
-
-```go
-func RetryWithRetriesAndBackoff(ctx context.Context, op func() error,
-    initial, max time.Duration, maxRetries int, desc string) error {
-    // 参数校验
-    if initial <= 0 { initial = time.Second }
-    if max <= 0 { max = 60 * time.Second }
-
-    backoff := time.Duration(0)
-    attempt := 0
-    for {
-        err := op()
-        if err == nil { return nil }
-        if ctx.Err() != nil { return ctx.Err() }
-
-        // maxRetries < 0 无限重试；>= 0 检查已重试次数
-        if maxRetries >= 0 && attempt >= maxRetries {
-            return fmt.Errorf("%s: 已达最大重试次数 %d: %w", desc, maxRetries, err)
-        }
-        attempt++
-
-        // 指数退避
-        if backoff == 0 {
-            backoff = initial
-        } else {
-            backoff *= 2
-            if backoff > max { backoff = max }
-        }
-
-        select {
-        case <-ctx.Done():
-            return ctx.Err()
-        case <-time.After(backoff):
-        }
-    }
-}
-```
-
-关键行为：
-- 初始退避 `reconnectInterval`（5s），每次失败翻倍直到 `reconnectMaxInterval`（60s）。
-- `reconnectMaxRetries < 0` 持续重连；`>= 0` 表示最多重试 N 次（总共 N+1 次尝试）。
-- 任意 `ctx.Done()` 立刻退出。
-- 默认配置（`-1`）下永不放弃，对应"Admin 理论不会挂"的部署前提。
-- `maxRetries == 0` 被当作 1 次尝试（仅尝试一次，不重试），因为 `resolveReconnectRetries` 在 JSON 层已将 0 转为 -1。
-
-### 2.6 任务完成上报的"丢弃后上报"细节
-
-**代码位置**：`agent/agent.go::executeTask`
-
-`executeTask` 在 `runner.Run(taskCtx)` 返回后会尝试上报 `TaskCompletionReport`：
-
-```go
-// 使用 context.Background() 脱离已 cancel 的 taskCtx
-reportCtx, reportCancel := context.WithTimeout(
-    context.Background(), a.cfg.TaskReportTimeout)
-defer reportCancel()
-
-report := TaskCompletionReport{
-    AgentID:       a.id,
-    TaskID:        task.TaskID,
-    Result:        result,
-    ErrorMsg:      errMsg,
-    FinishedAt:    time.Now(),
-    FinalSnapshot: finalSnap,
-}
-
-if err := a.httpCli.ReportTaskDone(reportCtx, report); err != nil {
-    stresslog.Warn("[AGENT] 任务完成上报失败（任务已丢弃，由 Admin 心跳超时自动收尾）",
-        zap.String("taskID", task.TaskID),
-        zap.Error(err))
-}
-```
-
-关键设计：
-- 使用 `context.Background()` + `TaskReportTimeout`（默认 30s），脱离已被 cancel 的 taskCtx，让上报有机会在 Admin 恢复时发出去。
-- **只尝试一次**，失败后打 Warn 日志即返回。
-- 失败的语义：任务已丢弃，由 Admin 心跳超时安全网在 60s 后自动合成 offline report。
-
-`runner.Cleanup()` 在上报完成后清理临时目录（任务工作目录在 `os.TempDir()` 下）。
-
-### 2.7 Agent 优雅关闭
-
-**代码位置**：`agent/agent.go::shutdown`
-
-执行顺序（严格按编号，每步完成后才进入下一步）：
-
-1. **停止当前任务**：`cancelCurrentTask("agent shutdown")` 触发任务取消。
-2. **等待任务结束**：通过独立 goroutine + channel 等待 `taskWG.Wait()` 完成。最长等待 `TaskReportTimeout + 5s` 余量。
-   - **不在协程池里 Wait**：`taskWG.Wait()` 在独立 goroutine 中执行，避免"全部协程都在等其他协程，但池容量已满 / 关闭"的死锁场景。
-   ```go
-   waitTaskDone := make(chan struct{})
-   utils.GetWorkPool().Go(func() {
-       a.taskWG.Wait()
-       close(waitTaskDone)
-   })
-   select {
-   case <-waitTaskDone:
-   case <-time.After(a.cfg.TaskReportTimeout + 5*time.Second):
-       stresslog.Warn("[AGENT] 等待任务退出超时，继续关闭流程")
-   }
-   ```
-3. **停止上报循环**：`stressReporter.Stop()` / `sysReporter.Stop()`（幂等，`sync.Once` 保护）。
-4. **取消全局 ctx**：`a.cancel()` → 心跳 / 轮询 / system 上报循环退出。
-5. **注销**：`httpCli.Deregister(deregCtx)` best-effort 注销（5s 超时）。
-6. **关闭 HTTP 服务器**：`shutdownHTTPServer(context.Background())`，5s 超时。
-7. **关闭协程池**：`utils.GetWorkPool().Shutdown()` 等待协程池任务完成。
-
-`triggerStop()` 使用 `sync.Once` 保护，确保 `stopCh` 只关闭一次，可安全并发调用。
+**远程关机的两段确认**：收到 Shutdown 命令时 Executor 只发 ACK（applied）并 `PrepareShutdown` 记录命令 ID/序号；进程退出延迟到 Admin 持久化该 ACK 并回发 `CommandReceipt`（`agent/command/executor.go:223-226`、`agent/app.go:121-137`）。若 ACK 丢失，Admin 会重放命令，此时进程必须还活着才能重放结果——这是把退出推迟到回执的原因（`controlplane/proto/control.proto:122-128` 注释）。
 
 ---
 
 ## 3. Agent 异常退出 → Admin 端处理
 
-> 用户需求：单节点离线不停整个任务（除非全离线）；要在测试监控 / 测试结果中体现。
+> 总原则：单节点离线不停整个任务（除非全离线）；异常要在任务事件与最终报告里体现。
 
 ### 3.1 Admin 感知 Agent 状态的通道
 
 | 通道 | 触发点 | 代码位置 | 作用 |
 |------|--------|---------|------|
-| 心跳超时扫描 | `AgentRegistry.scanAndMarkStatus`（5s/次） | `admin/agent.go::StartHealthChecker` | 主动检测，标记 unhealthy / offline |
-| 任意请求 Touch | `AgentRegistry.Touch` | `admin/handlers.go` 中多个 handler | 把任意请求当 keepalive |
+| 心跳超时扫描 | `Registry.scanAndMarkStatus`（5s/次） | `admin/agent/registry.go:378-393` | 主动检测，标记 unhealthy / offline |
+| gRPC 会话生命周期 | `Session` 退出 / `Attach` 顶替 / `Detach` | `admin/grpcapi/control_service.go:96-103`、`admin/grpcapi/session.go:154-203` | 会话级 generation 管理、旧代指标丢弃 |
+| 任意请求 Touch | `Registry.Touch` | `admin/metrics/accept.go:38`、`admin/task/completion.go:60` 等 | 把指标帧/报告等请求当 keepalive |
 
 **Touch 与 Heartbeat 的差别**：
 
-`Touch`（`admin/agent.go::Touch`）：
-- 只更新 `LastHeartbeatAt` 和 `AppVersion`。
-- 不动 `CurrentTaskID` / `CurrentBots`（那些是心跳的语义性字段，必须由心跳路径更新）。
-- 触发 unhealthy/offline → 在线 的恢复。
-
-`Heartbeat`（`admin/agent.go::Heartbeat`）：
-- 更新 `LastHeartbeatAt`、`AppVersion`、`CurrentTaskID`、`CurrentBots`。
-- 当 `CurrentTaskID` 发生变化时，清除 `LatestStress` 和 `StressUpdatedAt`，避免旧任务的指标串到新任务。
-- 同样触发 unhealthy/offline → 在线 的恢复。
-
-**实现选择"任意请求都更新 LastHeartbeatAt"**的理由：
-
-- Agent 默认 5s 一次 stress 上报、5s 一次 system 上报、10s 一次心跳，三类请求频次差不多。
-- 任一通道存活就说明 Agent 在线，标记 offline 应该以"全部通道都失败"为准。
-- 实现成本只是几个 handler 各加一行 `s.agents.Touch(agentID, "")`。
-
-哪些 handler 调用了 Touch：
-- `handleAgentStressReport`：`s.agents.Touch(report.AgentID, "")`
-- `handleAgentSystemReport`：`s.agents.Touch(report.AgentID, "")`
-- `handleAgentTaskDone`：`s.agents.Touch(agentID, "")`
-- `handleAgentPendingTask`：`s.agents.Touch(agentID, "")`
+- `Touch`（`admin/agent/registry.go:237-250`）：只刷新 `LastHeartbeatAt` 与 appVersion；触发 unhealthy/offline → 在线恢复
+- `Heartbeat`（`:128-160`）：额外更新语义字段 `CurrentTaskID`/`CurrentBots`；任务切换时清空 `LatestStress` 防旧任务指标串入
+- `StartTask`（`:195-211`）：Start ACK 提交后同步节点为 busy——首个指标窗口无需等心跳
+- `CompleteTask`（`:215-234`）：仅在 taskID 仍是节点当前任务时清理回 idle；返回 false 表示报告迟到
 
 ### 3.2 心跳超时阈值与状态扫描
 
-**代码位置**：`admin/agent.go::scanAndMarkStatus`
+**代码位置**：`admin/agent/registry.go:395-442`
 
-`scanAndMarkStatus` 由 `StartHealthChecker` 以 5s 间隔调用：
+`scanAndMarkStatus` 每 5 秒遍历全部节点：
 
-```go
-func (r *AgentRegistry) scanAndMarkStatus() {
-    var changes []statusChange
-    r.mu.Lock()
-    now := time.Now()
-    for _, node := range r.agents {
-        lag := now.Sub(node.LastHeartbeatAt)
-        var newStatus AgentStatus
-        switch {
-        case lag >= r.offlineThreshold:
-            newStatus = AgentOffline
-        case lag >= r.unhealthyThreshold:
-            newStatus = AgentUnhealthy
-        default:
-            continue
-        }
-        if node.Status != newStatus {
-            from := node.Status
-            node.Status = newStatus
-            changes = append(changes, statusChange{...})
-        }
-        // offline → 从注册表删除
-        if node.Status == AgentOffline {
-            delete(r.agents, node.ID)
-        }
-    }
-    r.mu.Unlock()
-    r.fireOnChange(changes) // 锁外触发回调
-}
+```
+lag = now - LastHeartbeatAt
+lag >= offlineAfter(60s)   → 标记 Offline，**立即从注册表删除**（无延迟清理队列）
+lag >= unhealthyAfter(30s) → 标记 Unhealthy（仍在线，告警）
+其余                        → 保持业务状态
 ```
 
-**心跳超时阈值**（在 `admin-config.json::agentRegistry` 中配置）：
-
-| 距上次活动 | 状态变更 | 含义 |
-|-----------|---------|------|
-| `< unhealthyAfter`（默认 30s） | 保持业务状态 | 健康 |
-| `>= unhealthyAfter` | → `Unhealthy` | 告警，但仍视为在线 |
-| `>= offlineAfter`（默认 60s） | → `Offline` | 视为离线，从注册表删除 |
-
-**与计划的差异**：计划中提到 `purgeAfter`（24h 后清理无任务的 offline 节点），但实际代码中 offline 节点在 `scanAndMarkStatus` 中立即从注册表删除（`delete(r.agents, node.ID)`），没有 24h 延迟清理。这意味着 offline 状态是瞬态的——标记后立即删除。
-
-**`fireOnChange` 的设计**：状态变更回调收集到 `changes` 切片中，在 `agents.mu` 锁释放后才触发。这防止了 `onChange` 回调（可能获取 `tasks.mu`）与 `agents.mu` 的死锁。
+- 状态变更收集后在**锁外** `fireOnChange`（防 `agents.mu → tasks.mu` 的 AB-BA 死锁）
+- offline 状态是瞬态的：标记、触发回调、删除一气呵成；该节点 ID 可被后续 Hello 重新注册
+- unhealthy/offline 节点收到任何请求（心跳/指标/报告）时经 `touchLocked` 自动恢复：有任务 → busy，无任务 → idle（`:254-277`）
 
 ### 3.3 单节点离线 → 任务级处理
 
-**代码位置**：`admin/admin.go::onAgentStatusChange`
+**代码位置**：`admin/app.go:421-520`（onAgentStatusChange）
 
-`onAgentStatusChange` 是 Admin 处理 Agent 状态变更的核心回调，注册在 `AgentRegistry` 中。
+回调先过滤：无活跃任务、或离线节点不在活跃任务分配名单中 → 不动作。分配节点离线时记录 `AgentEvent{Type:"offline"}`，然后按任务状态分支：
 
-处理逻辑按场景分支：
+- **任务 Stopping 时节点离线**：立刻合成 `ResultFailed + "节点离线"` report（CleanupStatus 标记"清理状态未知"）；若全部预期节点已有 report → 转 Stopped（`admin/app.go:485-516`）
+- **任务 Running/Starting 时节点离线**：`checkAndStopIfAllLost` 检查剩余节点（`:518-519`）
 
-**场景 A：活跃任务中，已分配节点离线**（`to == AgentOffline`）：
+**`checkAndStopIfAllLost` 判定**（`admin/app.go:689-717`）：
 
-1. 检查当前是否有活跃任务（`s.tasks.ActiveTask()`）。
-2. 检查离线 Agent 是否是活跃任务的分配节点。
-3. 记录 `AgentEvent{Type:"offline", Detail:"心跳超时"}`。
-
-然后根据任务状态进一步处理：
-
-- **任务 Stopping 时节点离线**：立刻合成 `ResultFailed + "节点离线"` 的 report；若所有节点都已有 report → 转 `Stopped`。
-  ```go
-  if task.State == TaskStopping {
-      // 合成 report
-      if len(task.Reports) == len(task.Assignments) {
-          s.tasks.Transition(task.ID, TaskStopping, TaskStopped)
-      }
-      return
-  }
-  ```
-
-- **任务 Running 时节点离线**：调用 `checkAndStopIfAllLost` 检查是否所有分配节点都已失效。
-
-**场景 B：已分配节点重新注册**（`busy/unhealthy → idle`）：
-
-```go
-if (from == AgentBusy || from == AgentUnhealthy) && to == AgentIdle {
-    // 记录 restarted 事件
-    // 立即合成 ResultFailed report
-    // checkAndStopIfAllLost
-}
+```
+任务的某个预期节点（SucceededAgents 优先，空则 Assignments）视为"已失效"当：
+  - 该 agentID 已有 Reports[agentID]（已合成或自然上报）
+  - 或节点已从注册表删除
+  - 或节点 status == Offline
+  - 或节点 CurrentTaskID != 当前 taskID
+全部预期节点失效 → autoStopTask(taskID, "所有分配节点已失效")
 ```
 
-**场景 C：节点恢复**（`offline → idle/busy`）：
-```go
-if from == AgentOffline && (to == AgentIdle || to == AgentBusy) {
-    // 记录 reconnected 事件
-}
-```
+### 3.4 Agent 进程重启（实例变化）
 
-**`checkAndStopIfAllLost` 的判定**（`admin/admin.go::checkAndStopIfAllLost`）：
+**代码位置**：`admin/agent/registry.go:79-125`、`admin/app.go:522-546`
 
-```text
-任务的某个 Assignment 视为"已失效"当：
-  - 该 AgentID 已存在 Reports[agentID]（已合成 report 或自然上报）
-  - 或 节点已从注册表删除（Get 返回 false）
-  - 或 节点 status == Offline
-  - 或 节点 CurrentTaskID != 当前 taskID（Agent 已不再认为自己跑这个任务）
-全部 Assignment 都失效 → autoStopTask(taskID, "所有分配节点已失效")
-```
+Registry 为每个节点维护 `instances[agentID]{startedAt, taskID}`。Hello 注册时若旧实例 `StartedAt` 与新 Hello 不同且旧实例仍持有任务 → 锁外触发 `onRestart(agentID, lostTaskID)`：
 
-代码实现：
-```go
-func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
-    task, ok := s.tasks.Get(taskID)
-    if !ok || !IsActiveState(task.State) { return }
-    anyAlive := false
-    for _, a := range task.Assignments {
-        if _, hasReport := task.Reports[a.AgentID]; hasReport { continue }
-        node, nodeOk := s.agents.Get(a.AgentID)
-        if nodeOk && node.Status != AgentOffline && node.CurrentTaskID == taskID {
-            anyAlive = true
-            break
-        }
-    }
-    if !anyAlive {
-        s.autoStopTask(taskID, "所有分配节点已失效")
-    }
-}
-```
+1. 记录 `AgentEvent{Type:"restarted", Detail:"节点进程实例已变化，原任务已丢失"}`
+2. 立即为该节点合成 `ResultFailed + "节点进程重启，任务已丢失"` report（避免任务卡等一份永远不会到来的报告）
+3. `checkAndStopIfAllLost`：剩余节点够则任务继续，全失效则转 failed
 
-### 3.4 Agent 进程重启（已分配节点重新注册）
-
-**代码位置**：`admin/agent.go::Register`、`admin/handlers.go::handleAgentRegister`、`admin/admin.go::onAgentStatusChange`
-
-用户需求：运行任务期间允许新 Agent 注册，因为已分配 Agent 异常重启走重连流程，等价于"新注册"，不允许会导致行为不一致。
-
-实现细节：
-
-1. `handleAgentRegister`（`admin/handlers.go`）不拒绝活跃任务期间的注册：
-   ```go
-   func (s *AdminServer) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
-       // 解析请求，构造 AgentNode（Status: AgentIdle）
-       if err := s.agents.Register(node); err != nil {
-           writeError(w, err)
-           return
-       }
-       writeJSON(w, http.StatusOK, RegisterResponse{...})
-   }
-   ```
-
-2. `AgentRegistry.Register`（`admin/agent.go`）无条件覆盖旧 entry：
-   ```go
-   func (r *AgentRegistry) Register(node *AgentNode) error {
-       r.mu.Lock()
-       existing, exists := r.agents[node.ID]
-       from := AgentStatus("")
-       if exists { from = existing.Status }
-       r.agents[node.ID] = node // 无条件覆盖
-       needCallback := exists && r.onChange != nil && from != node.Status
-       r.mu.Unlock()
-       if needCallback { r.onChange(node.ID, from, node.Status) }
-       return nil
-   }
-   ```
-
-3. 旧状态 `busy/unhealthy → idle` 触发 `onAgentStatusChange`，被识别为"已分配节点重启"：
-   - 记录 `AgentEvent{Type:"restarted", Detail:"Agent 重新注册，已分配任务在该节点丢失"}`。
-   - **立即为该 Agent 合成 `ResultFailed` report**，避免任务因等待"永远不会到来的"完成上报而卡死。
-   - 调用 `checkAndStopIfAllLost`：若所有分配节点都已失效 → `autoStopTask`；否则任务继续。
-
-**不补档**：新注册后该 Agent 是空白节点，不会被自动塞回旧任务；旧任务在该节点上的 bots 量直接放弃。
+**不补档**：新实例是空白节点，不会被塞回旧任务；旧任务在该节点上的机器人量直接放弃。运行任务期间的新节点注册不受限制（同 ID 覆盖）。
 
 ### 3.5 自然完成路径
 
-**代码位置**：`admin/handlers.go::handleAgentTaskDone`
+**代码位置**：`admin/task/completion.go:59-100`（CompletionService.Accept）
 
 ```
-1. s.agents.Touch(agentID, "")         ← 刷新心跳
-2. s.agents.Heartbeat(agentID, ...)    ← 把 Agent 标记回 Idle
-3. s.tasks.Update(taskID, ...)         ← 写入 Reports[agentID] = report
-4. 检查 len(Reports) == len(Assignments)
-   → Running: Transition(taskID, TaskRunning, TaskStopped)
-   → Stopping: Transition(taskID, TaskStopping, TaskStopped)
+gRPC FinalReport
+  → agents.Touch（刷新心跳）
+  → 校验汇报者在预期名单（ExpectedAgents：SucceededAgents 优先，空则 Assignments）
+     不在 → PermanentReportError（终态 NACK，Agent 停止重发）
+  → StageIndex > 0：阶段报告，同节点同阶段幂等覆盖 StageReports，不触发状态转换
+  → 最终报告：Reports[agentID] = report
+  → 全部预期节点汇报完毕：聚合 CleanupSummary → running/stopping → stopped
 ```
-
-**锁顺序关键**：`agents.Heartbeat` 必须在 `tasks.Update` **之外**调用，避免 `agents.mu` 与 `tasks.mu` 的 AB-BA 死锁（见 §5.2）。
-
-```go
-func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request) {
-    // 1. Touch 刷新心跳
-    s.agents.Touch(agentID, "")
-    // 2. Heartbeat 标记回 idle（在 tasks.Update 之外！）
-    s.agents.Heartbeat(agentID, HeartbeatRequest{Status: "idle"})
-    // 3. Update 写入 report
-    var needTransition TaskState
-    err := s.tasks.Update(taskID, func(t *Task) {
-        // 阶段完成报告：存入 StageReports
-        if report.StageIndex > 0 {
-            t.StageReports = append(t.StageReports, report)
-            return
-        }
-        // 最终完成报告
-        t.Reports[agentID] = report
-        if len(t.Reports) == len(t.Assignments) {
-            if t.State == TaskRunning { needTransition = TaskRunning }
-            else if t.State == TaskStopping { needTransition = TaskStopping }
-        }
-    })
-    // 4. Transition 在 Update 外部调用
-    if needTransition == TaskRunning {
-        s.tasks.Transition(taskID, TaskRunning, TaskStopped)
-    } else if needTransition == TaskStopping {
-        s.tasks.Transition(taskID, TaskStopping, TaskStopped)
-    }
-}
-```
-
-**阶段完成报告**（`StageIndex > 0`）：渐进式加压模式下，每个阶段完成时 Agent 会发送阶段报告，存入 `StageReports` 而非 `Reports`，不触发状态转换。
-
-**自然完成路径不主动调用 `synthesizeOfflineReports`**。如果某 Agent 在任务期间离线，该 Agent 的 report 会通过 §3.3 / §3.4 / §3.6 的某条路径补齐。
 
 ### 3.6 用户手动停止任务
 
-**代码位置**：`admin/handlers.go::handleStopTask`
+**代码位置**：`admin/httpapi/task_routes.go:497-548`
 
-1. 校验任务状态必须为 `TaskRunning`。
-2. `Running → Stopping`（`Transition`）。
-3. 向在线节点 POST `/agent/v1/stop`（通过 `dispatcher.Stop`）。
-4. `synthesizeOfflineReports` 立即为已离线节点合成 `ResultStopped + "节点离线，未上报"`。
-5. 若所有节点都已有 report → 立即 `Stopping → Stopped`。
-6. 否则启动 30s 安全网 `startStopTimeout`。
+1. 任务必须 running（否则 `TASK_INVALID_STATE`）
+2. `running → stopping`
+3. 为目标节点（SucceededAgents 优先）创建 StopTask 命令；**命令创建失败 → 回滚 `stopping → running`** 并返回 500（`task_routes.go:530-533`；该回滚边在 `validTransition` 中显式合法，`admin/task/store.go:276`）
+4. `synthesizeOfflineReports`（`admin/app.go:559-614`）：为已离线且未上报的节点合成 `ResultStopped + "节点离线，未上报"` report
+5. 全部已有 report → 立即 `stopping → stopped`；否则启动 60s 安全网
+6. Agent：StopTask → `CancelTask(taskID, reason)` → 停机器人 → stopped 报告
 
-```go
-func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
-    // 校验 + Transition Running→Stopping
-    // 向在线节点发送 stop 命令
-    allReported := s.synthesizeOfflineReports(id)
-    if allReported {
-        s.tasks.Transition(id, TaskStopping, TaskStopped)
-    } else {
-        s.startStopTimeout(id) // 30s 安全网
-    }
-}
+**停止超时安全网**（`admin/app.go:616-683`）：
+
+```
+stopWaitTimeout = 60s
+  必须 ≥ Agent 端 Manager.closeRobotsTimeout(15s) + Robot.Close 兜底(10s) + 网络上报延迟，
+  否则 Agent 真实上报到达前 Admin 已合成 fake report 并归档，真实指标被丢弃（:616-620 注释）
+超时后：为未上报节点合成 ResultStopped + "停止超时，节点未响应" → stopping → stopped
 ```
 
-**`startStopTimeout` 安全网**（`admin/admin.go::startStopTimeout`）：
-
-```go
-func (s *AdminServer) startStopTimeout(taskID string) {
-    utils.GetWorkPool().Go(func() {
-        time.Sleep(30 * time.Second)
-        task, ok := s.tasks.Get(taskID)
-        if !ok || task.State != TaskStopping { return }
-        // 为所有未上报的节点合成 ResultStopped report
-        s.tasks.Update(taskID, func(t *Task) {
-            for _, a := range t.Assignments {
-                if _, exists := t.Reports[a.AgentID]; !exists {
-                    t.Reports[a.AgentID] = TaskCompletionReport{
-                        Result: ResultStopped,
-                        ErrorMsg: "停止超时，节点未响应",
-                    }
-                }
-            }
-        })
-        s.tasks.Transition(taskID, TaskStopping, TaskStopped)
-    })
-}
-```
+安全网用 `GoWithStop` + `waitStopGuard`（select stopCh / timer）：进程关闭时立即放弃等待，不占协程导致 workpool 关闭超时（`:622-633`）。
 
 ### 3.7 自动停止（autoStopTask）
 
-**代码位置**：`admin/admin.go::autoStopTask`
+**代码位置**：`admin/app.go:720-788`
 
 触发场景：
-- 所有分配节点失效（offline / restarted / report 已合成）— 由 `checkAndStopIfAllLost` 调用。
-- Deadline 超时 — 由 `startDeadlineWatchdog`（5s/次）检测。
 
-行为：`Running/Starting → Stopping → Failed`，为所有未上报的 Assignment 合成 `ResultFailed + reason` 的 report。
+- 所有分配节点失效 — 由 `checkAndStopIfAllLost` 调用
+- Deadline 超时 — `startDeadlineWatchdog`（5s/次）检查活跃任务 `Config.Deadline`（`admin/app.go:802-828`）
 
-```go
-func (s *AdminServer) autoStopTask(taskID string, reason string) {
-    task, ok := s.tasks.Get(taskID)
-    if !ok || !IsActiveState(task.State) { return }
+行为：
 
-    // Starting 阶段直接转 Failed（还没发到 Agent，不需要 stop RPC）
-    if task.State == TaskStarting {
-        s.tasks.Transition(taskID, TaskStarting, TaskFailed)
-        return
-    }
-
-    // Running → Stopping
-    if task.State == TaskRunning {
-        s.tasks.Transition(taskID, TaskRunning, TaskStopping)
-    }
-
-    // 向在线节点发送 stop 命令
-    for _, a := range task.Assignments {
-        node, ok := s.agents.Get(a.AgentID)
-        if ok && node.Status != AgentOffline {
-            s.dispatcher.Stop(node.Address, taskID)
-        }
-    }
-
-    // 为所有未上报的节点合成 ResultFailed report
-    s.tasks.Update(taskID, func(t *Task) {
-        for _, a := range t.Assignments {
-            if _, ok := t.Reports[a.AgentID]; !ok {
-                t.Reports[a.AgentID] = TaskCompletionReport{
-                    Result: ResultFailed,
-                    ErrorMsg: reason,
-                }
-            }
-        }
-    })
-
-    // Stopping → Failed
-    s.tasks.Transition(taskID, TaskStopping, TaskFailed)
-}
-```
-
-**Deadline 看门狗**（`admin/admin.go::startDeadlineWatchdog`）：
-
-每 5 秒检查活跃任务的 `Config.Deadline`，超时则调用 `autoStopTask("任务超时")`。
+1. 任务在 Starting：直接 `starting → failed`（命令尚未被节点接受，无需 stop）
+2. Running：`running → stopping` → 为目标节点创建 StopTask 命令（10s 超时）
+3. 为所有未上报节点合成 `ResultFailed + reason` report
+4. `stopping → failed`
 
 ---
 
@@ -786,210 +330,93 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 
 ### 4.1 Admin 重启 → 活跃任务恢复
 
-**代码位置**：`admin/task.go::NewTaskStore`
+**代码位置**：`admin/task/store.go:51-67`、`admin/task/admin_store.go:24-28`
 
-`NewTaskStore` 加载 `data/tasks/*.json` 时，发现状态为 `starting/running/stopping` 的任务：
+`NewStore` 加载 `data/tasks/*.json` 时，状态为 starting/running/stopping 的任务：
 
-1. 一律重置为 `TaskFailed`，`ErrorMsg = "admin restart, task lost"`。
-2. `recoveredIDs` 记录这些任务 ID。
-3. `SetOnTerminal` 注册回调后，对每个 recovered 任务触发 `onTaskTerminal` → 归档到 history。
+1. 重置为 `Failed`，`ErrorMsg = "admin restart, task lost"`，`StoppedAt = now`
+2. 记入 `recoveredIDs`
+3. `SetOnTerminal` 注册回调后，对每个恢复任务**补放一次** onTerminal → 归档到 history（`admin/task/store.go:71-79`）
 
-```go
-func NewTaskStore(dataDir string) (*TaskStore, error) {
-    tasks, err := loadTaskFiles(dataDir)
-    // ...
-    var recoveredIDs []string
-    for _, t := range tasks {
-        if IsActiveState(t.State) {
-            t.State = TaskFailed
-            t.ErrorMsg = "admin restart, task lost"
-            t.StoppedAt = &now
-            recoveredIDs = append(recoveredIDs, t.ID)
-        }
-        ts.tasks[t.ID] = t
-    }
-    ts.recoveredIDs = recoveredIDs
-    return ts, nil
-}
-```
-
-Agent 端的对应路径见 §2.4：Admin 重启后给 Agent 的心跳返回 404 → Agent 主动取消任务并重新注册。
+Agent 端对应路径见 §2.3：重连后 Hello 触发孤儿任务停止。
 
 ### 4.2 持久化原子性
 
-**代码位置**：`admin/persist.go::saveTaskFile`
+**代码位置**：`admin/task/persist.go`
 
-```go
-func saveTaskFile(dataDir string, task *Task) error {
-    dir := filepath.Join(dataDir, "tasks")
-    os.MkdirAll(dir, 0o755)
-    data, _ := json.MarshalIndent(task, "", "  ")
-
-    // 原子写入：先写临时文件再 rename
-    tmp := taskFilePath(dataDir, task.ID) + ".tmp"
-    os.WriteFile(tmp, data, 0o644)
-    dst := taskFilePath(dataDir, task.ID)
-    if err := os.Rename(tmp, dst); err != nil {
-        os.Remove(tmp) // rename 失败则删除临时文件
-        return err
-    }
-    return nil
-}
-```
-
-**`loadTaskFiles` 启动加载**（`admin/persist.go::loadTaskFiles`）：
-- 跳过非 `.json` 后缀的文件。
-- 跳过 `.tmp` 后缀（不加载半写文件）。
-- 清理旧版残留的 `.tmp.json` 文件。
-- 解析失败的文件跳过并打 Warn 日志。
+- 任务 JSON 写入：临时文件 + `os.Rename` 原子替换；`Create/Update/Transition` 后同步落盘
+- 加载时跳过半写文件；解析失败的文件跳过并打 Warn
+- 命令日志、指标窗口、AgentRegistry 均为内存态（重启丢失/重建）；资源包内容寻址可按任务配置重建
 
 ### 4.3 终态归档异步化
 
-**代码位置**：`admin/task.go::Transition`
+**代码位置**：`admin/task/store.go:188-211`、`admin/app.go:322-370`
 
-`TaskStore.Transition` 检测到终态时：
+`Transition` 进入终态时：
 
-1. 清理 `activeID`。
-2. 深拷贝 task 数据（JSON marshal/unmarshal），提交到 `utils.GetWorkPool().Go(...)` 异步执行 `onTerminal`（归档不阻塞状态机）。
+1. 同一临界区内清除 `activeID`（与状态写入同锁，杜绝"activeID 指向已终结任务"的永久卡死，见该处注释）
+2. 以 `TerminalClone`（JSON 深拷贝）副本提交协程池异步执行 `onTerminal`
 
-```go
-if !IsActiveState(to) {
-    if ts.activeID == id { ts.activeID = "" }
-    if ts.onTerminal != nil {
-        var taskCopy Task
-        if data, err := json.Marshal(t); err == nil {
-            json.Unmarshal(data, &taskCopy)
-        }
-        taskRef := &taskCopy
-        utils.GetWorkPool().Go(func() { ts.onTerminal(taskRef) })
-    }
-}
-```
-
-深拷贝避免了异步归档 goroutine 与后续任务操作之间的 data race。
-
-**`onTaskTerminal` 的行为**（`admin/admin.go::onTaskTerminal`）：
-1. 停止 Sampler（如果存在）。
-2. 异步归档到 HistoryStore（如果 history 模块启用）。
-3. 归档时优先从 agent 终止报告聚合最终快照，兜底从心跳聚合。
+`onTaskTerminal`：停 Sampler → 共享状态命名空间清理登记（Redis）→ 优先用 Agent 终止报告聚合最终快照（`buildFinalStressFromReports`，过滤空快照），空则兜底窗口聚合 → `history.Archive`。history 未启用时 `metricsWindows.DropTask` 释放窗口状态。
 
 ---
 
 ## 5. 实现细节与陷阱
 
-### 5.1 注册版本号 regGeneration
+### 5.1 会话 generation
 
-**代码位置**：`agent/agent.go::Agent.regGeneration`
-
-Agent 每次重新注册成功后 `regGeneration.Add(1)`。
-
-```go
-type Agent struct {
-    // ...
-    regGeneration atomic.Int64
-}
-```
-
-当前主要用于诊断，未来可扩展：比如把 `stressReporter` 绑定到某个 generation，重新注册后 Admin 视角 task 已不存在，Agent 的旧 reporter 即便没来得及关闭也只会失败，不会污染新任务的指标。
-
-`regGeneration` 在以下时机递增：
-- 初始注册成功（`Run()` 中）：`a.regGeneration.Add(1)`
-- Admin 重启后重新注册成功（`heartbeatLoop` 中）：`a.regGeneration.Add(1)`
+- `SessionRegistry.Attach` 为每次会话递增 generation 并顶替旧会话（取消旧 context，`admin/grpcapi/session.go:154-177`）；per-Agent gate 串行化 Attach 与 WithCurrent，防旧流事件落库前被顶替（`:181-194`）
+- 命令投递携带 `delivery_generation`，Agent 校验与当前会话一致才入队（`agent/session/transport.go:126-128`）；指标流每帧校验 generation（`admin/grpcapi/metrics_service.go:38-43`）
+- 会话结束统一 `DropGeneration` 清理该代指标槽位（`admin/grpcapi/control_service.go:98`）
 
 ### 5.2 锁顺序约定
 
-涉及 `agents.mu` 与 `tasks.mu` 的调用路径必须遵守同一顺序，避免 AB-BA 死锁。
+**全局顺序**：`agents.mu` → `tasks.mu`。
 
-**全局锁顺序**：`agents.mu` → `tasks.mu`。`agents.mu` 必须在 `tasks.mu` 之前获取。
-
-具体实现：
-
-- `onAgentStatusChange`（从 `agents.Heartbeat` / `scanAndMarkStatus` 触发）：先释放 `agents.mu`（`fireOnChange` 在锁外调用），然后获取 `tasks.mu`。
-  - `fireOnChange` 的设计就是收集所有状态变更，释放锁后再逐个触发回调。
-
-- `handleAgentTaskDone`：**必须把 `agents.Heartbeat` 放在 `tasks.Update` 之外**。
-  ```go
-  s.agents.Touch(agentID, "")       // agents.mu 获取/释放
-  s.agents.Heartbeat(agentID, ...)  // agents.mu 获取/释放
-  s.tasks.Update(taskID, ...)       // tasks.mu 获取/释放
-  ```
-  当前实现已遵循。
-
-- `handleStopTask`：先 `Transition`（`tasks.mu`），再 `synthesizeOfflineReports`（内部有 `tasks.Update`），最后 `startStopTimeout`。不涉及 `agents.mu` 的同时持有。
-
-- 其他 admin handler 中如新增涉及两者的逻辑，必须显式保证 `agents.mu` 先于 `tasks.mu`，或确保两者不在同一调用链中同时持有。
+- `Registry.fireOnChange` 在锁外触发回调（`admin/agent/registry.go:65-73`），`onAgentStatusChange` 随后才进入 tasks 操作
+- `CompletionService.Accept` 先 `agents.Touch`（获取/释放 agents.mu），再 `tasks.Update`（tasks.mu）
+- `Repository.Transition` 的终态回调经深拷贝 + 协程池异步执行，锁内不触发跨模块调用
+- 新增涉及两者的逻辑必须保持该顺序，或确保两者不在同一调用链同时持有
 
 ### 5.3 所有 Transition 错误都已检查
 
-所有 `s.tasks.Transition(...)` 调用的返回错误都已处理：
+全部 `Transition` 调用点的错误均落日志（"状态转换失败"），代表"状态机被另一条路径抢先转换"（如手动停止与自然完成竞争），属良性竞态，记录即可不回退。调用点分布：`onAgentStatusChange`（stopping→stopped）、`startStopTimeout`、`autoStopTask`、`handleStartTask`/`startTaskBackground`（starting→failed/running）、`handleStopTask`（running→stopping、stopping→stopped/running 回滚）。
 
-```text
-[ADMIN] 状态转换失败 <from>→<to>  taskId=...  error=...
-```
+### 5.4 命令幂等与重放
 
-通常这类错误代表"状态机被另一条路径抢先转换"（如手动停止 + 自然完成竞争），属于良性竞态；记录日志即可，不需要回退。
+- Admin 命令日志按全局递增 Sequence 排序；会话投递游标（非 ACK 游标）保证健康会话每条命令只流一次、重连后从头补发（`admin/command/bus.go:96-114`）
+- 在途窗口 `CommandDispatchWindow = 16`：未 ACK 命令占满配额时暂停拉取，ACK 后自动补投（`admin/grpcapi/session.go:43-64`）
+- Agent 对同 `commandId` 重放直接回放既有 ACK 结果（`agent/command/executor.go:96-98`）；重复 StartTask 且任务相同 → DUPLICATE
+- 瞬时错误（canceled/deadline/unavailable）不落 REJECTED，交由命令重放重试（`agent/command/executor.go:286-296`）
+- StartTask 期间会话中断：`context.AfterFunc` 把会话取消转成任务取消原因 `errTaskSessionInterrupted`，释放预留并静默（等命令重放），不产生永久 REJECTED（`agent/command/executor.go:159-186`）
 
-涉及的 Transition 调用点（`admin/admin.go`、`admin/handlers.go`）：
-- `onAgentStatusChange` 中 Stopping → Stopped
-- `startStopTimeout` 中 Stopping → Stopped
-- `autoStopTask` 中 Starting → Failed、Running → Stopping、Stopping → Failed
-- `handleStartTask` 中 Starting → Failed、Starting → Running
-- `handleStopTask` 中 Running → Stopping、Stopping → Stopped
-- `startTaskBackground` 中 Starting → Failed、Starting → Running
+### 5.5 协程池容量与 Shutdown
 
-### 5.4 协程池容量与 Shutdown
-
-**代码位置**：`utils/work_pool.go`
-
-- `Cap == 0`（默认）表示无限制（ants 库语义），业务上极少触发 `MaxBlockingTasks`。
-- `Shutdown(timeout=5s)`：超时后打印泄漏 goroutine 列表（含 caller 文件:行号 + 运行时长），便于排查"未正常退出的循环"。
-- `Shutdown` 使用 `sync.Once` 语义（`stopped.CompareAndSwap(false, true)`），多次调用安全。
-- `Shutdown` 中 `wg.Wait()` 在独立 goroutine 中执行（不在池内），避免死锁。
+- `Shutdown(5s)` 超时后放弃等待；`GoWithStop` 任务经 `StopChan()` 感知关闭提前退出
+- `submit` 的「先登记 wg 再二次检查 stopped」消除与 Shutdown 的计数竞态（`internal/workpool/workpool.go:111-113`）
+- Admin 关闭顺序先 cancel runtimeCtx 再等待各服务（§2.4）；Agent 的 `taskWG.Wait()` 在协程池内执行、主流程限时等待（§2.6）——两处都是"不要在等待方占住池"的同型设计
 
 ---
 
-## 6. 任务分配失败回滚
+## 6. 任务启动/停止失败回滚
 
-**代码位置**：`admin/handlers.go::startTaskBackground`
+### 6.1 启动失败（`admin/httpapi/task_routes.go:465-495`）
 
-`startTaskBackground` 是任务分配的异步执行函数，在 `handleStartTask` 中通过协程池提交：
+`startTaskBackground`（协程池异步）：
 
-1. 读取任务配置，构建 `TaskAssignment`（包含 ConfigURL、ConfigFiles、RampUp 等）。
-2. 向各 Agent 异步推送任务（`dispatcher.AssignTask`）。
-3. 推送成功的 Agent 立即通过 `agents.Heartbeat` 标记为 busy。
-4. 如果任一 Agent 分配失败：
-   - 向已接受任务的 Agent 发送 stop 命令回收资源。
-   - `Transition(taskID, TaskStarting, TaskFailed)` 回滚任务状态。
-   - 停止 Sampler。
+1. 任务不存在（并发删除）→ 停 Sampler 返回
+2. `ScheduleStart`：打包资源 + 组装 StartTask 命令 + 批量写入命令日志；失败 → `starting → failed` + 停 Sampler
+3. 成功 → 成功节点记入 `SucceededAgents` → `starting → running` → `finishTaskIfFullyReported` 兜底（节点瞬间完成时立即终态）
 
-```go
-func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments []Assignment) {
-    var failed []string
-    var succeeded []string
-    // ...
-    for _, a := range assignments {
-        if err := s.dispatcher.AssignTask(agent.Address, cfg); err != nil {
-            failed = append(failed, a.AgentID)
-        } else {
-            succeeded = append(succeeded, a.AgentID)
-            s.agents.Heartbeat(a.AgentID, HeartbeatRequest{Status: "busy", ...})
-        }
-    }
-    if len(failed) > 0 {
-        // 回滚已成功的 Agent
-        for _, agentID := range succeeded {
-            s.dispatcher.Stop(agent.Address, taskID)
-        }
-        s.tasks.Transition(taskID, TaskStarting, TaskFailed)
-        s.sampler.Stop(taskID)
-        return
-    }
-    // 全部成功
-    s.tasks.Transition(taskID, TaskStarting, TaskRunning)
-}
-```
+命令已写入但节点未接受的情况由命令重放与孤儿停止机制收敛，无需逐节点回收。
 
-**RampUp 缩放**：分布式模式下每个 Agent 分到的 bot 数不同，`scaleRampUp` 按比例缩放各 stage 的 count，最后一个 stage 取剩余数确保总数精确。
+### 6.2 停止失败
+
+停止命令创建失败 → 回滚 `stopping → running`，前端收 500（`admin/httpapi/task_routes.go:530-533`）；`validTransition` 显式允许该回滚边（`admin/task/store.go:276`）。
+
+### 6.3 分布式参数拆分失败前置
+
+`ValidateDistributedConcurrency` 在启动入口拒绝 `0 < concurrency < 分配节点数` 的组合（`admin/task/distribution.go:30-47`）；`SplitGlobalValues` 运行期兜底保底 1 + 总和守恒（`:69-124`）。
 
 ---
 
@@ -997,22 +424,26 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 
 | 故障场景 | Agent 行为 | Admin 行为 | 任务最终状态 |
 |---------|-----------|-----------|------------|
-| Admin 挂掉，Agent Idle | 心跳失败递进重试，**不退进程** | — | 无任务 |
-| Admin 挂掉，Agent Busy | 连续 `HBFailThreshold` 次心跳失败 → 取消任务 → 回 Idle → 持续重连 | — | 任务在 Agent 端被丢弃 |
-| Admin 重启 | Agent 收到 404 → 取消任务（若有）→ 重新注册 → Idle | 加载旧 active 任务为 failed 并归档 | failed（旧）/ 等待新任务 |
-| Admin 持续不可达 + 注册超出 maxRetries（默认 -1 不会触发）| 退出进程 | — | 任务被丢弃 |
-| Agent 进程退出，无任务 | — | 60s 后标记 offline 并从注册表删除 | 无影响 |
-| Agent 进程退出，有任务 | — | 60s 后 offline，记录 AgentEvent；剩余节点继续 | 继续 running |
-| Agent 进程重启，无任务 | 新注册 → Idle | 覆盖旧 entry | 无影响 |
-| Agent 进程重启，有任务 | 新注册 → Idle | 记录 `restarted` 事件，合成该节点的 failed report；检查是否全失效 | 剩余节点继续 / 全失效则 failed |
-| 所有 Agent 离线或重启 | 各自走重连 | `checkAndStopIfAllLost` → `autoStopTask` | failed |
-| 任务运行中新 Agent 注册 | 注册成功 → Idle，等待分配 | 接受注册，未分配的节点保持 Idle | 不影响当前任务 |
-| 用户手动停止任务 | 收到 `/agent/v1/stop` → 停 bots → 上报 | 离线节点合成 stopped report；30s 安全网 | stopped |
-| 任务 deadline 超时 | 收到 `/agent/v1/stop` | `autoStopTask("任务超时")` | failed |
-| Agent 心跳网络抖动 | 单次失败 → fail-interval 重试 → 恢复 | LastHeartbeatAt 被任意请求 Touch 刷新；通常无感 | 无影响 |
-| HTTP handler panic | — | recover 中间件捕获，返回 500 JSON，写日志 + stack trace | 不影响其他请求 |
-| 业务 goroutine panic | 协程池双层 PanicHandler 捕获 | 同左 | 该 goroutine 退出，其他不受影响 |
-| 进程顶层 panic | `cmd/agent/main.go` 顶层 recover 写日志 + exit 2 | `cmd/admin/main.go` 顶层 recover 写日志 + exit 2 | 由进程管理器拉起 |
+| Admin 挂掉，Agent Idle | 重连退避；系统指标本地继续采集 | — | 无任务 |
+| Admin 挂掉，Agent Busy | 重连退避；租约到期（默认 45s）取消任务 → idle；未确认报告留在 outbox | — | 任务在 Agent 端被丢弃，Admin 恢复后由孤儿停止收尾 |
+| Admin 重启 | 重连后 Hello 携带 currentTaskId → 收到孤儿 StopTask → 取消并上报 | 活跃任务恢复为 failed 并补归档 | failed（旧） |
+| Admin 主动关闭 | 收到 ServerClosing → 以 Unavailable 重连 | 广播 ServerClosing → GracefulStop | 不变（重连后续跑） |
+| Admin 持续不可达 + 重连超次数（默认 -1 不触发） | 退出进程 | — | 任务被丢弃 |
+| Agent 进程退出，无任务 | — | 60s 后 offline 并从注册表删除 | 无影响 |
+| Agent 进程退出，有任务 | — | offline 事件；stopping 中合成 report，running 中检查全失效 | 剩余节点继续 / 全失效则 failed |
+| Agent 进程重启，无任务 | Hello 重注册 → idle | 覆盖旧 entry | 无影响 |
+| Agent 进程重启，有任务 | 新实例 Hello | restarted 事件 + 合成 failed report + 检查全失效 | 剩余节点继续 / 全失效则 failed |
+| 所有分配节点离线或重启 | 各自走重连 | checkAndStopIfAllLost → autoStopTask | failed |
+| 任务运行中新节点注册 | 注册成功 → idle 等待分配 | 接受注册（同 ID 覆盖） | 不影响当前任务 |
+| 用户手动停止 | 收 StopTask → 停机器人 → stopped 报告 | 离线节点合成 report；60s 安全网 | stopped |
+| 停止命令创建失败 | — | 回滚 stopping → running | running |
+| 任务 deadline 超时 | 收 StopTask | autoStopTask("任务超时") | failed |
+| 会话在 StartTask 下载期间断开 | 下载中止、预留释放、命令重放重试 | 命令未 ACK → 重连后重放 | starting/running 不变 |
+| HTTP handler panic | — | recover 中间件捕获，500 JSON + 日志 | 不影响其他请求 |
+| 业务 goroutine panic | 协程池双层恢复捕获 | 同左 | 该 goroutine 退出 |
+| 进程顶层 panic | `cmd/agent` recover + exit 2 | `cmd/admin` recover + exit 2 | 由进程管理器拉起 |
+| 指标帧迟到/重复 | — | 窗口序列号判 duplicate 丢弃；系统帧按 sequence 去重 | 不影响 |
+| 压测帧任务不匹配 | — | AcceptanceService 静默丢弃（返回 nil） | 不影响 |
 
 ---
 
@@ -1020,86 +451,33 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 
 | 数据来源 | 字段 | 渲染位置 |
 |---------|------|---------|
-| `GET /sbot/agents` | `status` (`idle`/`busy`/`unhealthy`/`offline`) | 节点列表、MonitorDock 在线计数 |
-| `GET /sbot/tasks/{id}` | `agentEvents[]` | RuntimeBar "N 节点异常" 徽标 + MonitorDock Alert + HistoryDetailView 时间线 |
-| `AgentEvent.type` | `offline` / `reconnected` / `restarted` / `deregistered` | 不同标签颜色与文案：离线 (error) / 恢复 (success) / 重启丢任务 (warning) / 注销 (default) |
-| `StressAggregate` | `reportingAgents` / `totalAgents` / `offlineAgents` / `assignedAgents` | RuntimeBar 数据覆盖率提示 |
+| `GET /sbot/agents` | `status`（idle/busy/unhealthy/offline） | 节点列表、在线计数 |
+| `GET /sbot/tasks/{id}` | `agentEvents[]`（offline/reconnected/restarted） | 任务详情时间线、异常徽标 |
+| `GET /sbot/tasks/{id}` | `cleanupSummary`（全节点清理状态汇总） | 最终报告清理面板 |
+| `GET /sbot/metrics` | `reportingAgents`/`freshAgents`/`staleAgents`/`coverageRatio`/`asOf` | 数据覆盖率提示 |
 | Task `state == failed` + `errorMsg` | `errorMsg` | 最终报告 banner |
-
----
-
-## 9. 与计划的差异
-
-本节列出实际实现与 `plans/error-handling.md` 之间的差异。
-
-### 9.1 配置参数简化
-
-**计划中提到但实际未实现的配置项**：
-- `heartbeatFailInterval`：计划中描述为独立配置项且默认与 `heartbeatInterval` 不同（更短以加速重连），实际实现中 `HBFailInterval` 硬编码等于 `HBInterval`（`agent/config.go::Resolve` 中 `HBFailInterval: hbInterval`）。
-  - 新增 `HBRequestTimeout`（默认 5s）和 `HBFailThreshold`（默认 3）作为可配置项，分别控制心跳单次请求超时和"任务运行中容忍的连续失败次数"。
-- `reconnectInterval` / `reconnectMaxInterval`：计划中描述为可配置，实际硬编码为 5s / 60s（`agent/config.go::Resolve`）。
-- `taskReportTimeout`：计划中描述为可配置，实际硬编码为 30s。
-- `heartbeatInterval >= 25s` 的启动校验：计划中提到会拒绝启动，实际代码中未发现此校验逻辑。
-
-**计划中提到但实际未实现的兼容性字段**：
-- `maxHeartbeatFailures` / `taskRunAdminLostExit` / `reconnectEnabled` / `registerRetryMaxInterval` 等旧字段兼容：实际代码中未找到相关反序列化逻辑。
-
-### 9.2 Agent 状态清理策略
-
-**计划中**：`Offline` 节点超过 `purgeAfter`（24h）且 `CurrentTaskID == ""` 时从注册表删除。
-
-**实际实现**：`scanAndMarkStatus`（`admin/agent.go`）在标记为 Offline 后立即从注册表删除（`delete(r.agents, node.ID)`），无 24h 延迟清理。`purgeAfter` 配置项不存在。
-
-### 9.3 Deregister 回调
-
-**计划中**：`Deregister` 触发 `onAgentStatusChange`，会为关联任务的 Agent 合成 report。
-
-**实际实现**：`Deregister`（`admin/agent.go`）在删除注册表条目时，仅当 `node.CurrentTaskID != ""` 时才触发 `onChange` 回调（模拟 `→ AgentOffline` 的变更），让 `onAgentStatusChange` 处理任务侧的合成 report。
-
-### 9.4 stress 报告的过期检测
-
-**实际额外实现**（计划中未提及）：`handleAgentStressReport`（`admin/handlers.go`）检测 stress 报告是否属于当前任务，过期的报告直接丢弃（返回 `{"status":"stale"}`），避免旧任务数据串入 `LatestStress`。
-
-### 9.5 阶段完成报告
-
-**实际额外实现**（计划中未提及）：`handleAgentTaskDone` 支持 `StageIndex > 0` 的阶段完成报告，存入 `StageReports` 而非 `Reports`，用于渐进式加压模式的阶段汇报。计划中未描述此机制。
-
-### 9.6 任务分配失败时的 Sampler 处理
-
-**实际实现**：`startTaskBackground` 中分配失败时调用 `s.sampler.Stop(taskID)` 停止采样器。计划中未明确描述此步骤。
-
-### 9.7 regGeneration 的字段类型
-
-**计划中**：描述为 `atomic.Uint64`。
-
-**实际实现**：`agent/agent.go` 中 `regGeneration` 类型为 `atomic.Int64`。
+| `GET /sbot/history/{id}` | `agentReports[].cleanupStatus` | 历史详情节点报告 |
 
 ---
 
 ## 附录：任务状态机
 
 ```
-pending ──→ starting ──→ running ──→ stopping ──→ stopped
-  │            │            │                         ↑
-  │            │            └──────→ failed           │
-  │            │                                     │
-  │            └──→ failed                           │
-  │                                                  │
-  └──→ stopped（计划未提及，validTransition 允许）     │
-                                                     │
-                              stopping ──→ failed    │
-                                                     │
-                              running ──→ stopped（自然完成）
+             ┌──────────────────────────────→ stopped ←─────────────────┐
+             │                                  ↑                       │
+pending ──→ starting ──→ running ──→ stopping ──┘（回滚边：stopping → running，§6.2）
+   │           │            │            │
+   ↓           ↓            ↓            ↓
+ failed      failed      failed       failed
 ```
 
-状态转换合法性校验（`admin/task.go::validTransition`）：
+状态转换合法性校验（`admin/task/store.go:267-280`）：
 
 | from | to |
 |------|----|
-| `TaskPending` | `TaskStarting` / `TaskFailed` / `TaskStopped` |
-| `TaskStarting` | `TaskRunning` / `TaskFailed` |
-| `TaskRunning` | `TaskStopping` / `TaskStopped` / `TaskFailed` |
-| `TaskStopping` | `TaskStopped` / `TaskFailed` |
+| `pending` | `starting` / `stopped` / `failed` |
+| `starting` | `running` / `failed` |
+| `running` | `stopping` / `stopped` / `failed` |
+| `stopping` | `running`（停止命令创建失败回滚）/ `stopped` / `failed` |
 
-终态：`TaskStopped`、`TaskFailed`。
-活跃态（`IsActiveState`）：`TaskStarting`、`TaskRunning`、`TaskStopping`。
+终态：`stopped`、`failed`。活跃态（`IsActiveState`，`admin/task/types.go:33-35`）：`starting`、`running`、`stopping`——全集群同时最多一个活跃任务（`Begin` 单例入口，`admin/task/store.go:249-265`）。

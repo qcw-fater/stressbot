@@ -1,33 +1,18 @@
 # 前端 API 接口文档
 
-> **历史说明（2026-08-13）**：本文中的手写端点清单保留作历史参考，不再作为当前 API 契约。现行浏览器管理 API 以 `api/admin/openapi.yaml` 为唯一来源，并由 `/sbot/docs` 展示。
+> **契约来源**：浏览器管理 API 以 `api/admin/openapi.yaml` 为唯一契约，由 `npm run generate:api`（openapi-typescript）生成 `cmd/web/src/generated/admin-api.ts`；服务器在 `/sbot/docs` 展示同一契约。
 
 ## 概述
 
-前端仅与 Admin 服务器通信（不直连 Agent）。所有端点前缀 `/sbot/`。Admin 代理所有 Agent 相关请求。
+前端仅与 Admin 服务器通信（不直连 Agent）。所有浏览器管理端点前缀 `/sbot/`。
 
-本文档对照 `plans/api-monitor.md`（计划文档）和实际代码，详尽记录所有前端 API 端点、TypeScript 类型定义、错误处理策略和轮询方案。
+**契约 + 生成客户端模式**：
 
-### 与计划的差异汇总
-
-| 差异点 | 计划 | 实际实现 |
-|---|---|---|
-| API 前缀 | `/api/` | `/sbot/`（通过 `services/env.ts` 的 `API_PREFIX` 配置） |
-| Admin 端口 | `:8080` | 实际 `:7718`（默认配置），由 `conf/admin-config.json` 控制 |
-| RobotConfig.authAddr | 必填 | 已移除（不再由前端指定 authAddr） |
-| RobotConfig.authExtra | `Record<string,string>` | 改名为 `stateExtra`（`Record<string,string>`），语义更清晰 |
-| RobotConfig.debugMode | 计划中 | 未作为独立字段；调试模式在前端 `editorStore.debugMode` 表达 |
-| ActionMetric.skippedCount | 计划中有 | 实际 `types/api.ts` 中 **不存在**；该字段被移除 |
-| ErrorBucket | 计划中 `msg+count` | 实际改为 `ErrorEntry`（`kind+code+codeName+msgs+count`），提供更详细的错误分类 |
-| ConfigSummary.authAddr | 计划中有 | 实际不存在（authAddr 从 RobotConfig 中移除） |
-| HistoryDetail.assignments.agentName | 计划中可选 | 实际类型中为可选 `agentName?` |
-| agentsApi.shutdownAgent / shutdownAllAgents | 计划未提及 | 实际实现，对应 `POST /sbot/agents/{id}/shutdown` 和 `POST /sbot/agents/shutdown-all` |
-| metricsApi.getClusterMetrics | 计划返回 `StressSnapshot` | 实际返回 `StressAggregate`（包含 `snapshot + reportingAgents + totalAgents`） |
-| baselineApi | 计划未提及 | 实际新增模块，从 Admin 或 Vite 中间件读取 `conf/` 基线资源 |
-| resourcesStore | 计划未提及 | 实际新增 IndexedDB 双 DB 资源管理（proto / scripts / adapter） |
-| 基线资源端点 | 计划未提及 | Admin 后端新增 `GET /sbot/baseline/*` 系列，供前端读取 conf/ 资源 |
-| 错误码端点 | 计划未提及 | Admin 后端新增 `GET /sbot/api/error-codes` |
-| scriptSync | 计划未提及 | 实际新增 `services/scriptSync.ts`，自动同步 flow 引用的 Lua 脚本到 IDB |
+- `api/admin/openapi.yaml` 是唯一契约源；后端路由注册（`admin/httpapi/routes.go`）与前端类型都从它出发。
+- `npm run generate:api` 生成 `cmd/web/src/generated/admin-api.ts`（`cmd/web/package.json:13`）。
+- `cmd/web/src/services/generatedClient.ts` 用 `openapi-fetch` 的 `createClient<paths>` 构造类型安全客户端 `managementClient`，并把其判别联合返回值转换为项目既有的 `Promise/ApiError` 契约（`unwrapGenerated`）；AbortError 透传不包装。
+- 服务层按域拆分模块：`api.ts`（fetch 基座 + ApiError）、`baselineApi.ts`、`tasksApi.ts`、`agentsApi.ts`、`metricsApi.ts`、`historyApi.ts`、`flowsApi.ts`、`templatesApi.ts`、`capabilitiesApi.ts`、`codecApi.ts`。**组件禁止直接 fetch**。
+- 基线资源读取走 `BASELINE_PREFIX`（默认 `/sbot/baseline`），不进 OpenAPI 契约（文本端点）。
 
 ---
 
@@ -40,17 +25,18 @@ stressbot 分布式压测系统包含四类角色：
 | 角色 | 说明 |
 |---|---|
 | **前端** | React + Ant Design + Vite，本文档覆盖范围 |
-| **Admin** | 控制中枢，前端唯一通信对象，默认 `:7718` |
+| **Admin** | 控制中枢，前端唯一通信对象，浏览器管理面默认 `:7718`（`conf/admin.toml:25`） |
 | **Agent** | N 个工作节点，分布在不同压测服务器 |
 | **被压测游戏服务器** | 项目外，前端无需关心 |
 
 ### 1.2 通信拓扑
 
 ```
-前端 ──HTTP/JSON──> Admin (:7718) ──HTTP──> Agent (:7070)
+前端 ──HTTP/JSON──> Admin (:7718，浏览器管理面 /sbot/)
+Admin ──gRPC──> Agent（控制面 :7720，任务下发/指标上报，不经浏览器）
 ```
 
-前端不直连 Agent。Admin 聚合所有 Agent 数据，代理转发 Agent 日志请求。
+前端不直连 Agent。Admin-Agent 控制面使用 gRPC 长连接（`conf/admin.toml:36-38` controlPlane），浏览器只看到 Admin 聚合后的数据。
 
 ### 1.3 聚合 vs 单点
 
@@ -76,11 +62,11 @@ stressbot 分布式压测系统包含四类角色：
 | 开发（Vite dev） | `VITE_API_PREFIX` 默认 `/sbot`，Vite 代理到 Admin |
 | 生产 | Admin 同源托管前端，前缀 `/sbot` |
 
-Vite 代理配置（`cmd/web/vite.config.ts`）将 `/sbot` 代理到 Admin 地址。
+前缀由 `cmd/web/src/services/env.ts` 的 `API_PREFIX` 集中管理。Vite 代理配置（`cmd/web/vite.config.ts`）将 `/sbot` 代理到 Admin 地址。
 
 ### 2.2 基线资源前缀
 
-`BASELINE_PREFIX` 默认 `/sbot/baseline`，用于读取 `conf/` 目录下的 proto / scripts / adapter / flow / config 资源。
+`BASELINE_PREFIX` 默认 `/sbot/baseline`，用于读取 `conf/` 目录下的 proto / scripts / adapter / flow 资源。
 
 ### 2.3 通用请求头
 
@@ -114,19 +100,20 @@ multipart 上传时 `Content-Type` 由浏览器自动设置为 `multipart/form-d
 | `409` | 状态冲突 |
 | `500` | 服务端故障 |
 
-### 2.6 错误码常量
+### 2.6 常见错误码
+
+完整展示文案见 `cmd/web/src/services/errorHandler.ts` 的 `TOAST_MAP`：
 
 | code | 含义 |
 |---|---|
 | `TASK_NOT_FOUND` | 任务不存在 |
 | `TASK_INVALID_STATE` | 任务状态不允许此操作 |
 | `TASK_CONFLICT` | 已有 active 任务（单例约束） |
-| `AGENT_NOT_FOUND` | Agent 不存在 |
-| `AGENT_BUSY` | Agent 正忙 |
-| `AGENT_OFFLINE` | Agent 离线 |
+| `AGENT_NOT_FOUND` / `AGENT_BUSY` / `AGENT_OFFLINE` | 节点状态类 |
 | `CAPACITY_EXCEEDED` | 集群容量不足 |
-| `HISTORY_NOT_FOUND` | 历史任务不存在 |
-| `HISTORY_STARRED` | 试图删除收藏的历史任务 |
+| `HISTORY_NOT_FOUND` / `HISTORY_STARRED` / `HISTORY_DISABLED` | 历史归档类 |
+| `ACTION_TEMPLATE_NOT_FOUND` / `LISTEN_TEMPLATE_NOT_FOUND` / `TEMPLATE_NAME_CONFLICT` / `TEMPLATE_SNAPSHOT_CONFLICT` | 模板库类 |
+| `TEMPLATE_LIBRARY_DISABLED` / `FLOW_LIBRARY_DISABLED` | 服务器未启用对应库（MySQL 未配置） |
 | `INVALID_ARGUMENT` | 参数非法 |
 | `NETWORK_ERROR` | 前端自定义：网络断开 / CORS 错误 |
 
@@ -136,12 +123,7 @@ RFC3339 字符串：`2026-04-29T10:30:00.123+08:00`。
 
 ### 2.8 轮询频率
 
-| 接口 | 间隔 | 条件 |
-|---|---|---|
-| `/sbot/agents` | 10s（edit）/ 5s（running） | 持续 |
-| `/sbot/system` | 10s（edit）/ 5s（running） | 持续 |
-| `/sbot/metrics` | 5s | running / viewActive |
-| `/sbot/tasks/{id}` | 5s | running / viewActive |
+轮询由 `runtimeStore.pollingPolicy(mode)` 集中决定（见 §11.3）：`running` / `viewActive` 全量 5s；`edit` 仅 agents/system 10s；`finalReport` 停止轮询（30s 兜底间隔）。
 
 ---
 
@@ -162,6 +144,7 @@ export class ApiError extends Error {
 ```
 
 - 网络断开 / CORS 错误包装为 `{ code: 'NETWORK_ERROR', status: 0 }`
+- 主动取消（AbortError）原样抛出，不伪装成网络故障（`isAbortError`）
 - 非 JSON 响应体兜底为 `{ code: 'HTTP_ERROR', message: statusText }`
 - `204 No Content` 返回 `undefined`
 
@@ -169,12 +152,11 @@ export class ApiError extends Error {
 
 | 方法 | 函数签名 | 说明 |
 |---|---|---|
-| GET JSON | `getJson<T>(path: string, init?: RequestInit): Promise<T>` | 带 `Accept: application/json` |
+| GET JSON | `getJson<T>(path, init?): Promise<T>` | 带 `Accept: application/json` |
 | POST JSON | `postJson<T>(path, body?, init?): Promise<T>` | 自动 `JSON.stringify(body)` |
 | PUT JSON | `putJson<T>(path, body?, init?): Promise<T>` | 同上 |
 | DELETE | `del<T = void>(path, init?): Promise<T>` | 204 返回 void |
-| POST multipart | `postMultipart<T>(path, fd: FormData, init?): Promise<T>` | 不设 Content-Type（浏览器自动） |
-| GET text | `getText(path, init?): Promise<string>` | 纯文本响应 |
+| POST multipart | `postMultipart<T>(path, fd, init?): Promise<T>` | 不设 Content-Type（浏览器自动） |
 
 ### 3.3 辅助函数
 
@@ -198,15 +180,9 @@ function buildQuery(params: Record<string, unknown>): string
 GET /sbot/tasks?state=running&limit=20&offset=0
 ```
 
-**前端函数**：`listTasks(params?: TasksListParams): Promise<TasksListResponse>`
+**前端函数**：`listTasks(params?, signal?): Promise<TasksListResponse>`
 
-**请求参数**（query，全部可选）：
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `state` | `TaskState` | 过滤状态 |
-| `limit` | `number` | 分页大小 |
-| `offset` | `number` | 偏移量 |
+**请求参数**（query，全部可选）：`state`（TaskState）、`limit`、`offset`。
 
 **响应** `200 OK`：
 
@@ -217,17 +193,13 @@ interface TasksListResponse {
 }
 ```
 
-> 内部通过 `adaptList()` 兼容后端直接返回数组或 `{items, total}` 两种格式。
-
 ### 4.2 任务详情
 
 ```
 GET /sbot/tasks/{id}
 ```
 
-**前端函数**：`getTask(id: string): Promise<TaskDetail>`
-
-**响应** `200 OK`：返回 `TaskDetail`（见 §10 类型定义）。
+**前端函数**：`getTask(id, signal?): Promise<TaskDetail>`
 
 ### 4.3 创建任务
 
@@ -236,30 +208,27 @@ POST /sbot/tasks
 Content-Type: multipart/form-data
 ```
 
-**前端函数**：`createTask(fd: FormData): Promise<CreateTaskResponse>`
+**前端函数**：`createTask(fd): Promise<CreateTaskResponse>`
 
-**FormData 字段**：
+**FormData 字段**（由 `services/taskActions.ts` 的 `startTask` 组装）：
 
 | 字段 | 类型 | 必需 | 说明 |
 |---|---|---|---|
 | `name` | string | 是 | 任务名 |
-| `totalBots` | string (int) | 是 | 集群总机器人数 |
+| `totalBots` | string (int) | 是 | 集群总机器人数（渐进加压时为各阶段之和） |
+| `robotConfig` | string (JSON) | 是 | RobotConfig 序列化（rampUp 在其内） |
 | `flow.json` | file (Blob) | 是 | 流程定义 JSON |
-| `proto/<filename>` | file | 否 | 多个 .proto 文件 |
-| `scripts/<filename>` | file | 否 | 多个 .lua 文件 |
-| `robotConfig` | string (JSON) | 是 | RobotConfig 序列化 |
+| `flowTemplateId` | string | 否 | 来源流程模板 ID，仅用于历史溯源 |
 | `deadline` | string (RFC3339) | 否 | 自动停止时间 |
-| `adapter/<name>_codec.json` | file | 否 | 声明式 codec 配置，可多份 |
-| `adapter/errors.json` | file | 否 | 错误码映射 |
-
-> 实际由 `services/taskActions.ts` 的 `startTask()` 组装 FormData，只提交 flow 引用到的脚本，proto 全量提交。
+| `proto/<filename>` | file | 否 | 多个 .proto 文件（全量提交） |
+| `scripts/<filename>` | file | 否 | 多个 .lua 文件（只提交 flow 引用到的） |
+| `adapter/<name>_codec.json` | file | 否 | 声明式 codec 配置，可多份（至少一份，否则启动前拦截） |
+| `adapter/errors.json` | file | 否 | 错误码映射（未配置则不下发） |
 
 **响应** `201 Created`：
 
 ```typescript
-interface CreateTaskResponse {
-  id: string;
-}
+interface CreateTaskResponse { id: string }
 ```
 
 ### 4.4 启动任务
@@ -268,11 +237,9 @@ interface CreateTaskResponse {
 POST /sbot/tasks/{id}/start
 ```
 
-**前端函数**：`startTask(id: string): Promise<StartTaskResponse>`
+**前端函数**：`startTask(id): Promise<StartTaskResponse>`
 
-无请求体。
-
-**响应** `202 Accepted`：
+无请求体。**响应** `202 Accepted`：
 
 ```typescript
 interface StartTaskResponse {
@@ -287,7 +254,7 @@ interface StartTaskResponse {
 POST /sbot/tasks/{id}/stop
 ```
 
-**前端函数**：`stopTask(id: string): Promise<TaskBrief>`
+**前端函数**：`stopTask(id): Promise<TaskBrief>`
 
 **响应** `202 Accepted`：返回当前 `TaskBrief`（含 `state: "stopping"`）。前端立即更新 store，无需等下一轮轮询。
 
@@ -299,13 +266,15 @@ DELETE /sbot/tasks/{id}
 
 仅允许 `stopped` / `failed` 状态。**响应** `204 No Content`。
 
-### 4.7 任务配置下载
+### 4.7 任务配置读取
 
 ```
 GET /sbot/tasks/{id}/config/{path}
 ```
 
-**前端函数**：`taskConfigUrl(id: string, path: string): string`（返回 URL，用于 `<a>` 标签下载）。
+**前端函数**：
+- `getTaskConfigJson<T>(id, path): Promise<T>` -- 解析为 JSON
+- `taskConfigUrl(id, path): string` -- 返回 URL，用于 `<a>` 标签下载
 
 支持路径：`flow/flow.json`、`config.json`、`proto/<filename>`、`scripts/<filename>`。
 
@@ -321,53 +290,39 @@ GET /sbot/tasks/{id}/config/{path}
 GET /sbot/agents
 ```
 
-**前端函数**：`listAgents(): Promise<AgentsListResponse>`
+**前端函数**：`listAgents(signal?): Promise<AgentsListResponse>`
 
 **响应** `200 OK`：
 
 ```typescript
-interface AgentsListResponse {
-  items: AgentBrief[];
-}
+interface AgentsListResponse { items: AgentBrief[] }
 ```
 
-### 5.2 Agent 详情
-
-```
-GET /sbot/agents/{id}
-```
-
-**响应** `200 OK`：`AgentDetail`（含 `latestSystem?: SystemSnapshot`）。
-
-### 5.3 强制注销 Agent
+### 5.2 强制注销 Agent
 
 ```
 DELETE /sbot/agents/{id}
 ```
 
-**前端函数**：`deleteAgent(id: string): Promise<void>`
+**前端函数**：`deleteAgent(id): Promise<void>`
 
 仅允许 `offline` 状态。**响应** `204 No Content`。
 
-### 5.4 关闭单个 Agent
+### 5.3 关闭单个 Agent
 
 ```
 POST /sbot/agents/{id}/shutdown
 ```
 
-**前端函数**：`shutdownAgent(id: string): Promise<void>`
+**前端函数**：`shutdownAgent(id): Promise<void>`
 
-> 计划中未提及，实际实现。
-
-### 5.5 关闭所有 Agent
+### 5.4 关闭所有 Agent
 
 ```
 POST /sbot/agents/shutdown-all
 ```
 
 **前端函数**：`shutdownAllAgents(): Promise<{ succeeded: string[]; failed: string[] }>`
-
-> 计划中未提及，实际实现。
 
 ---
 
@@ -381,9 +336,7 @@ POST /sbot/agents/shutdown-all
 GET /sbot/metrics?taskId=task-01
 ```
 
-**前端函数**：`getClusterMetrics(params?: MetricsParams): Promise<StressAggregate>`
-
-> 计划中返回 `StressSnapshot`，实际返回 `StressAggregate`（包裹 `snapshot + reportingAgents + totalAgents`）。前端兼容新旧两种格式。
+**前端函数**：`getClusterMetrics(params?, signal?): Promise<StressAggregate>`
 
 **响应** `200 OK`：
 
@@ -392,10 +345,16 @@ interface StressAggregate {
   snapshot: StressSnapshot;
   reportingAgents: number;
   totalAgents: number;
+  offlineAgents: number;
+  assignedAgents: number;
+  freshAgents: number;
+  staleAgents: number;
+  coverageRatio: number;
+  asOf: string;
 }
 ```
 
-无 active 任务时返回空快照（字段全 0，actions 为空数组）。
+`parseStressAggregate` 负责把后端可能缺省的节点健康字段归一为安全数值。无 active 任务时返回空快照（字段全 0，actions 为空数组）。
 
 ### 6.2 各 Agent 压测指标
 
@@ -403,7 +362,7 @@ interface StressAggregate {
 GET /sbot/metrics/agents?taskId=task-01
 ```
 
-**前端函数**：`getPerAgentMetrics(params?: MetricsParams): Promise<PerAgentMetrics>`
+**前端函数**：`getPerAgentMetrics(params?, signal?): Promise<PerAgentMetrics>`
 
 **响应** `200 OK`：
 
@@ -420,23 +379,15 @@ interface PerAgentMetricsItem {
 }
 ```
 
-### 6.3 单个 Agent 压测指标
-
-```
-GET /sbot/metrics/agents/{agentId}
-```
-
-**响应** `200 OK`：直接返回 `StressSnapshot`。
-
-### 6.4 文本摘要
+### 6.3 文本摘要
 
 ```
 GET /sbot/metrics/summary
 ```
 
-返回 `text/plain`，前端可用 `getText()` 获取。
+返回 `text/plain` 摘要。
 
-### 6.5 指标计算说明
+### 6.4 指标计算说明
 
 **Apdex**：当前展示的是 RTT Apdex，`(satisfied + tolerating * 0.5) / rttApdexSampleCount`。其中 `rttApdexSampleCount = rttSampleCount + rttFailedCount`；无响应帧的失败请求记 frustrated，进入 Apdex 分母但不进入 RTT 直方图。监听、单向发送和本地动作不打分。
 
@@ -458,25 +409,16 @@ GET /sbot/metrics/summary
 GET /sbot/system
 ```
 
-**前端函数**：`getClusterSystem(): Promise<ClusterSystemSnapshot>`
-
-**响应** `200 OK`：`ClusterSystemSnapshot`（见 §10 类型定义）。
+**前端函数**：`getClusterSystem(signal?): Promise<ClusterSystemSnapshot>`；`parseClusterSystemSnapshot` 做字段归一。
 
 ### 7.2 各 Agent 系统指标
 
 ```
 GET /sbot/system/agents
-```
-
-**响应** `200 OK`：`PerAgentSystem`（见 §10 类型定义）。
-
-### 7.3 单个 Agent 系统指标
-
-```
 GET /sbot/system/agents/{agentId}
 ```
 
-**响应** `200 OK`：`SystemSnapshot`。
+`GET /sbot/system/agents` 返回 `PerAgentSystem`；单 Agent 端点返回 `SystemSnapshot`（在 OpenAPI 契约中定义，前端当前经聚合视图消费）。
 
 ---
 
@@ -490,7 +432,7 @@ GET /sbot/system/agents/{agentId}
 GET /sbot/history?limit=20&offset=0&state=stopped&tags=v1.2&starred=true
 ```
 
-**前端函数**：`listHistory(filter?: HistoryFilter): Promise<HistoryListResponse>`
+**前端函数**：`listHistory(filter?, init?): Promise<HistoryListResponse>`
 
 **Query 参数**（全部可选）：
 
@@ -499,8 +441,7 @@ GET /sbot/history?limit=20&offset=0&state=stopped&tags=v1.2&starred=true
 | `limit` | int | 默认 20，最大 100 |
 | `offset` | int | 偏移量 |
 | `state` | string | `stopped` / `failed` |
-| `startedAfter` | RFC3339 | 起始时间 >= |
-| `startedBefore` | RFC3339 | 起始时间 <= |
+| `startedAfter` / `startedBefore` | RFC3339 | 起始时间过滤 |
 | `tags` | string（可重复） | 任意一个匹配 |
 | `tagsAll` | string（可重复） | 全部匹配 |
 | `starred` | bool | 仅收藏 |
@@ -515,7 +456,7 @@ GET /sbot/history/{id}
 GET /sbot/history/{id}?stageIndex=2   // reset 任务的第 2 段段落详情
 ```
 
-**前端函数**：`getHistory(id: string, stageIndex?: number): Promise<HistoryDetail>`
+**前端函数**：`getHistory(id, stageIndex?, init?): Promise<HistoryDetail>`
 
 `stageIndex > 0` 时返回该 reset 段落详情，响应附带 `recordKind="stage"` / `stageIndex` / `stageLabel` / `stageFrom` / `stageTo`，`totalBots` 为该段峰值机器人数。
 
@@ -526,7 +467,7 @@ PUT /sbot/history/{id}
 PUT /sbot/history/{id}?stageIndex=2   // 更新 reset 任务第 2 段的收藏/标签/备注
 ```
 
-**前端函数**：`updateHistory(id: string, req: UpdateHistoryRequest, stageIndex?: number): Promise<HistoryDetail>`
+**前端函数**：`updateHistory(id, req, stageIndex?, init?): Promise<HistoryDetail>`
 
 **请求体**（所有字段可选，部分更新）：
 
@@ -538,8 +479,7 @@ interface UpdateHistoryRequest {
 }
 ```
 
-> 含 `reset` 的渐进式加压任务，收藏/标签/备注**分属各阶段段落**：带 `stageIndex>0` 时写入段落级元数据
-> （`task_stage_meta`），不带或 `<=0` 时写入任务级（`task_history`）。返回更新后的对应（段落或整体）详情。
+> 含 `reset` 的渐进式加压任务，收藏/标签/备注**分属各阶段段落**：带 `stageIndex>0` 时写入段落级元数据（`task_meta`），不带或 `<=0` 时写入任务级。返回更新后的对应（段落或整体）详情。
 
 ### 8.4 删除历史记录
 
@@ -547,7 +487,7 @@ interface UpdateHistoryRequest {
 DELETE /sbot/history/{id}?force=false
 ```
 
-**前端函数**：`deleteHistory(id: string, force?: boolean): Promise<void>`
+**前端函数**：`deleteHistory(id, force?): Promise<void>`
 
 starred=true 时必须 `?force=true`。
 
@@ -558,17 +498,20 @@ GET /sbot/history/{id}/timeseries
 GET /sbot/history/{id}/timeseries?stageIndex=2   // 仅第 2 段采样点
 ```
 
-**前端函数**：`getHistoryTimeseries(id: string, maxPoints?: number, stageIndex?: number): Promise<TimeseriesResponse>`
+**前端函数**：`getHistoryTimeseries(id, maxPoints?, stageIndex?): Promise<TimeseriesResponse>`
 
 `stageIndex > 0` 时仅返回该 reset 段落的采样点；采样点 `stageIndex` 字段表示其所属段落号（非 reset 任务恒为 -1）。
 
 ### 8.6 配置归档
 
 ```
-GET /sbot/history/{id}/config
+GET /sbot/history/{id}/config          // 配置摘要（HistoryConfigSummary）
+GET /sbot/history/{id}/config/archive  // 完整归档（proto/scripts 文件内容）
 ```
 
-**前端函数**：`getHistoryConfig(id: string): Promise<HistoryConfigArchive>`
+**前端函数**：
+- `getHistoryConfig(id, init?): Promise<HistoryConfigSummary>`
+- `getHistoryConfigArchive(id): Promise<HistoryConfigArchive>`
 
 ### 8.7 克隆历史任务
 
@@ -577,7 +520,7 @@ POST /sbot/history/{id}/clone
 Content-Type: application/json
 ```
 
-**前端函数**：`cloneHistory(id: string, req?: HistoryCloneRequest): Promise<{ id: string }>`
+**前端函数**：`cloneHistory(id, req?): Promise<{ id: string }>`
 
 ### 8.8 多任务对比
 
@@ -586,7 +529,7 @@ GET /sbot/history/compare?ids=task-a,task-b,task-c
 GET /sbot/history/compare?targets=task-a:-1,task-b:2   // 支持阶段段落对比
 ```
 
-**前端函数**：`compareHistory(targets: CompareTarget[]): Promise<HistoryCompareResponse>`，其中 `CompareTarget = string | { id: string; stageIndex?: number }`。
+**前端函数**：`compareHistory(targets: CompareTarget[], init?): Promise<HistoryCompareResponse>`，其中 `CompareTarget = string | { id: string; stageIndex?: number }`。
 
 2~5 个对比目标。`targets=id:stageIndex` 中 `stageIndex=-1` 表示整体、`>0` 表示该 reset 段落；任一目标带段号即走 `targets=`，否则沿用旧 `ids=`。响应每项附带 `parentId` / `stageIndex` / `stageLabel`。
 
@@ -607,583 +550,92 @@ GET /sbot/history/{id}/agents?stageIndex=2   // 第 2 段段落节点报告
 
 ---
 
-## 9. 日志查看器 API
+## 9. 流程模板库 API
 
-源文件：`cmd/web/src/services/logsApi.ts`
+源文件：`cmd/web/src/services/flowsApi.ts`。服务器 MySQL 存储；服务器未配置时接口返回 `FLOW_LIBRARY_DISABLED`。
 
-### 9.1 查询 Admin 日志
+| 端点 | 前端函数 | 说明 |
+|---|---|---|
+| `GET /sbot/flows` | `listFlowTemplates(signal?)` | 流程模板列表（不含 flow/layout） |
+| `POST /sbot/flows` | `createFlowTemplate(req)` | 新建模板（name + flow + layout） |
+| `GET /sbot/flows/snapshot` | `getFlowSnapshot()` | 全量快照（含 revision） |
+| `PUT /sbot/flows/snapshot` | `replaceFlowSnapshot(req)` | 乐观锁整库替换（expectedRevision + idPolicy） |
+| `GET /sbot/flows/{id}` | `getFlowTemplate(id)` | 模板详情（含 flow/layout） |
+| `PUT /sbot/flows/{id}` | `updateFlowTemplate(id, req)` | 覆盖更新 |
+| `DELETE /sbot/flows/{id}` | `deleteFlowTemplate(id)` | 删除 |
 
-```
-GET /sbot/logs/admin?afterSeq=0&limit=200
-```
+流程模板只存 flow + layout，不内嵌 Lua/proto/adapter（资源走独立管理链路）。
 
-**前端函数**：`getAdminLogs(params?: LogQueryParams): Promise<LogQueryResult>`
+## 10. Action/Listen 模板库 API
 
-**Query 参数**：
+源文件：`cmd/web/src/services/templatesApi.ts`，导出 `actionTemplatesApi` 与 `listenTemplatesApi` 两组同构实例。两类模板存储均可用时 `capabilities.templateLibrary=true`，否则相关接口返回 `TEMPLATE_LIBRARY_DISABLED`。
 
-| 参数 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `afterSeq` | uint64 | `0` | 游标：仅返回 seq > afterSeq 的条目 |
-| `limit` | int | `200` | 最大返回条数（1~500） |
-| `level` | string | - | 日志等级过滤 |
-| `search` | string | - | 关键字搜索 |
+| 端点 | 说明 |
+|---|---|
+| `GET /sbot/action-templates` / `GET /sbot/listen-templates` | 模板列表 |
+| `POST /sbot/action-templates` / `POST /sbot/listen-templates` | 新建模板 |
+| `GET /sbot/action-templates/snapshot` / `GET /sbot/listen-templates/snapshot` | 全量快照（含 revision） |
+| `PUT /sbot/action-templates/snapshot` / `PUT /sbot/listen-templates/snapshot` | 乐观锁整库替换（`TemplateIdPolicy`: `preserve` / `generate-missing`） |
+| `GET /sbot/action-templates/{id}` / `GET /sbot/listen-templates/{id}` | 模板详情 |
+| `PUT /sbot/action-templates/{id}` / `PUT /sbot/listen-templates/{id}` | 覆盖更新 |
+| `DELETE /sbot/action-templates/{id}` / `DELETE /sbot/listen-templates/{id}` | 删除 |
 
-### 9.2 查询 Agent 日志（代理转发）
+冲突错误码：`TEMPLATE_NAME_CONFLICT`（同名）、`TEMPLATE_SNAPSHOT_CONFLICT`（快照 revision 过期，需刷新重试）。
 
-```
-GET /sbot/logs/agents/{id}?afterSeq=0&limit=200
-```
+## 11. 服务器能力与 Codec 元数据 API
 
-**前端函数**：`getAgentLogs(agentId: string, params?: LogQueryParams): Promise<LogQueryResult>`
-
-### 9.3 列出 Admin 日志文件
-
-```
-GET /sbot/logs/admin/files
-```
-
-**前端函数**：`getAdminLogFiles(): Promise<LogFileInfo[]>`
-
-### 9.4 列出 Agent 日志文件
+### 11.1 服务器能力
 
 ```
-GET /sbot/logs/agents/{id}/files
+GET /sbot/capabilities
 ```
 
-**前端函数**：`getAgentLogFiles(agentId: string): Promise<LogFileInfo[]>`
-
-### 9.5 下载日志文件
-
-```
-GET /sbot/logs/admin/files/{name}
-GET /sbot/logs/agents/{id}/files/{name}
-```
-
-返回 `text/plain` + `Content-Disposition` 下载头。
-
----
-
-## 10. 完整 TypeScript 类型定义
-
-源文件：`cmd/web/src/types/api.ts`
-
-### 10.1 基础枚举
+**前端函数**：`getCapabilities(init?): Promise<CapabilitiesResponse>`（类型直接取自生成契约 `components['schemas']['CapabilitiesResponse']`）
 
 ```typescript
-type TaskState = 'pending' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
-type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline';
-type TaskResult = 'completed' | 'stopped' | 'failed';
-type OS = 'windows' | 'linux' | 'darwin';
-type Arch = 'amd64' | 'arm64';
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-type ErrorKind = 'framework' | 'server';
-```
-
-### 10.2 通用错误
-
-```typescript
-interface ApiErrorBody {
-  code: string;
-  message: string;
-  details?: Record<string, unknown>;
+interface CapabilitiesResponse {
+  sharedState: boolean;      // 是否已配置共享状态（Redis）
+  sharedAddr?: string;       // 脱敏展示地址
+  flowLibrary: boolean;      // 服务器流程库是否启用
+  templateLibrary: boolean;  // 共享 Action/Listen 模板库是否启用
 }
 ```
 
-### 10.3 Task 相关类型
+启动任务前用它做 share 预检：脚本使用 `share` 但 `sharedState=false` 时前端提前拦截（`taskActions.ts:213-234`）。
 
-```typescript
-interface TaskBrief {
-  id: string;
-  name: string;
-  state: TaskState;
-  totalBots: number;
-  agentCount: number;
-  createdAt: string;
-  startedAt?: string;
-  stoppedAt?: string;
-}
+### 11.2 Codec 预览与算法元数据
 
-interface TaskConfig {
-  robotConfig: RobotConfig;
-  deadline?: string;
-  flowFiles: string[];
-}
+源文件：`cmd/web/src/services/codecApi.ts`
 
-interface RobotConfig {
-  concurrency: number;
-  timeoutSec: number;
-  accountPrefix?: string;
-  startNumber?: number;
-  mainService?: string;
-  stateExtra?: Record<string, string>;
-  heartbeatSec?: number;
-  httpTimeoutSec?: number;
-  apdexT?: number;
-  logLevel?: LogLevel;
-  debugMode?: boolean;
-  rampUp?: RampUpConfig;
-}
+| 端点 | 前端函数 | 说明 |
+|---|---|---|
+| `POST /sbot/codec/preview` | `previewCodec(req): Promise<PreviewResult>` | 纯计算：对样例输入跑声明式 codec 编解码预览 |
+| `GET /sbot/codec/algorithms` | `fetchCodecAlgorithms(): Promise<AlgoMeta[]>` | 可用压缩/加密算法元数据 |
 
-interface RampUpStage {
-  count: number;
-  concurrency?: number;
-  holdSec?: number;
-  reset?: boolean;
-}
+## 12. 基线资源 API
 
-interface RampUpConfig {
-  stages: RampUpStage[];
-}
+源文件：`cmd/web/src/services/baselineApi.ts`。从 Admin 或 Vite 中间件读取 `conf/` 目录下的基线资源，全部只读：
 
-interface Assignment {
-  taskId: string;
-  agentId: string;
-  agentName: string;
-  startNumber: number;
-  totalBots: number;
-}
+| 函数 | 路径 | 说明 |
+|---|---|---|
+| `fetchBaselineResource(kind, name)` | `/sbot/baseline/<dir>/<name>` | 三态单文件读取：`ok` / `missing`（服务器权威 404）/ `error`（网络失败，有无未知） |
+| `fetchBaselineFlow()` | `/sbot/baseline/flow/flow.json` | 基线 flow.json |
+| `fetchBaselineScriptIndex()` | `/sbot/baseline/scripts/index.json` | 脚本文件列表 |
+| `fetchBaselineScript(name)` | `/sbot/baseline/scripts/<name>` | 脚本内容 |
+| `fetchBaselineProtoIndex()` | `/sbot/baseline/proto/index.json` | proto 文件列表 |
+| `fetchBaselineProtoContent(name)` | `/sbot/baseline/proto/<name>` | proto 内容 |
+| `fetchBaselineCodecIndex()` | `/sbot/baseline/adapter/index.json` | adapter 文件列表 |
+| `fetchBaselineCodec(name)` | `/sbot/baseline/adapter/<name>` | 指定 codec/errors 文件 |
 
-interface TaskCompletionReport {
-  agentId: string;
-  taskId: string;
-  result: TaskResult;
-  errorMsg?: string;
-  finishedAt: string;
-}
+三态接口的用途：删除对账必须区分「服务器说没有」（404，可删本地）与「请求失败」（断网/5xx，服务器上到底有没有未知，不得删本地）。index 系列返回 `null` 表示请求失败，返回 `string[]`（含空数组）表示服务器权威清单。
 
-interface TaskDetail extends TaskBrief {
-  config: TaskConfig;
-  assignments: Assignment[];
-  errorMsg?: string;
-  reports?: Record<string, TaskCompletionReport>;
-  agentEvents?: AgentEvent[];
-}
+不存在「写基线」的独立 HTTP 端点：基线写入只发生在创建任务时（后端 `writeBaselineFiles`）。
 
-interface TasksListResponse {
-  total: number;
-  items: TaskBrief[];
-}
-
-interface CreateTaskResponse {
-  id: string;
-}
-
-interface StartTaskResponse {
-  taskId: string;
-  assignments: Assignment[];
-}
-```
-
-### 10.4 Agent 相关类型
-
-```typescript
-interface AgentEvent {
-  agentId: string;
-  agentName: string;
-  type: string;       // "offline" | "reconnected" | "deregistered" | "restarted"
-  timestamp: string;
-  detail?: string;
-}
-
-interface StaticInfo {
-  hostname: string;
-  os: OS;
-  arch: Arch;
-  numCpu: number;
-  memTotalMB: number;
-  goVersion: string;
-  kernelVer: string;
-  startedAt: string;
-}
-
-interface AgentBrief {
-  agentId: string;
-  name: string;
-  address: string;
-  appVersion: string;
-  maxBots: number;
-  status: AgentStatus;
-  currentTaskId?: string;
-  currentBots: number;
-  staticInfo: StaticInfo;
-  lastHeartbeatAt: string;
-  stressUpdatedAt?: string;
-  systemUpdatedAt?: string;
-  cpuPercent?: number;
-  memPercent?: number;
-  numGoroutine?: number;
-}
-
-interface AgentDetail extends AgentBrief {
-  latestSystem?: SystemSnapshot;
-}
-
-interface AgentsListResponse {
-  items: AgentBrief[];
-}
-```
-
-### 10.5 压测指标类型
-
-```typescript
-interface RobotsView {
-  started: number;
-  running: number;
-  stopped: number;
-  errored: number;
-}
-
-interface ConnectionsView {
-  established: number;
-  failed: number;
-  dropped: number;
-}
-
-interface BandwidthView {
-  totalSendBytes: number;
-  totalRecvBytes: number;
-  sendMBps: number;
-  recvMBps: number;
-}
-
-interface HistogramView {
-  count: number;
-  minMs: number | null;
-  maxMs: number | null;
-  avgMs: number | null;
-  p50Ms: number | null;
-  p90Ms: number | null;
-  p95Ms: number | null;
-  p99Ms: number | null;
-}
-
-interface ErrorEntry {
-  code: number;
-  codeName: string;
-  msgs: string[];
-  count: number;
-}
-
-interface ActionMetric {
-  name: string;
-  sampleCount: number;
-  successCount: number;
-  failureCount: number;
-  timeoutCount: number;
-  canceledCount: number;
-  executing: number;
-  successRate: number;
-  kind: 'networked' | 'listen' | 'send' | 'local';
-  rttApdex: number;
-  rttApdexSampleCount: number;
-  rttSampleCount: number;
-  rtt: HistogramView;
-  listenWait: HistogramView;
-  listenWaitSampleCount: number;
-  totalDuration: HistogramView;
-  totalDurationSampleCount: number;
-  nonRTTAvgMs: number;
-  buildAvgMs: number;
-  encodeAvgMs: number;
-  sendAvgMs: number;
-  decodeWaitAvgMs: number;
-  decodeAvgMs: number;
-  dispatchToActionWaitAvgMs: number;
-  parseStoreAvgMs: number;
-  avgQps: number;
-  avgSendBytes: number; // 平均每次已记录动作发送的 WireBytes
-  avgRecvBytes: number; // 平均每次已记录动作接收的 WireBytes
-  timeoutAvgMs: number;
-  errors?: ErrorEntry[];
-}
-
-interface SnapshotMetricsSummary {
-  sampleCount: number;
-  successCount: number;
-  failureCount: number;
-  timeoutCount: number;
-  canceledCount: number;
-  successRate: number;
-  rttApdex: number;
-  rttApdexSampleCount: number;
-  rtt: HistogramView;
-  listenWait: HistogramView;
-  totalDuration: HistogramView;
-  nonRTTAvgMs: number;
-  clientCostCount: number;
-  avgQps: number;
-}
-
-interface StressSnapshot {
-  timestamp: string;
-  collectionEpoch: number;
-  uptimeSeconds: number;
-  totalActions: number;
-  apdexT: number;
-  timingDetail: 'rtt' | 'codec' | 'full';
-  summary: SnapshotMetricsSummary;
-  robots: RobotsView;
-  connections: ConnectionsView;
-  bandwidth: BandwidthView;
-  actions: ActionMetric[];
-  window: ReportWindowView | null;
-}
-
-interface StressAggregate {
-  snapshot: StressSnapshot;
-  reportingAgents: number;
-  totalAgents: number;
-  offlineAgents: number;
-  assignedAgents: number;
-  freshAgents: number;
-  staleAgents: number;
-  coverageRatio: number;
-  asOf: string;
-}
-
-interface PerAgentMetricsItem {
-  agentId: string;
-  agentName: string;
-  snapshot: StressSnapshot;
-  updatedAt: string;
-}
-
-interface PerAgentMetrics {
-  items: PerAgentMetricsItem[];
-}
-```
-
-### 10.6 系统指标类型
-
-```typescript
-interface SystemSnapshot {
-  timestamp: string;
-  cpuPercent: number;
-  cpuPerCore: number[];
-  loadAvg1: number;
-  loadAvg5: number;
-  loadAvg15: number;
-  memTotalMB: number;
-  memUsedMB: number;
-  memPercent: number;
-  swapUsedMB: number;
-  processRssMB: number;
-  processHeapMB: number;
-  processSysMB: number;
-  numGoroutine: number;
-  numThread: number;
-  numFd: number;
-  netSendKBps: number;
-  netRecvKBps: number;
-  gcCount: number;
-  gcPauseAvgMs: number;
-}
-
-interface ClusterSystemSnapshot {
-  timestamp: string;
-  agentCount: number;
-  onlineCount: number;
-  offlineCount: number;
-  totalMemMB: number;
-  usedMemMB: number;
-  avgCpuPercent: number;
-  maxCpuPercent: number;
-  totalNetSendKBps: number;
-  totalNetRecvKBps: number;
-  totalGoroutines: number;
-  totalThreads: number;
-  totalFds: number;
-  hotAgentId?: string;
-  hotAgentName?: string;
-}
-
-interface PerAgentSystemItem {
-  agentId: string;
-  agentName: string;
-  status: AgentStatus;
-  snapshot: SystemSnapshot;
-  updatedAt: string;
-  isStale: boolean;
-}
-
-interface PerAgentSystem {
-  items: PerAgentSystemItem[];
-}
-```
-
-### 10.7 历史记录类型
-
-```typescript
-interface ConfigSummary {
-  concurrency: number;
-  timeoutSec: number;
-  flowSizeKB: number;
-  protoCount: number;
-  scriptCount: number;
-}
-
-interface HistoryRecord {
-  id: string;
-  name: string;
-  state: 'stopped' | 'failed';
-  totalBots: number;
-  agentCount: number;
-  createdAt: string;
-  startedAt?: string;
-  stoppedAt?: string;
-  durationSec: number;
-  errorMsg?: string;
-  starred: boolean;
-  tags: string[];
-  note?: string;
-  configSummary: ConfigSummary;
-  stageCount?: number;
-  // 阶段历史展示字段（仅含 reset 的渐进式加压任务）
-  recordKind?: 'task' | 'stage';
-  parentId?: string;
-  stageIndex?: number;
-  stageLabel?: string;     // 如「段 2 · S3-S4」
-  stageFrom?: number;
-  stageTo?: number;
-  hasResetStages?: boolean;
-  children?: HistoryRecord[];  // includeStages 时填充
-}
-
-interface HistoryListResponse {
-  total: number;
-  items: HistoryRecord[];
-}
-
-interface HistoryAgentReport {
-  agentId: string;
-  agentName: string;
-  result: TaskResult;
-  errorMsg?: string;
-  finishedAt: string;
-  finalSnapshot: StressSnapshot;
-}
-
-interface HistoryDetail extends HistoryRecord {
-  assignments: Array<{
-    taskId: string;
-    agentId: string;
-    agentName?: string;
-    startNumber: number;
-    totalBots: number;
-  }>;
-  agentReports: HistoryAgentReport[];
-  agentEvents?: AgentEvent[];
-  finalSnapshot: StressSnapshot;
-  finalSystem: ClusterSystemSnapshot;
-}
-
-interface HistoryFilter {
-  state?: 'stopped' | 'failed';
-  startedAfter?: string;
-  startedBefore?: string;
-  tags?: string[];
-  tagsAll?: string[];
-  starred?: boolean;
-  search?: string;
-  orderBy?: string;
-  limit?: number;
-  offset?: number;
-}
-
-interface UpdateHistoryRequest {
-  starred?: boolean;
-  tags?: string[];
-  note?: string;
-}
-
-interface HistoryTagsResponse {
-  tags: string[];
-}
-
-interface TimeseriesPoint {
-  taskId: string;
-  sampledAt: string;
-  elapsedSec: number;
-  dataType: 'stress' | 'system';
-  snapshot: StressSnapshot | ClusterSystemSnapshot;
-}
-
-interface TimeseriesResponse {
-  taskId: string;
-  stress: TimeseriesPoint[];
-  system: TimeseriesPoint[];
-}
-
-interface HistoryConfigArchive {
-  taskId: string;
-  name: string;
-  totalBots: number;
-  robotConfig: RobotConfig;
-  flowJson: unknown;
-  protoFiles: Record<string, string>;
-  scripts: Record<string, string>;
-}
-
-interface HistoryCloneRequest {
-  name?: string;
-}
-
-interface HistoryCompareResponse {
-  tasks: HistoryDetail[];
-  diff: {
-    actions: Record<string, number[]>;
-  };
-}
-```
-
-### 10.8 日志类型
-
-```typescript
-interface LogField {
-  key: string;
-  value: string;
-}
-
-interface LogEntry {
-  level: string;
-  time: string;
-  caller?: string;
-  message: string;
-  service?: string;
-  fields?: LogField[];
-}
-
-interface LogQueryResult {
-  entries: LogEntry[];
-  hasMore: boolean;
-  nextSeq: number;
-}
-
-interface LogFileInfo {
-  name: string;
-  size: number;
-  modTime: string;
-}
-```
-
-### 10.9 任务冲突 details 类型
-
-```typescript
-interface TaskConflictDetails {
-  activeTaskId: string;
-  activeName: string;
-  activeState: TaskState;
-  startedAt: string;
-}
-```
-
----
-
-## 11. 运行时状态管理
+## 13. 运行时状态管理
 
 源文件：`cmd/web/src/services/runtimeStore.ts`
 
-### 11.1 RuntimeMode 状态机
+### 13.1 RuntimeMode 状态机
 
 ```typescript
 type RuntimeMode = 'edit' | 'viewActive' | 'running' | 'finalReport';
@@ -1191,39 +643,43 @@ type RuntimeMode = 'edit' | 'viewActive' | 'running' | 'finalReport';
 
 | Mode | 触发 | 行为 |
 |---|---|---|
-| `edit` | 默认；stopTask 完成后 | FlowEditor 可编辑；仅轮询 agents/system（10s） |
-| `viewActive` | 发现已有 active 任务 | FlowEditor 只读；5s 轮询 |
+| `edit` | 默认；任务终态退出后 | FlowEditor 可编辑；仅轮询 agents/system（10s） |
+| `viewActive` | 发现已有 active 任务（attachToActive） | FlowEditor 只读；5s 轮询 |
 | `running` | 当前会话 startTask 成功 | 同上 |
 | `finalReport` | 任务终态 | 停止轮询；保留最后数据 |
 
-### 11.2 RuntimeState 完整字段
+`starting` / `stopping` 是后端 TaskState 值，不属于 RuntimeMode。运行中可「临时返回编辑」（`detachToEdit` 保留 `detachedActiveTask` 供无刷新重新进入监控），终态退出用 `detachFromActive`，彻底清空用 `reset`。
+
+### 13.2 RuntimeState 主要字段
 
 ```typescript
 interface RuntimeState {
   mode: RuntimeMode;
-  activeTask: TaskBrief | null;
-  ownedTaskId: string | null;
+  activeTask: TaskBrief | null;        // 当前查看的 active 任务
+  detachedActiveTask: TaskBrief | null; // 临时返回编辑时保留的任务引用
+  ownedTaskId: string | null;          // 本端发起的任务 ID（停止校验用）
   taskName: string;
   totalBots: number;
   robotConfig: RobotConfig;
   deadline: string | null;
+  rampUpEnabled: boolean;              // 渐进加压开关（持久化）
+  rampUpStages: RampUpStage[];         // 阶段配置（持久化）
   latestStress: StressSnapshot | null;
   latestSystem: ClusterSystemSnapshot | null;
   agents: AgentBrief[];
-  stressHistory: StressSnapshot[];     // 滑窗 60 点
-  systemHistory: ClusterSystemSnapshot[];  // 滑窗 60 点
-  connectionLost: boolean;
+  agentsLoaded: boolean;               // 区分「还没拿到」与「拿到了、集群确实空」
+  connectionLost: boolean;             // 连续查询失败横幅
   agentEvents: AgentEvent[];
-  reportingAgents: number;
+  reportingAgents: number;             // 节点健康（来自 StressAggregate）
   totalAgents: number;
   offlineAgents: number;
   assignedAgents: number;
 }
 ```
 
-### 11.3 轮询策略
+### 13.3 轮询策略
 
-`pollingPolicy(mode)` 函数集中决定四组轮询开关和间隔：
+`pollingPolicy(mode)`（`runtimeStore.ts:317-352`）集中决定四组轮询开关和间隔：
 
 | Mode | pollStress | pollSystem | pollAgents | pollActiveTask | 间隔 |
 |---|---|---|---|---|---|
@@ -1232,216 +688,99 @@ interface RuntimeState {
 | `viewActive` | true | true | true | true | 5s |
 | `finalReport` | false | false | false | false | 30s |
 
-### 11.4 持久化
+React Query 全局默认（`queryClient.ts`）：`retry` 2 次（AbortError 永不重试）、`retryDelay` 指数退避封顶 3s、`gcTime` 10 分钟、`refetchOnWindowFocus` 关闭（关窗不重取）、断线重连时重取。mutations 不重试。
 
-仅缓存"启动表单"四个字段到 `localStorage`（key `stressbot:runtime-form`）：
-`taskName` / `totalBots` / `robotConfig` / `deadline`。
+### 13.4 持久化
 
-运行态字段（mode / activeTask / agents 等）不持久化，每次刷新从 admin 重拉。
+仅缓存"启动表单"到 `localStorage`（key `stressbot:runtime-form`，version 4）：
+`taskName` / `totalBots` / `robotConfig` / `deadline` / `rampUpEnabled` / `rampUpStages`。
 
----
+运行态字段（mode / activeTask / agents 等）不持久化，每次刷新从 Admin 重拉。反序列化时与 `DEFAULT_ROBOT_CONFIG` 合并，老版本缺的新字段自动补全，用户已设置的字段不覆盖。
 
-## 12. 任务启停编排
+## 14. 任务启停编排
 
 源文件：`cmd/web/src/services/taskActions.ts`
 
-### 12.1 startTask 流程
+### 14.1 startTask 流程
 
 ```typescript
 async function startTask(opts: StartTaskOptions): Promise<string>
 ```
 
-完整流程：
-1. `flowStore.toTaskFlow()` + `validateFlow()` 校验
-2. `clearMonitorData()` + 清 metricsProvider
-3. `syncFlowScriptsToIdb()` 同步脚本
-4. 容量预检：`sum(online agents.maxBots) >= totalBots`
-5. 组装 multipart（flow.json + proto + scripts + `*_codec.json` + errors.json）
-6. `tasksApi.createTask(fd)` → `tasksApi.startTask(id)`
-7. 更新 runtimeStore：mode='running', ownedTaskId, activeTask
+完整流程（`taskActions.ts:100-297`，任意一步失败抛出，runtimeStore 不变更）：
+1. `syncProtosToIdb()` proto gap-fill（基线补缺不覆盖本地）；拉回新文件则重载 proto 注册表
+2. `validateFlow()` 校验，有 error 直接拒绝
+3. `syncFlowScriptsToIdb()` 脚本 gap-fill，仍缺失脚本则抛错
+4. proto import 依赖完整性校验（缺依赖拦截，不把残缺任务下发）
+5. codec 连接校验：flow 引用的每条 `<protocol>:<service>` 连接必须有对应 codec 文件
+6. 共享状态预检：脚本用 share 但服务器 `capabilities.sharedState=false` 时拦截
+7. 容量预检：`assignableCapacity(agents) >= totalBots`（口径与服务端分配一致，`taskCapacity.ts`）
+8. 组装 multipart（flow.json + 全量 proto + 引用到的 scripts + 全部 codec + errors.json）→ `tasksApi.createTask(fd)` → `markResourcesAsBaselineSynced` 刷新 baseHash → `tasksApi.startTask(id)`
+9. 更新 runtimeStore：清监控数据、mode='running'、ownedTaskId、activeTask
 
-### 12.2 stopTask 流程
+### 14.2 stopTask 流程
 
 ```typescript
-async function stopTask(taskId?: string): Promise<TaskBrief | null>
+async function stopTask(taskId?): Promise<TaskBrief | null>
 ```
 
 调用 `tasksApi.stopTask(id)`，立即更新 activeTask 到 store。
 
-### 12.3 attachToActive 流程
-
-```typescript
-async function attachToActive(taskId: string): Promise<void>
-```
+### 14.3 attachToActive 流程
 
 1. 拉 task detail
-2. stash 本地草稿到 LocalStorage
+2. stash 本地草稿到 LocalStorage（`stressbot:flow:stash`）
 3. 拉远端 flow.json → 替换 flowStore
 4. 同步脚本到 IDB
 5. 清监控数据
 6. 切 mode='viewActive'
-7. 回补时序历史
 
-### 12.4 草稿 stash/restore
+### 14.4 草稿 stash/restore
 
 - `restoreStashedDraft()`: 从 LocalStorage 恢复草稿
 - `hasStashedDraft()`: 检查是否有 stash
 
----
+## 15. IndexedDB 资源管理
 
-## 13. 基线资源 API
+源文件：`cmd/web/src/services/resourcesStore.ts`（详细机制见 `docs/resource-sync.md`）
 
-源文件：`cmd/web/src/services/baselineApi.ts`
-
-从 Admin 或 Vite 中间件读取 `conf/` 目录下的基线资源。
-
-| 函数 | 路径 | 说明 |
-|---|---|---|
-| `fetchBaselineFlow()` | `/sbot/baseline/flow/flow.json` | 基线 flow.json |
-| `fetchBaselineConfig()` | `/sbot/baseline/config.json` | 基线 config.json |
-| `fetchBaselineScriptIndex()` | `/sbot/baseline/scripts/index.json` | 脚本文件列表 |
-| `fetchBaselineScript(name)` | `/sbot/baseline/scripts/<name>` | 脚本内容 |
-| `fetchBaselineProtoIndex()` | `/sbot/baseline/proto/index.json` | proto 文件列表 |
-| `fetchBaselineProtoContent(name)` | `/sbot/baseline/proto/<name>` | proto 内容 |
-| `fetchBaselineCodecIndex()` | `/sbot/baseline/adapter/index.json` | adapter 文件列表 |
-| `fetchBaselineCodec(name)` | `/sbot/baseline/adapter/<name>` | 指定 codec/errors 文件 |
-
----
-
-## 14. IndexedDB 资源管理
-
-源文件：`cmd/web/src/services/resourcesStore.ts`
-
-### 14.1 双 DB 架构
+### 15.1 三库架构
 
 | 数据库 | Object Store | 内容 |
 |---|---|---|
 | `stressbot-resources-proto` | `data` | 用户上传的 .proto 文件 |
 | `stressbot-resources-scripts` | `data` | 用户上传/编辑的 .lua 脚本 |
-| `stressbot-resources-adapter` | `data` | `*_codec.json` / `errors.json` |
+| `stressbot-resources-adapter` | `data` | 多份 `*_codec.json` + 共享 `errors.json` |
 
-### 14.2 ResourceFile 数据模型
+### 15.2 ResourceFile 数据模型
 
 ```typescript
 interface ResourceFile {
-  name: string;        // 文件名（作为 IDB key）
-  content: string;     // utf-8 文本内容
-  size: number;        // 字节长度
-  uploadedAt: string;  // ISO 时间戳
+  name: string;         // 文件名（作为 IDB key）
+  content: string;      // utf-8 文本内容
+  size: number;         // 字节长度
+  uploadedAt: string;   // ISO 时间戳
+  baseHash?: string | null; // 上次确认同步到的服务器内容 hash
 }
 ```
 
-### 14.3 Proto 操作
+### 15.3 主要操作
 
-| 函数 | 说明 |
-|---|---|
-| `addProto(name, content)` | 添加单个 proto |
-| `addProtos(files)` | 批量添加 |
-| `getProto(name)` | 获取单个 |
-| `listProto()` | 列出全部（按 name 排序） |
-| `removeProto(name)` | 删除 |
-| `clearProto()` | 清空 |
+proto / script / adapter 各有一组 CRUD（`addXxx` / `addXxxFromBaseline` / `getXxx` / `listXxx` / `removeXxx` / `clearXxx` / `replaceXxxFiles`），adapter 侧另有 `getCodecSchema` / `setCodecSchema` / `clearCodecSchema` / `listCodecFiles` / `getErrorMap` / `setErrorMap` / `clearErrorMap`。写操作完成后经 `subscribe(fn)` 通知订阅方刷新。
 
-### 14.4 Script 操作
+### 15.4 Legacy 迁移
 
-| 函数 | 说明 |
-|---|---|
-| `addScript(name, content)` | 添加单个脚本 |
-| `addScripts(files)` | 批量添加 |
-| `getScript(name)` | 获取单个 |
-| `listScript()` | 列出全部 |
-| `removeScript(name)` | 删除 |
-| `clearScript()` | 清空 |
-
-### 14.5 Adapter 操作
-
-| 函数 | 说明 |
-|---|---|
-| `getCodecSchema(name)` | 获取单个 `*_codec.json` |
-| `setCodecSchema(name, content)` | 设置单个 `*_codec.json` |
-| `clearCodecSchema(name)` | 删除单个 codec 配置 |
-| `listCodecFiles()` | 列出全部 `*_codec.json` |
-| `getErrorMap()` | 获取共享 `errors.json` |
-| `setErrorMap(content)` | 设置共享 `errors.json` |
-| `clearErrorMap()` | 删除共享错误码映射 |
-
-### 14.6 基线同步
-
-`syncResourcesFromBaseline()` 对比 IDB 与基线，自动新增，冲突/删除返回给调用方。
-
-```typescript
-interface BaselineSyncResult {
-  added: Array<{ type: ResourceType; name: string }>;
-  unchanged: Array<{ type: ResourceType; name: string }>;
-  conflicts: SyncDiff[];
-  removed: SyncDiff[];
-}
-```
-
-### 14.7 变更订阅
-
-`subscribe(fn)` 注册回调，所有写操作完成后触发。
-
-### 14.8 Legacy 迁移
-
-模块加载时自动检测旧 `stressbot-resources` DB（v0 双 store），迁移 proto 数据到新 DB 后删除旧 DB。
-
----
-
-## 15. 脚本同步服务
-
-源文件：`cmd/web/src/services/scriptSync.ts`（由 `taskActions.ts` 引用）
-
-### 15.1 设计目标
-
-- flow 引用的脚本是唯一来源，IDB 是本地副本
-- IDB 已存在的脚本永不覆盖（保护用户编辑稿）
-- 缺失脚本从基线拉取
-
-### 15.2 脚本名扫描范围
-
-| 来源字段 | 说明 |
-|---|---|
-| `actions[].script` | lua 模式动作 |
-| `listens[].script` | lua 模式回调 |
-| `nodes[].condition`（`lua:` 前缀） | boolean/loop 条件 |
-| `nodes[].breakCondition`（`lua:` 前缀） | loop break 条件 |
-
-### 15.3 返回结果
-
-```typescript
-interface ScriptSyncResult {
-  added: string[];    // 从基线拉回并写入 IDB
-  skipped: string[];  // IDB 已有，未操作
-  missing: string[];  // 基线也拉不到
-}
-```
-
----
+模块加载时自动检测旧 `stressbot-resources` DB（v0 双 store），迁移数据到新库后删除旧 DB（`resourcesStore.ts:30,116`）。
 
 ## 16. 后端路由注册
 
-源文件：`admin/handlers.go`
+源文件：`admin/httpapi/routes.go`（`registerManagementRoutes`）。完整契约见 `api/admin/openapi.yaml`；`GET /sbot/openapi.yaml` 与 `GET /sbot/docs`（Swagger UI）随服务发布。
 
-### 16.1 完整路由表
-
-**Agent 上行**：
+**任务**：
 
 | 方法 | 路径 | Handler |
 |---|---|---|
-| POST | `/sbot/agent/register` | `handleAgentRegister` |
-| POST | `/sbot/agent/{id}/heartbeat` | `handleAgentHeartbeat` |
-| POST | `/sbot/agent/{id}/deregister` | `handleAgentDeregister` |
-| POST | `/sbot/agent/stress` | `handleAgentStressReport` |
-| POST | `/sbot/agent/system` | `handleAgentSystemReport` |
-| POST | `/sbot/agent/{id}/task/{tid}/done` | `handleAgentTaskDone` |
-| GET | `/sbot/agent/{id}/pending-task` | `handleAgentPendingTask` |
-
-**前端 - 任务**：
-
-| 方法 | 路径 | Handler |
-|---|---|---|
-| POST | `/sbot/tasks` | `handleCreateTask` |
+| POST | `/sbot/tasks` | `handleCreateTask`（含 `writeBaselineFiles` 写回基线） |
 | GET | `/sbot/tasks` | `handleListTasks` |
 | GET | `/sbot/tasks/{id}` | `handleGetTask` |
 | GET | `/sbot/tasks/{id}/config/{path...}` | `handleGetTaskConfig` |
@@ -1449,17 +788,16 @@ interface ScriptSyncResult {
 | POST | `/sbot/tasks/{id}/stop` | `handleStopTask` |
 | DELETE | `/sbot/tasks/{id}` | `handleDeleteTask` |
 
-**前端 - Agent**：
+**Agent**：
 
 | 方法 | 路径 | Handler |
 |---|---|---|
 | GET | `/sbot/agents` | `handleListAgents` |
-| GET | `/sbot/agents/{id}` | `handleGetAgent` |
 | DELETE | `/sbot/agents/{id}` | `handleDeleteAgent` |
 | POST | `/sbot/agents/{id}/shutdown` | `handleShutdownAgent` |
 | POST | `/sbot/agents/shutdown-all` | `handleShutdownAllAgents` |
 
-**前端 - 指标**：
+**指标**：
 
 | 方法 | 路径 | Handler |
 |---|---|---|
@@ -1477,27 +815,17 @@ interface ScriptSyncResult {
 |---|---|---|
 | GET | `/sbot/history` | `handleListHistory` |
 | GET | `/sbot/history/tags` | `handleGetHistoryTags` |
+| GET | `/sbot/history/compare` | `handleCompareHistory` |
 | GET | `/sbot/history/{id}` | `handleGetHistory` |
 | PUT | `/sbot/history/{id}` | `handleUpdateHistory` |
 | DELETE | `/sbot/history/{id}` | `handleDeleteHistory` |
 | GET | `/sbot/history/{id}/agents` | `handleGetHistoryAgents` |
 | GET | `/sbot/history/{id}/config` | `handleGetHistoryConfig` |
+| GET | `/sbot/history/{id}/config/archive` | `handleGetHistoryConfigArchive` |
 | GET | `/sbot/history/{id}/timeseries` | `handleGetHistoryTimeseries` |
 | POST | `/sbot/history/{id}/clone` | `handleCloneHistory` |
-| GET | `/sbot/history/compare` | `handleCompareHistory` |
 
-**日志**：
-
-| 方法 | 路径 | Handler |
-|---|---|---|
-| GET | `/sbot/logs/admin` | `handleGetAdminLogs` |
-| GET | `/sbot/logs/agents/{id}` | `handleGetAgentLogs` |
-| GET | `/sbot/logs/admin/files` | `handleListAdminLogFiles` |
-| GET | `/sbot/logs/admin/files/{name}` | `handleDownloadAdminLogFile` |
-| GET | `/sbot/logs/agents/{id}/files` | `handleListAgentLogFiles` |
-| GET | `/sbot/logs/agents/{id}/files/{name}` | `handleDownloadAgentLogFile` |
-
-**基线资源**：
+**基线资源（只读）**：
 
 | 方法 | 路径 | Handler |
 |---|---|---|
@@ -1508,53 +836,50 @@ interface ScriptSyncResult {
 | GET | `/sbot/baseline/adapter/index.json` | `handleBaselineCodecIndex` |
 | GET | `/sbot/baseline/adapter/{name}` | `handleBaselineCodecFile` |
 | GET | `/sbot/baseline/flow/flow.json` | `handleBaselineFlow` |
-| GET | `/sbot/baseline/config.json` | `handleBaselineConfig` |
 
-**其他**：
+**流程模板库**：`GET/POST /sbot/flows`、`GET/PUT /sbot/flows/snapshot`、`GET/PUT/DELETE /sbot/flows/{id}`（§9）。
 
-| 方法 | 路径 | Handler |
-|---|---|---|
-| POST | `/sbot/resources/baseline` | `handleUpdateBaseline` |
-| GET | `/sbot/api/error-codes` | `handleErrorCodeIndex` |
+**Action/Listen 模板库**：`GET/POST /sbot/action-templates`、`/sbot/listen-templates` 及其 `/snapshot`、`/{id}` 变体（§10）。
 
----
+**能力与 Codec**：`GET /sbot/capabilities`、`POST /sbot/codec/preview`、`GET /sbot/codec/algorithms`（§11）。
+
+**错误码**：`GET /sbot/api/error-codes`（`handleErrorCodeIndex`）。
+
+Agent 上行（注册/心跳/指标上报/任务完成）不走这些 HTTP 路由——Admin-Agent 控制面是 gRPC 长连接（`admin/grpcapi/`），对浏览器不可见。
 
 ## 17. 接口分组与页面映射
 
 | 页面/组件 | 主要 API | 辅助 API |
 |---|---|---|
-| EditorPage（HomeShellInner） | `agents`, `system`, `tasks` | — |
+| EditorPage（HomeShellInner） | `agents`, `system`, `tasks`（useRuntimeQueries） | — |
 | RuntimeBar | `tasks`, `metrics` | — |
-| TaskStartModal | `tasks` (create+start), `agents` (容量预检) | `resourcesStore` |
+| TaskStartModal | `tasks` (create+start), `agents` (容量预检) | `capabilities`（share 预检）, `resourcesStore` |
 | ActiveTaskGuardModal | `tasks` (list+get) | — |
-| MonitorDock（大盘/动作/错误/趋势/per-Agent/系统） | `metrics`, `system`, `agents` | — |
-| ResourcesDrawer | `baselineApi` (基线同步), `resourcesStore` (IDB) | — |
-| HistoryModal | `history` (list/detail/clone/compare/timeseries) | — |
+| MonitorDock（负载/吞吐/质量/动作表/系统） | `metrics`, `system`, `agents` | — |
+| ResourcesDrawer / ProtocolConfigEditor | `baselineApi` (基线同步), `resourcesStore` (IDB) | — |
+| FlowManagerModal | `flowsApi`（服务器流程库） | — |
+| NodePalette 模板区 | `templatesApi`（服务器模板库） | `capabilities` |
+| HistoryModal / HistoryDetailView | `history` (list/detail/clone/compare/timeseries/config/archive) | — |
 | AgentsPanel | `agents` (list/delete/shutdown) | — |
-
----
+| NotepadTab | 本地（无后端 API） | — |
 
 ## 18. 错误处理策略
 
-### 18.1 全局错误拦截
+### 18.1 集中展现
 
-所有 API 调用通过 `services/api.ts` 的 `request()` 函数统一拦截：
-
-- 非 2xx 响应：解析 JSON body 为 `ApiError` 抛出
-- 网络错误：包装为 `{ code: 'NETWORK_ERROR', status: 0 }`
-- `204 No Content`：返回 `undefined`
+`services/errorHandler.ts` 的 `showApiError` 按 `TOAST_MAP` 把错误码翻译成中文提示；message/modal 实例由 App 顶层注入（动态主题），未注入时回退静态实例。
 
 ### 18.2 TASK_CONFLICT 特殊处理
 
-`TASK_CONFLICT` 错误走 `Modal.confirm`，让用户选择"查看运行中"或"留在编辑态"。`details` 含 `activeTaskId` / `activeName` / `activeState` / `startedAt`。
+`TASK_CONFLICT` 走 `Modal.confirm`，让用户选择"查看运行中"或"留在编辑态"。`details` 含 `activeTaskId` / `activeName` / `activeState` / `startedAt`。处理器经 `registerTaskConflictHandler` 注入（避免 services 反向依赖 store）。
 
 ### 18.3 轮询失败处理
 
 | 场景 | 策略 |
 |---|---|
-| 单次失败 | 静默吞掉 |
-| 连续失败 >= 3 次 | UI 顶部显示红色横条 |
-| 恢复成功 | 红条消失，toast "已恢复连接" |
+| 单次失败 | 静默吞掉（React Query retry 2 次后放弃） |
+| 连续失败 | UI 顶部显示红色横幅（`connectionLost`） |
+| 恢复成功 | 红条消失 |
 
 ### 18.4 空快照守门
 

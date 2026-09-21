@@ -122,3 +122,24 @@ taskWorkDir = ""
   # taskReportTimeout 任务结束后最终报告的确认超时。
   # Agent 完成任务后会向 Admin 发送最终报告并等待确认，超时则放弃确认。
   taskReportTimeout = "30s"
+
+# ─── 高级：gnet 网络引擎调优 ────────────────────────────
+# 一般无需修改。仅在万级以上并发或超大协议包场景下酌情调整。
+# Agent 按节点机器规格调优；单机模式对应 stressbot.toml 的 [network] 段。
+[network]
+# readBufferCap gnet 读缓冲区容量（字节）。gnet 事件循环读取网络数据时的缓冲区大小。
+readBufferCap = 32768
+
+# writeBufferCap gnet 写缓冲区容量（字节）。
+writeBufferCap = 32768
+
+# numEventLoop gnet 事件循环（event loop）数量。
+# 0 = 自动取 runtime.NumCPU()（CPU 核数）。一般无需手动设置。
+numEventLoop = 0
+
+# maxConcurrentDials 同一时刻允许阻塞在拨号阶段的连接数上限。
+# 超出此上限的拨号请求会被阻塞排队，防止瞬时大量连接打爆系统。
+maxConcurrentDials = 512
+
+# maxBodyLen 单个协议包最大 body 字节数。超过此大小的包会被拒绝解析（防损坏帧撑爆内存）。
+maxBodyLen = 16777216

@@ -165,7 +165,7 @@ func NewRobot(parent context.Context, cfg Config, flow *flowdef.TaskFlow, factor
 	// stateExtra 先写，保留键后写：id / index / account 由框架按机器人身份分配，
 	// 被配置覆盖后整批机器人会共用同一身份，日志与服务端会话全部对不上。
 	for k, v := range cfg.StateExtra {
-		if _, reserved := reservedStateKeys[k]; reserved {
+		if flowdef.IsProtectedStateKey(k) {
 			stresslog.Warn("[ROBOT] stateExtra 键与框架保留键冲突，已忽略",
 				zap.Int("id", cfg.ID), zap.String("key", k))
 			continue
@@ -297,13 +297,6 @@ func (r *Robot) Wait() {
 // 代价：LState 不归还到池、state 不清空（避免与卡死的 goroutine 并发访问），
 // 进程退出时由 OS 回收，轻微资源泄漏可接受。
 const robotCloseTimeout = 10 * time.Second
-
-// reservedStateKeys 由框架按机器人身份写入、不允许 stateExtra 覆盖的 state 键。
-var reservedStateKeys = map[string]struct{}{
-	"id":      {},
-	"index":   {},
-	"account": {},
-}
 
 // defaultListenQueueSize 监听缓存队列默认容量，缺省等价于旧单槽语义。
 // 与 network.defaultListenQueueSize 保持一致（同值，独立定义避免跨包依赖未导出符号）。

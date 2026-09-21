@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"stressbot/config"
 	"stressbot/internal/stresslog"
 	"stressbot/monitor"
+	"stressbot/network"
 	"stressbot/robot"
 	"stressbot/state/shared"
 )
@@ -29,15 +31,6 @@ type Settings struct {
 	RampUp     *robot.RampUpConfig `toml:"rampUp"`
 }
 
-// NetworkConfig 定义 gnet 网络引擎调优参数。
-type NetworkConfig struct {
-	ReadBufferCap      int `toml:"readBufferCap"`
-	WriteBufferCap     int `toml:"writeBufferCap"`
-	NumEventLoop       int `toml:"numEventLoop"`
-	MaxConcurrentDials int `toml:"maxConcurrentDials"`
-	MaxBodyLen         int `toml:"maxBodyLen"`
-}
-
 // Config 是 stressbot.toml 的根配置。
 type Config struct {
 	Log        *stresslog.Config        `toml:"log"`
@@ -45,7 +38,7 @@ type Config struct {
 	Pprof      *config.PprofConfig      `toml:"pprof"`
 	Standalone *Settings                `toml:"standalone"`
 	Redis      *shared.RedisConfig      `toml:"redis"`
-	Network    NetworkConfig            `toml:"network"`
+	Network    network.EngineConfig     `toml:"network"`
 	Daemon     bool                     `toml:"daemon"`
 }
 
@@ -88,6 +81,11 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		if sum != s.Bot.TotalBots {
 			return nil, fmt.Errorf("standalone.rampUp.stages 各阶段 count 之和 (%d) 不等于 standalone.bot.totalBots (%d)", sum, s.Bot.TotalBots)
+		}
+	}
+	if cfg.Monitor != nil {
+		if _, err := config.ParsePositiveDuration(cfg.Monitor.ReportInterval, 5*time.Second, "monitor.reportInterval"); err != nil {
+			return nil, err
 		}
 	}
 	return cfg, nil

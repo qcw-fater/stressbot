@@ -1,0 +1,53 @@
+# Vector 采集端配置：只采集 Agent 日志（log/agent.log），解析 zap JSON 后写入 Loki。
+# 宿主机 D:/Gitee/stressbot/log 挂载到容器 /var/log/stressbot。
+data_dir = "/var/lib/vector"
+
+# ─── 采集源 ────────────────────────────────────────────
+# 注意：data_dir（checkpoint 与 sink 磁盘缓冲）必须落在 Docker named volume 上。
+# 若挂载 Windows 宿主机目录，磁盘缓冲的读写会触发 ENODATA（os error 61）导致 Vector 崩溃。
+[sources.agent_log]
+type = "file"
+include = ["/var/log/stressbot/agent.log"]
+# 默认 start_at_beginning = false：首次发现文件从末尾开始，只采集启动后新增的行。
+# 需要回灌历史时临时改为 true（注意 Loki 会拒绝超过保留期的旧样本）。
+glob_minimum_cooldown_ms = 1000
+
+# ─── 解析：zap JSON → 结构化字段 ───────────────────────
+[transforms.parse_agent]
+type = "remap"
+inputs = ["agent_log"]
+source = '''
+raw, err = parse_json(.message)
+if err == null && is_object(raw) {
+  merged, err = merge(., raw)
+  if err == null {
+    . = merged
+  }
+}
+ts, err = parse_timestamp(.timestamp, "%+")
+if err == null {
+  .timestamp = ts
+}
+# 每台 Agent 注入节点身份（取自 conf/agent.toml 的 agent.id，经环境变量传入）。
+.agent_id = get_env_var("AGENT_ID") ?? "agent-001"
+.level = downcase(to_string(.level) ?? "unknown")
+'''
+
+# ─── 输出：Loki ────────────────────────────────────────
+[sinks.loki]
+type = "loki"
+inputs = ["parse_agent"]
+endpoint = "http://loki:3100"
+encoding.codec = "json"
+# 标签只放低基数维度；taskID/agentID 等高基数字段留在行内 JSON，查询时用 | json 过滤。
+labels.job = "stressbot-agent"
+labels.agent_id = "{{ agent_id }}"
+labels.level = "{{ level }}"
+# agent_id / level 均为有限取值（节点数、日志级别数）且已兜底默认值，
+# 放开模板「必须带静态前缀」的基数保护。
+dangerously_allow_unconfined_template_resolution = true
+
+[sinks.loki.buffer]
+# 磁盘缓冲：Loki 不可达或压测打满施压机网卡时不丢日志。
+type = "disk"
+max_size = 268435488

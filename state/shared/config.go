@@ -88,37 +88,24 @@ func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
 	}
 
 	var err error
-	if out.DefaultClaimTTL, err = parseDurationDefault(c.DefaultClaimTTL, defaultClaimTTL); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: 解析 defaultClaimTTL 失败: %w", err)
+	if out.DefaultClaimTTL, err = config.ParsePositiveDuration(c.DefaultClaimTTL, defaultClaimTTL, "redis.defaultClaimTTL"); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: %w", err)
 	}
-	if out.OpTimeout, err = parseDurationDefault(c.OpTimeout, defaultOpTimeout); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: 解析 opTimeout 失败: %w", err)
+	if out.OpTimeout, err = config.ParsePositiveDuration(c.OpTimeout, defaultOpTimeout, "redis.opTimeout"); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: %w", err)
 	}
-	if out.DialTimeout, err = parseDurationDefault(c.Pool.DialTimeout, defaultDialTimeout); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: 解析 pool.dialTimeout 失败: %w", err)
+	if out.DialTimeout, err = config.ParsePositiveDuration(c.Pool.DialTimeout, defaultDialTimeout, "redis.pool.dialTimeout"); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: %w", err)
 	}
-	if out.ReadTimeout, err = parseDurationDefault(c.Pool.ReadTimeout, defaultReadWriteTimout); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: 解析 pool.readTimeout 失败: %w", err)
+	if out.ReadTimeout, err = config.ParsePositiveDuration(c.Pool.ReadTimeout, defaultReadWriteTimout, "redis.pool.readTimeout"); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: %w", err)
 	}
-	if out.WriteTimeout, err = parseDurationDefault(c.Pool.WriteTimeout, defaultReadWriteTimout); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: 解析 pool.writeTimeout 失败: %w", err)
+	if out.WriteTimeout, err = config.ParsePositiveDuration(c.Pool.WriteTimeout, defaultReadWriteTimout, "redis.pool.writeTimeout"); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: %w", err)
 	}
-	if out.ConnMaxLifetime, err = parseDurationDefault(c.Pool.ConnMaxLifetime, 0); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: 解析 pool.connMaxLifetime 失败: %w", err)
+	// connMaxLifetime 以 0 表示「不限制」，属 ParseDuration 域；其余五项是间隔/超时，0 非法。
+	if out.ConnMaxLifetime, err = config.ParseDuration(c.Pool.ConnMaxLifetime, 0, "redis.pool.connMaxLifetime"); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: %w", err)
 	}
 	return out, nil
-}
-
-func parseDurationDefault(s string, def time.Duration) (time.Duration, error) {
-	if s == "" {
-		return def, nil
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0, err
-	}
-	if d <= 0 {
-		return def, nil
-	}
-	return d, nil
 }

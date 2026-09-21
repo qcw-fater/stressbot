@@ -12,6 +12,7 @@ import (
 	"stressbot/config"
 	"stressbot/internal/stresslog"
 	"stressbot/monitor"
+	"stressbot/network"
 )
 
 // AppConfig 是 agent.toml 的完整配置；Config 仅对应其中的 [agent] 段。
@@ -20,6 +21,7 @@ type AppConfig struct {
 	Monitor *monitor.CollectorConfig `toml:"monitor"`
 	Pprof   *config.PprofConfig      `toml:"pprof"`
 	Agent   Config                   `toml:"agent"`
+	Network network.EngineConfig     `toml:"network"`
 	Daemon  bool                     `toml:"daemon"`
 }
 
@@ -46,6 +48,7 @@ func NewFromConfig(cfg *AppConfig) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Agent 配置校验失败: %w", err)
 	}
+	resolved.Network = cfg.Network
 	monitorConfig := monitor.CollectorConfig{}
 	if cfg.Monitor != nil {
 		monitorConfig = *cfg.Monitor
@@ -90,6 +93,7 @@ type ResolvedConfig struct {
 	ReconnectMaxInterval time.Duration
 	ReconnectMaxRetries  int
 	TaskReportTimeout    time.Duration
+	Network              network.EngineConfig
 }
 
 // Defaults 返回填充了默认值的 Agent 配置。

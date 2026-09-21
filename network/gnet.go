@@ -3,7 +3,6 @@ package network
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,15 +14,6 @@ import (
 
 	"github.com/panjf2000/gnet/v2"
 	"go.uber.org/zap"
-)
-
-// maxBodyLen 单个包体最大允许长度（16MB），防止畸形/恶意包导致 OOM。
-const maxBodyLen = 16 * 1024 * 1024
-
-const (
-	gnetReadBufferCap  = 32 * 1024 // gnet 读缓冲区容量
-	gnetWriteBufferCap = 32 * 1024 // gnet 写缓冲区容量
-	maxConcurrentDials = 512       // 限制同一 Agent 内同时阻塞在 gnet Dial/Enroll 的连接数
 )
 
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
@@ -67,6 +57,7 @@ type EventServer struct {
 	registry     *connRegistry
 	adp          protocol.Adapter // 仅用于 OnTraffic 的帧切割元信息（HeaderSize/BodyLength）
 	tickInterval time.Duration
+	maxBodyLen   int // 单个包体最大允许长度（防畸形包 OOM）；Dialer 按 EngineConfig 注入，直接构造时为编译期默认
 }
 
 // Compile-time assertion: EventServer satisfies gnet.EventHandler.
@@ -78,6 +69,7 @@ func NewEventServer(adp protocol.Adapter, heartbeatInterval time.Duration) *Even
 		registry:     newConnRegistry(),
 		adp:          adp,
 		tickInterval: heartbeatInterval,
+		maxBodyLen:   defaultMaxBodyLen,
 	}
 }
 
@@ -205,7 +197,7 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 		}
 
 		bodyLen := es.adp.BodyLength(headBuf)
-		if bodyLen < 0 || bodyLen > maxBodyLen {
+		if bodyLen < 0 || bodyLen > es.maxBodyLen {
 			serviceName := ""
 			robotName := ""
 			if conn != nil {
@@ -336,16 +328,20 @@ func writeDoneCallback(conn *Connection, onWritten WriteDoneFunc) func(gnet.Conn
 type Dialer struct {
 	client     *gnet.Client
 	server     *EventServer
+	params     engineParams
 	dialTokens chan struct{}
 	closed     atomic.Bool
 }
 
-// NewDialer 创建拨号器
-func NewDialer(adp protocol.Adapter, heartbeatInterval time.Duration) *Dialer {
+// NewDialer 创建拨号器。engine 零值 = 编译期默认参数（见 EngineConfig）。
+func NewDialer(adp protocol.Adapter, heartbeatInterval time.Duration, engine EngineConfig) *Dialer {
 	server := NewEventServer(adp, heartbeatInterval)
+	params := engine.normalize()
+	server.maxBodyLen = params.maxBodyLen
 	return &Dialer{
 		server:     server,
-		dialTokens: make(chan struct{}, maxConcurrentDials),
+		params:     params,
+		dialTokens: make(chan struct{}, params.maxConcurrentDials),
 	}
 }
 
@@ -370,10 +366,10 @@ func NewDialer(adp protocol.Adapter, heartbeatInterval time.Duration) *Dialer {
 func (d *Dialer) Start() error {
 	opts := []gnet.Option{
 		gnet.WithTicker(true),
-		gnet.WithReadBufferCap(gnetReadBufferCap),
-		gnet.WithWriteBufferCap(gnetWriteBufferCap),
+		gnet.WithReadBufferCap(d.params.readBufferCap),
+		gnet.WithWriteBufferCap(d.params.writeBufferCap),
 		gnet.WithMulticore(true),
-		gnet.WithNumEventLoop(runtime.NumCPU()),
+		gnet.WithNumEventLoop(d.params.numEventLoop),
 		gnet.WithLockOSThread(true),
 	}
 	client, err := gnet.NewClient(d.server, opts...)
@@ -387,7 +383,11 @@ func (d *Dialer) Start() error {
 	}
 
 	stresslog.Info("[GNET] 客户端引擎已启动",
-		zap.Int("numEventLoop", runtime.NumCPU()))
+		zap.Int("numEventLoop", d.params.numEventLoop),
+		zap.Int("readBufferCap", d.params.readBufferCap),
+		zap.Int("writeBufferCap", d.params.writeBufferCap),
+		zap.Int("maxConcurrentDials", d.params.maxConcurrentDials),
+		zap.Int("maxBodyLen", d.params.maxBodyLen))
 	return nil
 }
 

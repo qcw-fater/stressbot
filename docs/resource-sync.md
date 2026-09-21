@@ -47,7 +47,7 @@ stressbot 的 proto / lua / adapter 等资源，存在两份副本：
 | `stressbot-resources-scripts` | 所有 `.lua` 脚本 |
 | `stressbot-resources-adapter` | 多份 `*_codec.json` + 共享 `errors.json` |
 
-每个文件的数据结构（`[cmd/web/src/services/resourcesStore.ts](../cmd/web/src/services/resourcesStore.ts)`）：
+每个文件的数据结构（`cmd/web/src/services/resourcesStore.ts:32-40`）：
 
 ```ts
 interface ResourceFile {
@@ -105,10 +105,12 @@ interface ResourceFile {
 | 触发点 | 行为 | 文件 |
 |--------|------|------|
 | 页面加载 / 刷新 | **不拉取**；仅使用本地资源状态 | `[cmd/web/src/components/FlowEditor/index.tsx](../cmd/web/src/components/FlowEditor/index.tsx)` |
-| 加载 / 导入 flow | 仅做脚本 gap-fill（见 §6），**不做全量基线对比** | `[cmd/web/src/components/FlowEditor/panels/Toolbar.tsx](../cmd/web/src/components/FlowEditor/panels/Toolbar.tsx)` |
+| 加载 / 导入 flow | 仅做脚本 gap-fill（见 §6），**不做全量基线对比**；导入后 `syncFlowScriptsToIdb` 补缺失脚本 | `[cmd/web/src/components/FlowEditor/panels/useFlowFileIO.ts](../cmd/web/src/components/FlowEditor/panels/useFlowFileIO.ts)` |
 | 点击「拉取」按钮 | `syncResourcesFromBaseline()`，冲突弹 `BaselineSyncModal` | `[cmd/web/src/components/modules/ResourcesDrawer.tsx](../cmd/web/src/components/modules/ResourcesDrawer.tsx)` |
 | 启动任务 | `createTask` 上传配置 → 后端 `writeBaselineFiles` 写盘提交 | `[cmd/web/src/services/taskActions.ts](../cmd/web/src/services/taskActions.ts)` |
 | 启动任务（提交前） | `checkTaskResourcesAgainstBaseline` 做一次差异检查，有冲突弹二选一 | `[cmd/web/src/components/runtime/TaskStartModal.tsx](../cmd/web/src/components/runtime/TaskStartModal.tsx)` |
+
+gap-fill 的调用点（`scriptSync.ts:9-10` 注释）：FlowEditor 初始化、Toolbar 加载、TaskStartModal 打开、startTask 提交前。
 
 ---
 
@@ -203,20 +205,23 @@ localHash == serverHash ?
 
 ### 7.1 前端：组装并上传
 
-`[cmd/web/src/services/taskActions.ts](../cmd/web/src/services/taskActions.ts)` 的 `startTask`：
+`[cmd/web/src/services/taskActions.ts](../cmd/web/src/services/taskActions.ts)` 的 `startTask`（`taskActions.ts:114-297`）：
 
-1. 校验 flow（`validateFlow`），有 error 直接拒绝。
-2. `syncFlowScriptsToIdb` gap-fill，仍缺失脚本则抛错。
-3. 收集 IDB 资源：全量 proto、flow 引用到的 lua（`usedScripts`）、全部 `*_codec.json`、`errors.json`。
-4. 组装 multipart（`flow.json` + `proto/<n>` + `scripts/<n>` + `adapter/<codec>` + `adapter/errors.json`）。
-5. `POST /sbot/tasks` 创建任务；成功后立即 `markResourcesAsBaselineSynced` 把上传内容的哈希写为新的 `baseHash`，避免下次误报冲突。
-6. `POST /sbot/tasks/{id}/start` 启动。
+1. `syncProtosToIdb` proto gap-fill（只补缺不覆盖）；拉回新文件则重载 proto 注册表。
+2. 校验 flow（`validateFlow`），有 error 直接拒绝。
+3. `syncFlowScriptsToIdb` 脚本 gap-fill，仍缺失脚本则抛错。
+4. proto import 依赖完整性校验 + flow 引用连接的 codec 文件校验 + 共享状态预检（脚本用 share 但服务器未配 Redis 时拦截）。
+5. 容量预检（空闲节点 `maxBots` 之和 >= totalBots）。
+6. 收集 IDB 资源：全量 proto、flow 引用到的 lua（`usedScripts`）、全部 `*_codec.json`、`errors.json`（未配置则不下发）。
+7. 组装 multipart（`name` + `totalBots` + `robotConfig` + 可选 `deadline`/`flowTemplateId` + `flow.json` + `proto/<n>` + `scripts/<n>` + `adapter/<codec>` + `adapter/errors.json`）。
+8. `POST /sbot/tasks` 创建任务；成功后立即 `markResourcesAsBaselineSynced` 把上传内容的哈希写为新的 `baseHash`，避免下次误报冲突。
+9. `POST /sbot/tasks/{id}/start` 启动。
 
 > 注意提交范围：启动任务只写回**当前 flow 引用到的** lua 脚本，proto 全量、adapter 全量、flow 覆盖写。本地存了但当前流程没用到的脚本不会被提交。这对"编辑什么就跑什么"的常见场景已足够。
 
 ### 7.2 后端：写回基线
 
-Admin 在创建任务时调用 `writeBaselineFiles`（[`admin/httpapi/baseline_routes.go`](../admin/httpapi/baseline_routes.go)），把上传的 flow / proto / scripts / adapter 写入 `conf/` 对应目录，使下次拉取时本地与基线一致：
+Admin 在创建任务时调用 `writeBaselineFiles`（[`admin/httpapi/baseline_routes.go`](../admin/httpapi/baseline_routes.go):19，由 `admin/httpapi/task_routes.go:213` 在创建任务流程内调用），把上传的 flow / proto / scripts / adapter 写入 `conf/` 对应目录，使下次拉取时本地与基线一致：
 
 ```go
 s.writeBaselineFiles(&cfg, flowData)   // 创建任务流程内调用
@@ -267,8 +272,9 @@ handleSubmit
 | 文件 | 职责 |
 |------|------|
 | `[cmd/web/src/services/resourcesStore.ts](../cmd/web/src/services/resourcesStore.ts)` | IndexedDB 资源 CRUD、三方比较、拉取编排、冲突应用 |
-| `[cmd/web/src/services/baselineApi.ts](../cmd/web/src/services/baselineApi.ts)` | 基线只读 API（fetchBaseline* 系列） |
+| `[cmd/web/src/services/baselineApi.ts](../cmd/web/src/services/baselineApi.ts)` | 基线只读 API（fetchBaseline* 系列，含 ok/missing/error 三态单文件读取） |
 | `[cmd/web/src/services/scriptSync.ts](../cmd/web/src/services/scriptSync.ts)` | flow 引用脚本 gap-fill |
+| `[cmd/web/src/services/protoSync.ts](../cmd/web/src/services/protoSync.ts)` | proto gap-fill + import 依赖完整性检查（`missingProtoImports`） |
 | `[cmd/web/src/services/taskResourceDiff.ts](../cmd/web/src/services/taskResourceDiff.ts)` | 任务资源与基线差异检查（启动前） |
 | `[cmd/web/src/services/taskActions.ts](../cmd/web/src/services/taskActions.ts)` | 启动任务编排（隐式提交点） |
 | `[cmd/web/src/components/modules/ResourcesDrawer.tsx](../cmd/web/src/components/modules/ResourcesDrawer.tsx)` | 资源管理面板（拉取按钮 + 三 Tab） |

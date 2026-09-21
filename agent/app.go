@@ -292,7 +292,7 @@ func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFu
 	a.mu.Unlock()
 	stressReporter.Start(taskCtx)
 
-	runner := agenttask.NewRunner(task, a.collector)
+	runner := agenttask.NewRunner(task, a.collector, a.cfg.Network)
 	runner.OnStageReset = func(nextStageIndex int) {
 		snapshot := stressReporter.Snapshot()
 		a.collector.Reset()

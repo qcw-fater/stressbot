@@ -45,6 +45,4 @@ bugs/
 .superpowers/
 .zcode/
 
-# 部署测试
-deploy/
 .gcache/

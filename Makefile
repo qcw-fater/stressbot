@@ -47,11 +47,15 @@ build-current: ## 构建当前平台
 
 .PHONY: dev-agent
 dev-agent: ## 开发运行 agent
-	go run ./cmd/agent -config conf/config.json
+	go run ./cmd/agent -config conf/agent.toml
 
 .PHONY: dev-admin
 dev-admin: ## 开发运行 admin
-	go run ./cmd/admin -config conf/admin-config.json
+	go run ./cmd/admin -config conf/admin.toml
+
+.PHONY: dev-stressbot
+dev-stressbot: ## 开发运行单机压测
+	go run ./cmd/stressbot -config conf/stressbot.toml
 
 .PHONY: dev-web
 dev-web: ## 开发运行前端
@@ -62,7 +66,7 @@ dev-web: ## 开发运行前端
 .PHONY: check
 check: ## 编译检查（不输出二进制）
 	go build ./...
-	cd $(CMD_WEB) && npx tsc --noEmit
+	cd $(CMD_WEB) && npx tsc -b --noEmit
 
 .PHONY: test
 test: ## 运行前端测试

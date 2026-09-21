@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"stressbot/flow"
 	"stressbot/internal/stresslog"
 	"stressbot/protocol/protox"
 	"stressbot/state"
@@ -210,11 +211,11 @@ func robotDelete(L *lua.LState) int {
 		return 0
 	}
 	key := lua.LVAsString(L.Get(base))
-	ctx.Store.Delete(key)
+	deleteStateKey(ctx, key)
 	return 0
 }
 
-// robotClear robot.clear(key?) — 删除指定 key 或清空全部
+// robotClear robot.clear(key?) — 删除指定 key 或清空全部（身份键始终保留）
 func robotClear(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
@@ -222,12 +223,26 @@ func robotClear(L *lua.LState) int {
 	}
 	base := firstRobotArg(L)
 	if L.GetTop() < base {
-		ctx.Store.Clear()
+		for _, key := range ctx.Store.Keys() {
+			deleteStateKey(ctx, key)
+		}
 		return 0
 	}
 	key := lua.LVAsString(L.Get(base))
-	ctx.Store.Delete(key)
+	deleteStateKey(ctx, key)
 	return 0
+}
+
+// deleteStateKey 删除 state key；框架按机器人身份写入的保留键（id/index/account）拒绝删除。
+// 与 stateExtra 覆盖保护、clearState 动作校验同一口径：身份键一旦丢失，
+// 整批机器人会共用同一身份，日志与服务端会话全部对不上。
+func deleteStateKey(ctx *Context, key string) {
+	if flow.IsProtectedStateKey(key) {
+		stresslog.Warn("[SCRIPT] 拒绝删除框架保留键",
+			zap.Int("robot", ctx.RobotID), zap.String("key", key))
+		return
+	}
+	ctx.Store.Delete(key)
 }
 
 // robotIncrement robot.increment(key) — 原子递增

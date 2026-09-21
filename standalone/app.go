@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"stressbot/config"
 	"stressbot/internal/stresslog"
 	"stressbot/monitor"
 	"stressbot/robot"
@@ -93,7 +94,7 @@ func Run(ctx context.Context, cfg *Config, paths Paths) error {
 		Shared:         sharedStore,
 	}
 
-	dialer, err := runner.StartDialer(resources, 5*time.Second)
+	dialer, err := runner.StartDialer(resources, 5*time.Second, cfg.Network)
 	if err != nil {
 		return fmt.Errorf("启动网络引擎失败: %w", err)
 	}
@@ -117,7 +118,11 @@ func Run(ctx context.Context, cfg *Config, paths Paths) error {
 		return fmt.Errorf("启动机器人失败: %w", err)
 	}
 
-	stopMonitoring := startMonitoring(cfg.Monitor)
+	stopMonitoring, monErr := startMonitoring(cfg.Monitor)
+	if monErr != nil {
+		manager.StopAll()
+		return fmt.Errorf("启动监控失败: %w", monErr)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -184,15 +189,13 @@ func closeSharedStore(store shared.Store) {
 	}
 }
 
-func startMonitoring(cfg *monitor.CollectorConfig) func() {
+func startMonitoring(cfg *monitor.CollectorConfig) (func(), error) {
 	if cfg == nil {
-		return func() {}
+		return func() {}, nil
 	}
-	reportInterval := 5 * time.Second
-	if cfg.ReportInterval != "" {
-		if parsed, err := time.ParseDuration(cfg.ReportInterval); err == nil && parsed > 0 {
-			reportInterval = parsed
-		}
+	reportInterval, err := config.ParsePositiveDuration(cfg.ReportInterval, 5*time.Second, "monitor.reportInterval")
+	if err != nil {
+		return nil, err
 	}
 	reporter := monitor.NewReporter(monitor.Global(), reportInterval)
 	reporter.Start()
@@ -211,7 +214,7 @@ func startMonitoring(cfg *monitor.CollectorConfig) func() {
 		if stopHTTP != nil {
 			stopHTTP()
 		}
-	}
+	}, nil
 }
 
 func exportMetrics(cfg *monitor.CollectorConfig) {

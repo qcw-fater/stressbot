@@ -88,7 +88,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 ## 配置文件
 
 - `conf/stressbot.toml` — 单机模式运行配置：`log`/`monitor`/`pprof`/`standalone`（`bot`/`stateExtra`/`rampUp`）+ 可选 `redis`/`network`/`daemon`；资源路径（`flow`/`proto`/`scripts`/`adapter`）为 CLI flag（默认回退 `<conf>` 下子目录）。TOML 格式，支持注释和环境变量展开（`${VAR}`/`${VAR:-default}`）。
-- `conf/agent.toml` — Agent 节点配置：`log`/`monitor`/`pprof`/`agent`（含 `reconnect` 子段）/`daemon`
+- `conf/agent.toml` — Agent 节点配置：`log`/`monitor`/`pprof`/`agent`（含 `reconnect` 子段）/`network`/`daemon`
 - `conf/admin.toml` — Admin 服务器配置：`server`（HTTP 管理面）/`controlPlane`（gRPC 控制面 + Agent 健康判定）/`mysql`（含 `retentionDays` 和 `pool`）/`redis`/`log`/`pprof`/`daemon`
 - `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
 - `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。编解码统一由纯 Go `protocol/codec/` 引擎驱动，无 Lua codec 路径。
@@ -140,7 +140,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 默认节点延迟由 `TaskFlow.DefaultDelayMs` 控制。`delayMs: -1` 禁用，`delayMs: 0` 使用 defaultDelayMs。
 - `onError` 控制 action 失败后的错误链路：`ignoreCodes` 命中后 warn 并继续流程但 monitor 保留失败样本；`handler` 是普通节点调用边（不写入 next）；`retry.maxRetries` 是当前 action 的额外重试次数；`strategy` 支持空/`resume` 继续、`skip` 结束当前分支/层级（由 sequence/loop/boolean/weighted 捕获）、`abort` 中断流程。
 - 条件表达式（节点条件、switch 分支、字段绑定 `condition`）必须带 `state:` 或 `lua:` 前缀，缺前缀在**加载期**报错而非运行期恒 false。字段绑定的 `lua:` 条件与节点条件共用 Robot 层同一个求值实现（`engine.ActionExecutor.SetLuaConditionEvaluator` 注入）。
-- `stateExtra` 不得覆盖框架保留键 `id` / `index` / `account`（命中则 Warn 忽略），否则整批机器人会共用同一身份。
+- `stateExtra` 不得覆盖框架保留键 `id` / `index` / `account`（命中则 Warn 忽略），否则整批机器人会共用同一身份。同一保护覆盖三层：stateExtra 覆盖、clearState 动作（加载期报错）、Lua `robot.clear()`/`robot.delete()`（Warn 忽略），保护键清单统一走 `flow.IsProtectedStateKey`。
 - `rampUp.stages[].holdSec` 为 0 表示未填、回退默认 30s；显式配置的值一律照办，不做下限钳制。
 - 声明式动作的取消语义全 pattern 统一：`ActionExecutor.Execute` 入口一次早退，有等待窗口的（request / listen / connect / http）把流程 ctx 送到真正的阻塞点。取消一律报 `errcode.ErrActionCanceled`（Unwrap 保留 `context.Canceled`），monitor 归类为 Canceled 而非 Timeout/Failure——否则停止一批机器人会在监控面堆出假故障。请求-响应的取消感知接口是 `engine.ActionNetSender`（`NetSender` + 两个 ctx 首参的 request 方法）；拆两层是因为 `NetSender` 其余能力被 Lua 运行时共用，不能整体加 ctx。
 - 时长类配置统一走 `config.ParseDuration` / `config.ParsePositiveDuration`：**留空才回退默认，写错一律报错**，不允许「解析失败打个 Warn 后退默认」。两者只差 0 是否合法——间隔与超时用 `ParsePositiveDuration`（0 会退化成忙循环或立即超时），MySQL 连接池等以 0 表示「不限制」的项用 `ParseDuration`。

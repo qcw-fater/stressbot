@@ -1,6 +1,10 @@
 package task
 
-import "testing"
+import (
+	"testing"
+
+	"stressbot/network"
+)
 
 func TestAssignmentValidateRequiresStartIndex(t *testing.T) {
 	assignment := Assignment{}
@@ -25,7 +29,7 @@ func TestPackageScopedTaskNames(t *testing.T) {
 	if err := assignment.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
-	if runner := NewRunner(&assignment, nil); runner == nil {
+	if runner := NewRunner(&assignment, nil, network.EngineConfig{}); runner == nil {
 		t.Fatal("NewRunner() = nil")
 	}
 	var _ CompletionReport

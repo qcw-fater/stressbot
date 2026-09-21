@@ -2,7 +2,7 @@
 
 stressbot 的浏览器端管理界面：可视化流程编辑器 + 资源管理 + 任务启停 + 实时监控 + 历史归档 + 节点管理的单页应用。
 
-生产形态由 Admin 服务器静态托管（`server.staticDir`，默认 `cmd/web/dist`，挂在 `/stressbot/` 子路径），所有 API 走 `/sbot/` 前缀；开发形态用 Vite dev server 本地起页面、把 `/sbot/` 代理到 Admin。
+生产形态推荐 nginx 托管 dist 并把 `/sbot/` 反代到 Admin（Admin 内置 `server.staticDir` 直连托管当前与 `/stressbot/` base 不匹配，见 [docs/deployment.md](../../docs/deployment.md) §6），所有 API 走 `/sbot/` 前缀；开发形态用 Vite dev server 本地起页面、把 `/sbot/` 代理到 Admin。
 
 后端引擎、flow.json 数据模型、Lua API 等全栈文档见[根 README](../../README.md)，本文件只覆盖前端。
 
@@ -17,12 +17,12 @@ stressbot 的浏览器端管理界面：可视化流程编辑器 + 资源管理 
 | 监听子系统 | 工具栏 →「监听」 | ListenDef 三态（silent / declarative / lua）、ListenCard 画布卡、反向引用、重复注册检测、route 三形态编辑 |
 | 协议配置 | RuntimeBar →「协议配置」 | `*_codec.json` 结构化编辑（帧布局 / pipeline / 心跳 / routeKey 模板）+ `errors.json` 错误码映射，预览走后端 codec 引擎 |
 | 资源管理 | RuntimeBar →「资源」 | Proto / Lua 文件上传、Monaco 编辑、与服务器基线同步（DiffEditor 逐项解决三方冲突） |
-| 任务管理 | RuntimeBar「启动」→ `TaskStartModal` | 参数复核 + 资源清单 + 容量预检 + 提交；测试 / 调试双模式（调试自动 1 机器人 1 并发 debug 日志） |
+| 任务管理 | RuntimeBar「启动」→ `TaskStartModal` | 参数复核 + 资源清单 + 容量预检 + 提交；测试 / 调试双模式（调试自动 1 机器人 1 并发 debug 日志）；渐进加压（rampUp 阶段编辑，总数自动推导校验） |
 | 实时监控 | 底部 `MonitorDock` | 动作指标表（成功率 / 延迟分位 / Apdex / 错误下钻 / CSV 下载）+ 集群系统资源仪表盘，指标可回绑画布节点徽章 |
 | 历史归档 | RuntimeBar →「历史」 | 列表 / 详情 / 对比三视图（2~5 条对比）、备注标签收藏、克隆重跑、归档下载、离线 HTML 报告导出 |
 | 节点管理 | RuntimeBar →「节点」 | 压测节点（Agent）卡片：状态 / CPU / 内存 / 容量、强制注销、全部关闭 |
 | 流程库 / 模板库 | 工具栏「流程库」/ 左侧栏 | 组件模板（action / listen）与整份流程（flow + layout）均存服务器 MySQL，跨流程复用 |
-| 校验 | 工具栏 →「校验」 | 86 种规则 code（引用完整性 / action / binding / 条件语法）+ JSON Schema 校验，报告抽屉三 Tab + 节点角标 + 跳转定位 |
+| 校验 | 工具栏 →「校验」 | 91 种规则 code（引用完整性 / action / binding / 条件语法）+ JSON Schema 校验，报告抽屉三 Tab + 节点角标 + 跳转定位 |
 | 撤销重做 | `Ctrl+Z` / `Ctrl+Shift+Z` | zundo 时间旅行，limit 50，只记业务字段不记视图 |
 | 编辑稿持久化 | 自动 | LocalStorage 300ms 防抖写盘 + 关页前 flush，刷新恢复 |
 | 配置备份恢复 | 文件菜单 | 全量配置导出 / 导入、逐节冲突解决、崩溃后 `RecoveryGuard` 自动恢复 |
@@ -124,19 +124,21 @@ src/
 
 ## 页面架构与运行模式
 
-`EditorPage`（HomeShell）持有一个单向模式状态机（`services/runtimeStore.ts`）：
+`EditorPage`（HomeShell）持有一个单向模式状态机（`services/runtimeStore.ts`，`RuntimeMode` 共四态）：
 
 ```
-edit ──启动任务──▶ starting/running ──停止──▶ stopping ──▶ finalReport
-  ▲                                                   │
-  └──────────── 查看活跃任务 viewActive ◀─────────────┘
+edit ──启动任务──▶ running ──停止──▶ finalReport
+  ▲                                  │
+  └───── 查看活跃任务 viewActive ◀───┘
 ```
+
+> `starting` / `stopping` 是后端任务状态（TaskState），不是前端模式：running 态下轮询到的任务状态驱动界面推进，RuntimeBar 状态徽章按后端状态翻译（「启动中 / 停止中」等）。
 
 - **edit**：编辑态，后台 10s 轮询节点列表 / 系统资源；检测到活跃任务弹 `ActiveTaskGuardModal` 引导进入查看。
 - **viewActive / running**：5s 轮询任务详情 / 压测指标 / 系统资源 / 节点列表；FlowEditor 进入只读模式。
-- **finalReport**：终态报告，仍只读，可跳转历史详情。
+- **finalReport**：终态报告，仍只读（30s 低频轮询），可跳转历史详情。
 
-RuntimeBar 是顶部运行控制条（状态徽章、启停、资源/历史/节点/系统/笔记/协议配置六个入口、设置），通过 `FlowEditor` 的 `topbarExtra` 插槽挂在工具栏右侧。除资源抽屉外的功能面板全部 lazy + `LazyMount`（关闭即卸载）。
+RuntimeBar 是顶部运行控制条（状态徽章、启停、资源/历史/节点/系统/笔记/协议配置六个入口、设置），通过 `FlowEditor` 的 `topbarExtra` 插槽挂在工具栏右侧。除资源抽屉外的功能面板全部 lazy + `LazyMount`（关闭即卸载）。运行期间节点事件（offline / restarted / reconnected）以横幅告警；可临时返回编辑态（`detachToEdit`）而不刷新、随时重进监控。
 
 ---
 
@@ -199,7 +201,7 @@ FlowEditor/
 
 ### 校验（validation/）
 
-86 种规则 code：`refsCheck`（流程级引用 / 环 / 孤儿 / listenRefs，42）+ `actionRules`（action 语义，24）+ `bindingRules`（绑定与过滤器，19）+ 条件语法（1）；另有 Ajv 对后端 `config/validation/flow.schema.json` / `codec.schema.json` 的 Schema 校验。编辑停 150ms 自动跑，结果两处呈现：校验报告抽屉（errors / warnings / infos 三 Tab，「跳转」按钮 pan 到节点并打开编辑器）与节点外壳角标（按节点分组）。
+91 种规则 code：`refsCheck`（流程级引用 / 环 / 孤儿 / listenRefs，43）+ `actionRules`（action 语义，28）+ `bindingRules`（绑定与过滤器，19）+ 条件语法（1）；另有 Ajv 对后端 `config/validation/flow.schema.json` / `codec.schema.json` 的 Schema 校验（失败落 `FLOW_SCHEMA_INVALID`）。编辑停 150ms 自动跑，结果两处呈现：校验报告抽屉（errors / warnings / infos 三 Tab，「跳转」按钮 pan 到节点并打开编辑器）与节点外壳角标（按节点分组）。
 
 ### 持久化与历史
 
@@ -289,8 +291,8 @@ npm run build   # → dist/（tsc 类型检查 + vite build）
 
 部署两条路径：
 
-1. **Admin 托管（默认）**：Admin 配置 `server.staticDir`（默认 `cmd/web/dist`）直接静态托管，前端与 API 同源。
-2. **Nginx 独立部署**：参考 [`nginx.conf`](./nginx.conf)（80 端口多项目共用示例——`/stressbot/` 静态文件 + `/sbot/` 反代 Admin，静态资源一年强缓存）。
+1. **Admin 内置托管（当前受限）**：`server.staticDir`（默认 `cmd/web/dist`）直连托管与前端 `/stressbot/` base 不匹配——挂载点在 `/` 而资源引用带前缀，直连 7718 页面白屏；同源用法需把 dist 内容放进 staticDir 指向目录的 `stressbot/` 子目录。详见 [docs/deployment.md](../../docs/deployment.md) §6。
+2. **Nginx 独立部署（生产推荐）**：参考 [`nginx.conf`](./nginx.conf)（80 端口多项目共用示例——`/stressbot/` 静态文件 + `/sbot/` 反代 Admin，静态资源一年强缓存）。
 
 ---
 

@@ -1,10 +1,9 @@
 # Admin 服务端实施文档
 
-> **历史说明（2026-08-13）**：本文记录旧 HTTP 控制面和重构前包布局，仅供追溯，不再作为当前实现契约。现行架构与接口请以 `README.md`、`AGENTS.md`、`api/admin/openapi.yaml` 和 `docs/superpowers/specs/2026-08-13-package-architecture-design.md` 为准。
-
-> **角色定位**：Admin 是分布式压测系统的**控制中枢**，对前端提供管控 API（任务/Agent/指标/系统/历史/日志/基线资源），对 Agent 提供注册/心跳/上报接口和命令下发能力。
+> **角色定位**：Admin 是分布式压测系统的**控制中枢**，对浏览器提供管理面 HTTP API（`/sbot/`），对 Agent 节点提供 gRPC 控制面（会话/命令/资源包/指标）。
 > **本文档目标读者**：负责 `admin/` 包及 `cmd/admin/` 入口的开发者。
-> **文档性质**：本文档基于实际代码生成，标注了与原始设计计划的差异。
+> **文档性质**：基于当前代码编写（2026-09 修订），标注 `文件:行号` 便于对照。
+> 姊妹文档：`docs/agent-implementation.md`（Agent 端，协议契约可双向交叉验证）。
 
 ---
 
@@ -12,30 +11,31 @@
 
 - 项目名/Go module：`stressbot`
 - Admin 二进制：`admin.exe`（Linux：`admin`），来自 `cmd/admin`
-- 默认监听端口：`7718`
-- 数据目录：`data/`（任务持久化）
+- 监听面：浏览器管理面 HTTP **7718**（默认）、Agent 控制面 gRPC **7720**（默认）
+- 配置文件：`conf/admin.toml`（TOML）
+- 数据目录：`data/`（任务 JSON 持久化）、`data/bundles/`（资源包存储）
 - 静态资源目录：`cmd/web/dist/`（前端构建产物）
-- HTTP 路由前缀：`/sbot/`
-- Agent 主文档 = `docs/agent-implementation.md`，所有协议契约可双向交叉验证
+- HTTP 路由前缀：`/sbot/`；OpenAPI 契约：`api/admin/openapi.yaml`
 
 ---
 
 ## 1. 模块职责
 
-Admin 同时承担五类职责：
+Admin 同时承担六类职责：
 
-1. **集群管理**：维护 Agent 注册表（增删改查、健康检测、版本追踪）
-2. **任务编排**：接收前端请求 -> 单例校验 -> 分配账号范围 -> 推送任务 -> 监控完成
-3. **指标聚合**：合并多 Agent 上报的压测/系统指标，生成集群快照供前端轮询
-4. **历史归档**：任务运行期定时采样 + 终态归档至 MySQL，支持回查、对比、克隆、标签
-5. **运维支持**：Agent 关机命令下发、前端静态资源托管、基线资源读写、日志代理
+1. **集群管理**：Agent 注册表（gRPC 会话握手注册、心跳健康检测、实例重启识别）
+2. **任务编排**：接收前端请求 → 单例校验 → 分配 → 组装命令 → 投递 → 汇总完成报告
+3. **命令可靠性**：有界命令日志 + 会话投递窗口 + ACK/回执 + 重连重放
+4. **指标聚合**：摄取 Agent 上报的压测窗口/系统指标，合并为集群快照供前端轮询
+5. **历史归档**：运行期 10s 时序采样 + 终态归档至 MySQL，支持回查、对比、克隆、标签；流程/动作/监听模板库
+6. **运维支持**：节点远程关机命令、前端静态资源托管、基线资源读写、codec 预览
 
 不做的事：
-- 不做用户认证（内网工具，假定可信网络）
-- 不做指标告警（监控系统职责由外部 Prometheus 等承担，可后续接入）
-- 不做任务排队调度（任务单例约束，并发启动直接拒绝）
-- 不做二进制存储与分发（已废弃）
-- 不做自动升级编排（已废弃，升级改为运维手动重启 Agent 进程）
+
+- 不做用户认证（内网工具，假定可信网络；但 Redis 密码随控制面下发，控制端口必须只在受控私网可达）
+- 不做任务排队调度（单活跃任务约束，并发启动直接拒绝 409）
+- 不做指标告警
+- 不做二进制存储与自动升级编排（升级为运维手动重启 Agent 进程）
 
 ---
 
@@ -43,1242 +43,487 @@ Admin 同时承担五类职责：
 
 ```
 admin/
-  admin.go               -- AdminServer 主结构、HTTP 路由注册、生命周期、Agent 状态变更处理
-  config.go              -- Config 解析与校验、默认值
-  types.go               -- 全部 DTO 类型定义（Task/Agent/Report/Snapshot/History 等）
-  task.go                -- TaskStore 实现 + 状态机 + 单例约束 + 文件恢复
-  agent.go               -- AgentRegistry + 心跳超时检测 + 状态恢复
-  assignment.go          -- Assigner：比例分配 + debug 单节点分配
-  aggregator.go          -- MetricsAggregator：压测/系统指标聚合
-  agent_dispatcher.go    -- Admin -> Agent HTTP 通信（带重试）
-  history.go             -- HistoryStore：MySQL 持久化、查询、标签、清理
-  history_schema.go      -- 8 张表 DDL
-  sampler.go             -- Sampler：运行期定时采集时序数据
-  handlers.go            -- 全部 HTTP handler（Agent 上行 + 前端任务/Agent/指标/系统/日志/基线）
-  handlers_history.go    -- 历史归档相关 handler
-  persist.go             -- JSON 文件持久化（Task 实时态，原子写入）
-  errors.go              -- Admin 统一错误类型 + 预定义错误码
-  helpers.go             -- 辅助函数（配置默认值填充、日志查询参数解析）
+  app.go                -- Server 装配与生命周期、终态归档、Agent 状态回调、autoStop/停止安全网/deadline 看门狗
+  server.go             -- 管理面 HTTP 服务器构造、双监听面 Serve 与优雅关闭
+  config.go             -- admin.toml 配置解析、默认值、controlPlane 联动强校验
+  agent/
+    registry.go         -- Registry：注册/心跳/Touch/健康扫描/状态恢复/指标快照留存
+    types.go            -- Node、Status 枚举、HeartbeatRequest 等
+  task/
+    types.go            -- Task/State/Config/RobotConfig/Assignment/Dispatch/CompletionReport 等领域类型
+    store.go            -- 泛型 Repository：并发安全任务存储 + 生命周期状态机（Transition/Begin）
+    admin_store.go      -- Store 适配层：把 Task 接到 Repository Adapter（含重启恢复语义）
+    assignment.go       -- Assigner：空闲节点比例分配 + debugMode 单节点优先
+    distribution.go     -- ExpectedAgents、并发度等比拆分、ScaleRampUp、ValidateDistributedConcurrency
+    completion.go       -- CompletionService：最终/阶段报告汇总与全员完成流转
+    stage_plan.go       -- reset 边界 → 连续 1-based 段落号映射（归档对齐）
+    persist.go          -- data/tasks/{id}.json 原子持久化与加载
+    shared_cleanup.go   -- 共享状态待清理队列（持久化 + 定时重试）
+  command/
+    bus.go              -- Bus：命令写入、LRU 缓存解析、会话投递、ACK 落终态
+    memory.go           -- MemoryStore：内存有界命令日志（全局递增 Sequence、容量淘汰）
+    store.go            -- Store 接口
+    dispatcher.go       -- Dispatcher：ScheduleStart/ScheduleStop/ScheduleShutdown 组装编排
+  bundle/
+    store.go            -- SHA-256 内容寻址 zip 存储：Build 打包落盘、Open 限并发流式下发
+  grpcapi/
+    server.go           -- gRPC 服务器构造（16MB 消息上限、keepalive）
+    control_service.go  -- AgentControlService.Session：握手/注册/孤儿停止/收发循环
+    bundle_service.go   -- AgentBundleService.DownloadBundle 服务端流
+    metrics_service.go  -- AgentMetricsService.Report 客户端流
+    session.go          -- Session（投递窗口/事件通道）+ SessionRegistry（generation 顶替）
+    convert.go          -- 域模型 ⇄ controlpb 转换
+    validation.go       -- requireAgentID 等入参校验
+  metrics/
+    ingestor.go         -- Ingestor：latest-wins 槽位 + 有界 worker 转换落库
+    accept.go           -- AcceptanceService：压测帧归属校验
+    window_store.go     -- WindowStore：任务×节点窗口/累计状态
+    aggregator.go       -- Aggregator：集群压测聚合（含覆盖率）与系统聚合
+    sampler.go          -- Sampler：运行期 10s 时序采样
+    types.go            -- HistoryTrendPoint 等展示类型
+  history/
+    store.go            -- MySQL 归档/查询/对比/克隆/标签/清理
+    types.go            -- Record/Detail/Filter 等归档模型
+    policy.go           -- 归档策略
+  template/
+    flow_template.go    -- 流程模板库（flow_template 表）
+    action_template.go  -- 共享动作模板库
+    listen_template.go  -- 共享监听模板库
+    *_snapshot.go       -- 三类库的快照整体替换实现
+    common.go           -- 模板库公共逻辑
+  mysql/
+    open.go             -- 连接池打开（DSN 用驱动 FormatDSN 生成）
+    schema.go           -- InitializeSchema：启动建表/结构校验
+    schema_definition.go-- 内嵌 DDL：11 张表首版当前结构
+  apierror/
+    errors.go           -- Error 类型 + 21 个预定义错误码
+  httpapi/
+    routes.go           -- 全部 /sbot/ 路由注册 + recover/Schema 校验中间件 + capabilities
+    handler.go          -- Handler 与 Dependencies
+    task_routes.go      -- 任务创建/列表/详情/配置下载/启动/停止/删除
+    agent_routes.go     -- 节点列表/详情/删除/关机
+    metrics_routes.go   -- 压测/系统聚合查询
+    history.go          -- 历史归档端点
+    resources.go        -- 基线资源端点
+    templates.go        -- 流程/动作/监听模板端点
+    codec.go            -- codec 预览与算法元数据
+    baseline_routes.go  -- 基线目录布局
+    errors.go           -- writeError/writeJSON 等
+    middleware.go       -- panic 边界 + 请求校验包裹
+    docs.go openapi.go  -- Swagger UI / openapi.yaml 分发
+    template_helpers.go -- 展示辅助
 
 cmd/admin/
-  main.go                -- Admin 进程入口（信号处理、日志初始化、graceful shutdown）
+  main.go               -- 进程入口（顶层 recover、-d 守护进程、TOML 加载、日志、pprof）
 ```
 
-**实际依赖**：
-
-```bash
-go get github.com/go-sql-driver/mysql   # MySQL 驱动
-go get go.uber.org/zap                   # 结构化日志
-```
-
-**与计划的差异**：
-- 计划中的 `binary.go`（BinaryStore）和 `upgrade.go`（UpgradeOrchestrator）**未实现**，二进制存储与自动升级功能已废弃。
-- 计划中的 `handlers_history.go` 已按计划实现为独立文件。
-- 路由前缀从计划中的 `/api/` 变更为 `/sbot/`。
-- 未引入 `github.com/google/uuid` 和 `github.com/jmoiron/sqlx`，改用 `crypto/rand` 生成 ID 和标准 `database/sql`。
+**关键外部依赖**：`google.golang.org/grpc`（控制面）、`github.com/go-sql-driver/mysql`（DSN 生成 + 驱动）、`go.uber.org/zap`（结构化日志）。ID 生成用 `crypto/rand` 32 字符 hex（`admin/app.go:790-799`），数据库访问用标准 `database/sql`。
 
 ---
 
-## 3. 数据模型（完整 DTO）
+## 3. 数据模型（核心 DTO）
 
-### 3.1 Task
+### 3.1 Task（`admin/task/types.go:50-90`）
 
 ```go
 type Task struct {
-    ID          string     `json:"id"`              // 随机 32 字符 hex
-    Name        string     `json:"name"`
-    State       TaskState  `json:"state"`
-    TotalBots   int        `json:"totalBots"`       // 集群总机器人数
-    Config      TaskConfig `json:"config"`          // 任务配置
-    Assignments []Assignment `json:"assignments,omitempty"`   // 分配快照
-    Reports     map[string]TaskCompletionReport `json:"reports,omitempty"` // agentID -> 完成报告
-    StageReports []TaskCompletionReport `json:"stageReports,omitempty"` // 渐进式加压阶段报告
-    AgentEvents []AgentEvent `json:"agentEvents,omitempty"` // Agent 状态变化事件
-    CreatedAt   time.Time  `json:"createdAt"`
-    StartedAt   *time.Time `json:"startedAt,omitempty"`
-    StoppedAt   *time.Time `json:"stoppedAt,omitempty"`
-    ErrorMsg    string     `json:"errorMsg,omitempty"`
+    ID          string        `json:"id"`              // 随机 32 字符 hex
+    Name        string        `json:"name"`
+    State       State         `json:"state"`
+    TotalBots   int           `json:"totalBots"`       // 集群总机器人数
+    Config      Config        `json:"config"`
+    Assignments []Assignment  `json:"assignments,omitempty"`   // 分配快照
+    SucceededAgents []string  `json:"succeededAgents,omitempty"` // 实际成功接收命令的节点
+    Reports     map[string]CompletionReport `json:"reports,omitempty"` // agentID → 最终报告
+    CleanupSummary *robot.CleanupStatus      `json:"cleanupSummary,omitempty"`
+    StageReports []CompletionReport          `json:"stageReports,omitempty"` // reset 段落报告
+    AgentEvents  []AgentEvent                `json:"agentEvents,omitempty"`
+    CreatedAt   time.Time     `json:"createdAt"`
+    StartedAt   *time.Time    `json:"startedAt,omitempty"`
+    StoppedAt   *time.Time    `json:"stoppedAt,omitempty"`
+    ErrorMsg    string        `json:"errorMsg,omitempty"`
+    SharedUsed  bool          `json:"sharedUsed,omitempty"`  // 脚本使用 require("share")
+    SharedRunID string        `json:"sharedRunId,omitempty"` // = 任务 ID
+    FlowTemplateID string     `json:"flowTemplateId,omitempty"` // 来源模板（溯源）
 }
 ```
 
-**与计划的差异**：新增 `StageReports`（渐进式加压阶段完成报告）和 `AgentEvents`（任务期间 Agent 状态变化事件）字段。
+`PublicCopy()` 返回剥离内部 DDSketch 的浅拷贝，供面向浏览器的响应使用——sketch 字节只允许出现在 Agent→Admin 内部链路与归档中（`admin/task/types.go:281-306`）。
 
-### 3.2 TaskState
+### 3.2 State / Result（`admin/task/types.go:17-47`）
 
 ```go
-type TaskState string
-
-const (
-    TaskPending  TaskState = "pending"   // 已创建未启动
-    TaskStarting TaskState = "starting"  // 正在向 Agent 推送
-    TaskRunning  TaskState = "running"   // 至少一个 Agent 已开始执行
-    TaskStopping TaskState = "stopping"  // 收到停止指令，等待 Agent 上报 done
-    TaskStopped  TaskState = "stopped"   // 全部 Agent 已 done
-    TaskFailed   TaskState = "failed"    // 失败
-)
+Pending / Starting / Running / Stopping / Stopped / Failed
+IsActiveState = Starting || Running || Stopping        // 占据单例位
+ResultCompleted / ResultStopped / ResultFailed
 ```
 
-### 3.3 TaskResult
+### 3.3 Config 与 RobotConfig（`admin/task/types.go:93-155`）
 
 ```go
-type TaskResult string
-
-const (
-    ResultCompleted TaskResult = "completed" // 任务自然完成
-    ResultStopped   TaskResult = "stopped"   // 任务被手动停止
-    ResultFailed    TaskResult = "failed"    // 任务失败
-)
-```
-
-### 3.4 TaskConfig
-
-```go
-type TaskConfig struct {
-    FlowJSON    json.RawMessage   `json:"flowJson"`           // flow.json 原始内容
-    ProtoFiles  map[string][]byte `json:"protoFiles,omitempty"` // 文件名 -> 内容
-    LuaScripts  map[string][]byte `json:"luaScripts,omitempty"` // 文件名 -> 内容
-    Codecs      map[string][]byte `json:"codecs,omitempty"`   // *_codec.json 文件名 -> 内容
-    ErrorMap    []byte            `json:"errorMap,omitempty"` // errors.json 内容
-    RobotConfig RobotConfig       `json:"robotConfig"`        // 运行时配置
-    Deadline    *time.Time        `json:"deadline,omitempty"` // 任务截止时间
+type Config struct {
+    FlowJSON    json.RawMessage   `json:"flowJson"`
+    ProtoFiles  map[string][]byte `json:"protoFiles,omitempty"`
+    LuaScripts  map[string][]byte `json:"luaScripts,omitempty"`
+    Codecs      map[string][]byte `json:"codecs,omitempty"`   // *_codec.json（每连接一份）
+    ErrorMap    []byte            `json:"errorMap,omitempty"` // 共享 errors.json
+    RobotConfig RobotConfig       `json:"robotConfig"`
+    Deadline    *time.Time        `json:"deadline,omitempty"`
 }
 ```
 
-**与计划的差异**：协议适配资源已改为 `Codecs`（多份 `*_codec.json`）+ `ErrorMap`（共享 `errors.json`）。
+`RobotConfig`：Concurrency、TimeoutSec、AccountPrefix、StartNumber、MainService、StateExtra、HeartbeatSec、HTTPTimeoutSec、ApdexT（毫秒）、DebugMode、LogLevel、RampUp。Config 同时实现 `bundle.Source` 接口供打包（`admin/task/types.go:110-123`）。
 
-### 3.5 RobotConfig
+### 3.4 Assignment / Dispatch / SharedRuntimeAssignment（`admin/task/types.go:191-249`）
 
-```go
-type RobotConfig struct {
-    Concurrency    int               `json:"concurrency"`               // 并发启动数
-    TimeoutSec     int               `json:"timeoutSec"`                // TCP 请求超时秒数
-    AccountPrefix  string            `json:"accountPrefix,omitempty"`   // 账号名前缀
-    StartNumber    int               `json:"startNumber,omitempty"`     // 起始编号
-    MainService    string            `json:"mainService,omitempty"`     // 主服务名
-    StateExtra     map[string]string `json:"stateExtra,omitempty"`      // 初始状态额外键值对
-    HeartbeatSec   int               `json:"heartbeatSec,omitempty"`    // 心跳间隔秒数
-    HTTPTimeoutSec int               `json:"httpTimeoutSec,omitempty"`  // HTTP 请求超时秒数
-    ApdexT         int               `json:"apdexT,omitempty"`          // Apdex 阈值（毫秒）
-    DebugMode      bool              `json:"debugMode,omitempty"`       // 调试模式
-    LogLevel       string            `json:"logLevel,omitempty"`        // 临时日志等级
-    RampUp         *RampUpConfig     `json:"rampUp,omitempty"`          // 渐进式加压配置
-}
-```
+- `Assignment`：TaskID、AgentID、AgentName、StartNumber（账号编号基数上累加）、TotalBots。
+- `Dispatch`（下发参数）：含 `StartIndex`（本节点在任务全局机器人序号中的 0-based 起点）、缩放后的 `RampUp`、可选 `Shared`（Redis 运行时下发，密码随内网控制面传输）。
+- 超时字段统一 int 秒数存储，Dispatcher 转为 `"Ns"` duration 字符串下发（`admin/command/dispatcher.go:59-61`）。
 
-### 3.6 RampUpConfig / RampUpStage
+### 3.5 CompletionReport（`admin/task/types.go:253-276`）
 
-```go
-type RampUpConfig struct {
-    Stages []RampUpStage `json:"stages"`
-}
+AgentID、TaskID、Result、ErrorMsg、FinishedAt、FinalSnapshot（整体终态或 reset 段落终态快照）、StageIndex（-1/0=最终；>0=reset 段落，值为「即将进入的配置阶段下标」，归档时映射为连续 1-based 段落号）、CleanupStatus（Agent 侧清理结果，`robot.CleanupStatus`）。
 
-type RampUpStage struct {
-    Count       int `json:"count"`                 // 本阶段新增 bot 数
-    Concurrency int `json:"concurrency,omitempty"` // 覆盖全局并发数
-    HoldSec     int `json:"holdSec,omitempty"`     // 阶段间等待秒数
-    Reset       bool `json:"reset,omitempty"`      // 开始前清空已有机器人
-}
-```
+### 3.6 AgentEvent（`admin/task/types.go:178-189`）
 
-### 3.7 Assignment
+Type ∈ `offline`（心跳超时）/ `reconnected`（分配节点恢复）/ `restarted`（节点进程实例已变化，任务丢失）。
 
-```go
-type Assignment struct {
-    TaskID      string `json:"taskId"`
-    AgentID     string `json:"agentId"`
-    AgentName   string `json:"agentName"`    // Agent 显示名称
-    StartNumber int    `json:"startNumber"`  // 本 Agent 的 bot 起始编号
-    TotalBots   int    `json:"totalBots"`    // 本 Agent 分配的 bot 数量
-}
-```
-
-**与计划的差异**：新增 `AgentName` 字段用于显示。
-
-### 3.8 TaskAssignment（Admin -> Agent 下发）
-
-```go
-type TaskAssignment struct {
-    TaskID            string            `json:"taskId"`
-    TaskName          string            `json:"taskName"`
-    StartNumber       int               `json:"startNumber"`
-    TotalBots         int               `json:"totalBots"`
-    AccountPrefix     string            `json:"accountPrefix"`
-    ConcurrentNum     int               `json:"concurrentNum"`
-    MainService       string            `json:"mainService"`
-    StateExtra        map[string]string `json:"stateExtra"`
-    HeartbeatInterval string            `json:"heartbeatInterval"` // duration 字符串如 "5s"
-    TCPTimeout        string            `json:"tcpTimeout"`
-    HTTPTimeout       string            `json:"httpTimeout"`
-    ApdexT            int               `json:"apdexT"`
-    LogLevel          string            `json:"logLevel,omitempty"`
-    ConfigURL         string            `json:"configUrl"`         // 配置下载基础 URL
-    ConfigFiles       []string          `json:"configFiles"`       // 需要下载的文件列表
-    RampUp            *RampUpConfig     `json:"rampUp,omitempty"`  // 已按比例缩放
-}
-```
-
-### 3.9 AgentNode
-
-```go
-type AgentNode struct {
-    ID              string        `json:"agentId"`
-    Name            string        `json:"name"`
-    Address         string        `json:"address"`
-    AppVersion      string        `json:"appVersion"`
-    MaxBots         int           `json:"maxBots"`
-    StressInterval  string        `json:"stressInterval"`
-    SystemInterval  string        `json:"systemInterval"`
-    StaticInfo      StaticInfo    `json:"staticInfo"`
-
-    // 运行时状态
-    Status          AgentStatus   `json:"status"`
-    LastHeartbeatAt time.Time     `json:"lastHeartbeatAt"`
-    CurrentTaskID   string        `json:"currentTaskId,omitempty"`
-    CurrentBots     int           `json:"currentBots"`
-
-    // 最新指标快照（不序列化到前端）
-    LatestStress    *monitor.CollectorSnapshot `json:"-"`
-    LatestSystem    *SystemSnapshot            `json:"-"`
-    StressUpdatedAt time.Time     `json:"stressUpdatedAt,omitempty"`
-    SystemUpdatedAt time.Time     `json:"systemUpdatedAt,omitempty"`
-}
-```
-
-### 3.10 StaticInfo
-
-```go
-type StaticInfo struct {
-    Hostname   string    `json:"hostname"`
-    OS         string    `json:"os"`
-    Arch       string    `json:"arch"`
-    NumCPU     int       `json:"numCpu"`
-    MemTotalMB uint64    `json:"memTotalMB"`
-    GoVersion  string    `json:"goVersion"`
-    KernelVer  string    `json:"kernelVer"`
-    StartedAt  time.Time `json:"startedAt"`
-}
-```
-
-### 3.11 AgentStatus
-
-```go
-type AgentStatus string
-
-const (
-    AgentIdle      AgentStatus = "idle"
-    AgentBusy      AgentStatus = "busy"
-    AgentUnhealthy AgentStatus = "unhealthy" // 心跳超 30s 未到
-    AgentOffline   AgentStatus = "offline"   // 心跳超 60s 未到
-)
-```
-
-### 3.12 上报报文
-
-```go
-type StressReport struct {
-    AgentID    string                    `json:"agentId"`
-    TaskID     string                    `json:"taskId"`
-    ReportedAt time.Time                 `json:"reportedAt"`
-    Snapshot   *monitor.CollectorSnapshot `json:"snapshot"`
-}
-
-type SystemReport struct {
-    AgentID    string         `json:"agentId"`
-    ReportedAt time.Time      `json:"reportedAt"`
-    Snapshot   SystemSnapshot `json:"snapshot"`
-}
-
-type TaskCompletionReport struct {
-    AgentID       string                    `json:"agentId"`
-    TaskID        string                    `json:"taskId"`
-    Result        TaskResult                `json:"result"`
-    ErrorMsg      string                    `json:"errorMsg,omitempty"`
-    FinishedAt    time.Time                 `json:"finishedAt"`
-    FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
-    StageIndex    int                       `json:"stageIndex,omitempty"` // -1 或零值=最终报告，>=0=阶段报告
-}
-```
-
-### 3.13 SystemSnapshot
-
-```go
-type SystemSnapshot struct {
-    Timestamp     time.Time `json:"timestamp"`
-    CPUPercent    float64   `json:"cpuPercent"`
-    CPUPerCore    []float64 `json:"cpuPerCore,omitempty"`
-    LoadAvg1      float64   `json:"loadAvg1,omitempty"`
-    LoadAvg5      float64   `json:"loadAvg5,omitempty"`
-    LoadAvg15     float64   `json:"loadAvg15,omitempty"`
-    MemTotalMB    uint64    `json:"memTotalMB"`
-    MemUsedMB     uint64    `json:"memUsedMB"`
-    MemPercent    float64   `json:"memPercent"`
-    SwapUsedMB    uint64    `json:"swapUsedMB,omitempty"`
-    ProcessRssMB  uint64    `json:"processRssMB"`
-    ProcessHeapMB uint64    `json:"processHeapMB"`
-    ProcessSysMB  uint64    `json:"processSysMB"`
-    NumGoroutine  int       `json:"numGoroutine"`
-    NumThread     int32     `json:"numThread"`
-    NumFD         int32     `json:"numFd,omitempty"`
-    GCCount       uint32    `json:"gcCount"`
-    GCPauseAvgMs  float64   `json:"gcPauseAvgMs,omitempty"`
-    NetSendKBps   float64   `json:"netSendKBps"`
-    NetRecvKBps   float64   `json:"netRecvKBps"`
-}
-```
-
-### 3.14 注册/心跳请求
-
-```go
-type RegisterRequest struct {
-    AgentID        string    `json:"agentId"`
-    Name           string    `json:"name"`
-    Address        string    `json:"address"`
-    AppVersion     string    `json:"appVersion"`
-    MaxBots        int       `json:"maxBots"`
-    StressInterval string    `json:"stressInterval"`
-    SystemInterval string    `json:"systemInterval"`
-    StaticInfo     StaticInfo `json:"staticInfo"`
-}
-
-type RegisterResponse struct {
-    AgentID        string `json:"agentId"`
-    HeartbeatTTL   string `json:"heartbeatTtl"`
-    StressEndpoint string `json:"stressEndpoint"`
-    SystemEndpoint string `json:"systemEndpoint"`
-}
-
-type HeartbeatRequest struct {
-    AgentID       string `json:"agentId"`
-    Timestamp     string `json:"timestamp"`
-    Status        string `json:"status"`
-    CurrentTaskID string `json:"currentTaskId,omitempty"`
-    CurrentBots   int    `json:"currentBots"`
-    AppVersion    string `json:"appVersion"`
-}
-```
-
-### 3.15 AgentEvent
-
-```go
-type AgentEvent struct {
-    AgentID   string    `json:"agentId"`
-    AgentName string    `json:"agentName"`
-    Type      string    `json:"type"`      // "offline" | "reconnected" | "restarted"
-    Timestamp time.Time `json:"timestamp"`
-    Detail    string    `json:"detail,omitempty"`
-}
-```
-
-### 3.16 聚合快照
+### 3.7 聚合结果（`admin/metrics/aggregator.go:24-35`）
 
 ```go
 type StressAggregate struct {
-    Snapshot        *monitor.CollectorSnapshot `json:"snapshot"`
-    ReportingAgents int                        `json:"reportingAgents"`
-    TotalAgents     int                        `json:"totalAgents"`
-    OfflineAgents   int                        `json:"offlineAgents"`
-    AssignedAgents  int                        `json:"assignedAgents"`
-}
-
-type ClusterSystemSnapshot struct {
-    Timestamp       time.Time          `json:"timestamp"`
-    AgentCount      int                `json:"agentCount"`
-    OnlineCount     int                `json:"onlineCount"`
-    OfflineCount    int                `json:"offlineCount"`
-    AvgCPUPercent   float64            `json:"avgCpuPercent"`
-    MaxCPUPercent   float64            `json:"maxCpuPercent"`
-    HotAgentID      string             `json:"hotAgentId,omitempty"`
-    HotAgentName    string             `json:"hotAgentName,omitempty"`
-    TotalMemMB      uint64             `json:"totalMemMB"`
-    UsedMemMB       uint64             `json:"usedMemMB"`
-    TotalNetSendKBps float64           `json:"totalNetSendKBps"`
-    TotalNetRecvKBps float64           `json:"totalNetRecvKBps"`
-    TotalGoroutines int                `json:"totalGoroutines"`
-    TotalThreads    int32              `json:"totalThreads"`
-    TotalFDs        int32              `json:"totalFds"`
-    Agents          []AgentSystemBrief `json:"agents"`
-}
-
-type AgentSystemBrief struct {
-    AgentID      string  `json:"agentId"`
-    Name         string  `json:"name"`
-    Status       string  `json:"status"`
-    CPUPercent   float64 `json:"cpuPercent"`
-    MemPercent   float64 `json:"memPercent"`
-    NumGoroutine int     `json:"numGoroutine"`
-    NetSendKBps  float64 `json:"netSendKBps"`
-    NetRecvKBps  float64 `json:"netRecvKBps"`
-    LastSeen     int64   `json:"lastSeen"`
+    Snapshot        *monitor.CollectorSnapshot
+    ReportingAgents int     // 有窗口状态的节点
+    TotalAgents     int     // 非离线节点
+    OfflineAgents   int
+    AssignedAgents  int     // CurrentTaskID 匹配的节点
+    FreshAgents     int     // 窗口新鲜（<= max(3×上报周期, 15s)）
+    StaleAgents     int
+    CoverageRatio   float64 // 数据覆盖率
+    AsOf            time.Time
 }
 ```
 
-### 3.17 历史归档类型
+系统聚合为 `metrics.ClusterSystemSnapshot`（CPU 均值/最大、内存求和、网络速率求和、在线/离线计数）。
 
-```go
-type HistoryRecord struct {
-    ID            string         `json:"id"`
-    Name          string         `json:"name"`
-    State         TaskState      `json:"state"`
-    TotalBots     int            `json:"totalBots"`
-    AgentCount    int            `json:"agentCount"`
-    CreatedAt     time.Time      `json:"createdAt"`
-    StartedAt     *time.Time     `json:"startedAt,omitempty"`
-    StoppedAt     *time.Time     `json:"stoppedAt,omitempty"`
-    DurationSec   int            `json:"durationSec"`
-    ErrorMsg      string         `json:"errorMsg,omitempty"`
-    Starred       bool           `json:"starred"`
-    Tags          []string       `json:"tags"`
-    Note          string         `json:"note"`
-    ConfigSummary ConfigSummary  `json:"configSummary"`
-}
+### 3.8 历史归档模型（`admin/history/types.go`）
 
-type ConfigSummary struct {
-    Concurrency int `json:"concurrency"`
-    TimeoutSec  int `json:"timeoutSec"`
-    FlowSizeKB  int `json:"flowSizeKB"`
-    ProtoCount  int `json:"protoCount"`
-    ScriptCount int `json:"scriptCount"`
-}
-
-type HistoryDetail struct {
-    HistoryRecord
-    Assignments  []Assignment              `json:"assignments"`
-    AgentReports []HistoryAgentReport      `json:"agentReports"`
-    AgentEvents  []AgentEvent              `json:"agentEvents,omitempty"`
-    FinalSnapshot monitor.CollectorSnapshot `json:"finalSnapshot"`
-    FinalSystem  ClusterSystemSnapshot     `json:"finalSystem"`
-}
-
-type HistoryAgentReport struct {
-    AgentID       string                    `json:"agentId"`
-    AgentName     string                    `json:"agentName"`
-    Result        TaskResult                `json:"result"`
-    ErrorMsg      string                    `json:"errorMsg,omitempty"`
-    FinishedAt    time.Time                 `json:"finishedAt"`
-    FinalSnapshot monitor.CollectorSnapshot `json:"finalSnapshot"`
-}
-
-type HistoryFilter struct {
-    State          string
-    StartedAfter   time.Time
-    StartedBefore  time.Time
-    Tags           []string     // 任一匹配
-    TagsAll        []string     // 全部匹配
-    Starred        *bool
-    Search         string       // 模糊匹配 name + ID
-    Limit          int          // 默认 20，上限 100
-    Offset         int
-    OrderBy        string       // 白名单防注入
-}
-
-type HistoryListResponse struct {
-    Total int             `json:"total"`
-    Items []HistoryRecord `json:"items"`
-}
-
-type UpdateHistoryRequest struct {
-    Starred *bool    `json:"starred,omitempty"`
-    Tags    []string `json:"tags,omitempty"`
-    Note    *string  `json:"note,omitempty"`
-}
-
-type CompareResponse struct {
-    Tasks []HistoryDetail `json:"tasks"`
-    Diff  CompareDiff     `json:"diff"`
-}
-
-type CompareDiff struct {
-    Actions map[string][]float64 `json:"actions"` // actionName -> [taskA_p99, taskB_p99, ...]
-}
-```
-
-### 3.18 时序采样
-
-```go
-type TimeseriesPoint struct {
-    TaskID     string          `json:"taskId"`
-    SampledAt  time.Time       `json:"sampledAt"`
-    ElapsedSec int             `json:"elapsedSec"`
-    DataType   string          `json:"dataType"` // "stress" | "system"
-    Snapshot   json.RawMessage `json:"snapshot"`
-}
-
-type TimeseriesResponse struct {
-    TaskID string            `json:"taskId"`
-    Stress []TimeseriesPoint `json:"stress"`
-    System []TimeseriesPoint `json:"system"`
-}
-```
+`Record`（列表行，含 starred/tags/note、activeAgentCount、stageCount）、`Detail`（完整内部数据）、`DetailResponse`（界面消费摘要）、`ConfigSummary`、`Filter`（state/时间范围/tags/tagsAll/starred/search/分页/排序白名单）。
 
 ---
 
 ## 4. 核心组件设计
 
-### 4.1 AdminServer
+### 4.1 Server 装配（`admin/app.go:43-223`）
 
 ```go
-type AdminServer struct {
+type Server struct {
     cfg Config
-
-    tasks      *TaskStore
-    agents     *AgentRegistry
-    aggregator *MetricsAggregator
-    dispatcher *AgentDispatcher
-    assigner   *Assigner
-
-    logsProxyClient *http.Client  // Agent 日志代理（5s 超时）
-
-    history *HistoryStore  // 可选，cfg.History.Enabled=false 时为 nil
-    sampler *Sampler       // 同上
-
-    httpSrv *http.Server
-    stopCh  chan struct{}
-    wg      sync.WaitGroup
+    tasks           *admintask.Store
+    agents          *agent.Registry
+    aggregator      *metrics.Aggregator
+    metricsWindows  *metrics.WindowStore
+    assigner        *admintask.Assigner
+    bundles         *bundle.Store
+    sessions        *grpcapi.SessionRegistry
+    commandStore    command.Store
+    commandBus      *command.Bus
+    commandDispatch *command.Dispatcher
+    completion      *admintask.CompletionService
+    metricsAccept   *metrics.AcceptanceService
+    metricsIngestor *metrics.Ingestor
+    history         *history.Store              // 可选（MySQL 启用时）
+    flows           *template.FlowTemplateStore // 可选
+    actionTemplates *template.ActionTemplateStore
+    listenTemplates *template.ListenTemplateStore
+    sampler         *metrics.Sampler            // 可选
+    db              *sql.DB                     // 全局共享 MySQL 连接池
+    sharedCleanup   *admintask.SharedCleanup    // 共享状态待清理队列（Redis 启用时）
+    managementSrv   *http.Server
+    grpcSrv         *grpc.Server
+    ...
 }
 ```
 
-**与计划的差异**：移除了 `binaries`（BinaryStore）和 `upgrader`（UpgradeOrchestrator），这两个组件已废弃。
+**装配顺序**（`NewServer`，`admin/app.go:81-223`）：
 
-**初始化顺序**（`NewAdminServer`）：
+1. MySQL（host 非空时）：`mysql.Open` + PING + `InitializeSchema`（首版当前结构，无迁移链）；失败即退出，不提供半健康服务
+2. 任务存储 `admintask.NewStore("data")`（加载恢复，活跃任务重置 failed）；资源包存储 `bundle.NewStore("data/bundles", 128)`
+3. `SessionRegistry`、命令日志 `command.NewMemoryStore(100_000)`、Bus（LRU 8192）、Dispatcher
+4. `AgentRegistry`（unhealthyAfter/offlineAfter 阈值解析 + `onAgentStatusChange` 回调 + `SetOnRestart`）；`CompletionService`
+5. `WindowStore`、`Aggregator`、`AcceptanceService`、`Ingestor`（latest-wins 槽位）
+6. `Assigner`
+7. MySQL 可用时：`HistoryStore` + `Sampler`（10s，硬编码）+ 三个模板 store（复用全局 db；未配 history 时模板库仍可用）
+8. `SetOnTerminal`（终态回调）
+9. Redis 可用时：连通性 PING 验证 + `SharedCleanup`
 
-```
- 1. TaskStore：从 data/tasks/ 恢复任务，活跃任务重置为 failed
- 2. AgentRegistry：创建空注册表，注册 onChange 回调
- 3. MetricsAggregator：注入 AgentRegistry 引用
- 4. AgentDispatcher：创建 HTTP client（30s 超时）
- 5. Logs proxy client：5s 超时 HTTP client
- 6. Assigner：创建分配器
- 7. HistoryStore（可选）：连接 MySQL -> Schema 迁移 -> 创建 Sampler
- 8. 终态回调：SetOnTerminal 设置归档触发器
-```
+**Run**（`admin/app.go:226-283`）：初始化协程池 → 启动指标摄取器、健康检查、历史清理循环、deadline 看门狗、共享清理重试 → 解析 heartbeatInterval/leaseDuration → 构造管理面 HTTP 服务器与 `grpcapi.NewServer` → `serveServers` 双 listener 并行 Serve，任一退出即整体 Shutdown。
 
-**启动顺序**（`Run`）：
+**Shutdown**（`admin/app.go:286-320` + `admin/server.go:101-131`）：先 `runtimeCancel` + close stopCh（避免关闭死锁，注释见 `admin/app.go:294-299`）→ `sessions.Close("Admin 正在关闭")`（广播 ServerClosing）→ gRPC `GracefulStop`（10s 上限后强制 Stop）→ HTTP 关闭 keep-alive 后 `Shutdown`（10s 超时；ReadHeaderTimeout 10s / IdleTimeout 120s 见 `admin/server.go:26-29`，Read/WriteTimeout 故意不设，history 导出可能很长）→ 协程池 Shutdown → HistoryStore 与全局 db 关闭。
 
-```
- 1. 初始化协程池（utils.InitWorkPool）
- 2. 启动 AgentRegistry 心跳超时检测协程
- 3. 启动 HistoryStore 定时清理协程（可选）
- 4. 启动 deadline 看门狗协程
- 5. 注册路由 + http.Server.ListenAndServe
- 6. 信号处理（SIGINT/SIGTERM -> Shutdown）
-```
-
-**关闭顺序**（`Shutdown`）：
-
-```
- 1. http.Server.SetKeepAlivesEnabled(false) -> Shutdown(10s timeout)
- 2. HistoryStore.Close()（先 cancel context 使 prune 协程中断，再 db.Close）
- 3. WorkPool.Shutdown()
- 4. close(stopCh)
-```
-
-### 4.2 TaskStore（含单例约束）
+### 4.2 任务存储与状态机（`admin/task/store.go`）
 
 ```go
-type TaskStore struct {
+type Repository[T, S] struct {
     mu    sync.RWMutex
-    tasks map[string]*Task   // taskID -> Task
-
-    // 单例约束
-    startMu  sync.Mutex     // 串行化 start 流程，防止 TOCTOU
-    activeID string         // 当前 active 任务 ID（"" 表示无）
-
-    dataDir string
-
-    // 终态回调（用于触发归档）
-    onTerminal func(task *Task)
-
-    // Admin 重启时恢复的活跃任务 ID
+    tasks map[string]T
+    startMu  sync.Mutex   // 串行化启动入口
+    activeID string       // 当前活跃任务 ID
+    dataDir  string
+    ...
+    onTerminal   func(T)
     recoveredIDs []string
 }
 ```
 
-**关键方法**：
+关键方法：`Create`（ID 冲突拒绝）、`Get/List/ListByState`（返回 Clone 副本）、`Update`（持锁变更 + 落盘）、`Delete`（活跃任务拒绝删除）、`Transition`（CAS 语义状态转换）、`Begin`（启动入口）、`ActiveTask/ActiveTaskID/HasActive`、`SetOnTerminal`。
 
-| 方法 | 说明 |
-|---|---|
-| `Create(t *Task) error` | 创建任务，自动持久化 |
-| `Get(id string) (*Task, bool)` | 获取任务浅拷贝 |
-| `List() []*Task` | 列出所有任务浅拷贝 |
-| `ListByState(state TaskState) []*Task` | 按状态过滤 |
-| `Update(id string, fn func(*Task)) error` | 更新任务（自动持久化） |
-| `Delete(id string) error` | 删除任务（仅终态可删） |
-| `Transition(id string, from, to TaskState) (*Task, error)` | 状态转换（校验合法性 + 持久化 + 终态回调） |
-| `StartTask(id string) (*Task, error)` | 启动入口（单例约束） |
-| `ActiveTask() *Task` | 获取当前活跃任务浅拷贝 |
-| `ActiveTaskID() string` | 获取当前活跃任务 ID |
-| `HasActive() bool` | 是否有活跃任务 |
-| `SetOnTerminal(fn func(task *Task))` | 设置终态回调 + 触发恢复任务归档 |
+**单活跃任务约束**：`Begin`（`admin/task/store.go:249-265`）在 `startMu` 下检查 `activeID`（冲突时返回 `TASK_CONFLICT` + 活跃任务详情）再执行 pending→starting。`activeID` 的登记/清除与状态写入收在同一把 `mu` 锁内（`admin/task/store.go:188-211`），消灭「starting 而 activeID 为空」的窗口（否则一次失败转换会让 activeID 永久指向已终结任务，只能重启 Admin，详见该处注释）。
 
-**单例约束实现要点**：
+**终态回调异步化**：`Transition` 进入终态时以 `TerminalClone`（JSON 深拷贝）副本提交协程池调用 `onTerminal`（`admin/task/store.go:207-210`），归档不阻塞状态机。
 
-`StartTask` 通过 `startMu`（Mutex）串行化并发启动请求。流程：
-1. 获取 `startMu` 锁
-2. 获取 `mu`（RLock）检查 `activeID`
-3. 如果 `activeID != ""`，返回 `TASK_CONFLICT` 错误（含活跃任务信息）
-4. 调用 `Transition(id, TaskPending, TaskStarting)`
-5. 获取 `mu`（Lock）设置 `activeID = id`
+**Admin 重启恢复**：`NewRepository`（`admin/task/store.go:51-67`）加载 `data/tasks/*.json` 时把活跃状态任务经 Adapter.Recover 重置为 `Failed`（`errorMsg = "admin restart, task lost"`，`admin/task/admin_store.go:24-28`），记入 `recoveredIDs`；`SetOnTerminal` 注册后对这些任务补放一次归档回调（`admin/task/store.go:71-79`）。
 
-**activeID 维护**：
+**状态转换矩阵**（`admin/task/store.go:267-280`）：pending→starting/stopped/failed；starting→running/failed；running→stopping/stopped/failed；stopping→**running**（停止命令创建失败的回滚边，`admin/httpapi/task_routes.go:530-533`）/stopped/failed。
 
-| 触发 | 动作 |
-|---|---|
-| `StartTask` 成功 | `activeID = id` |
-| `Transition(running -> stopping)` | 不变（仍 active） |
-| `Transition(* -> stopped/failed)` | `activeID = ""` + 触发 `onTerminal` 回调 |
-| Admin 重启时 active 任务恢复为 failed | `activeID = ""` + 通过 `recoveredIDs` 延迟触发归档 |
-
-**状态转换矩阵**：
-
-| 当前 | 允许转到 | 触发场景 | 占据单例位 |
-|---|---|---|---|
-| `pending` | `starting`、`failed`、`stopped` | `POST /tasks/{id}/start` / 内部错误 / 取消 | 否 |
-| `starting` | `running`、`failed` | 全部 Agent 接受 / 任意 Agent 失败 | 是 |
-| `running` | `stopping`、`stopped`、`failed` | `POST /tasks/{id}/stop` / deadline / 全节点失效 | 是 |
-| `stopping` | `stopped`、`failed` | 全部 Agent 上报 done / 超时强制完成 | 是 |
-| `stopped`、`failed` | （终态） | -- | 否 |
-
-**合法转换校验**（`validTransition`）：
+### 4.3 AgentRegistry（`admin/agent/registry.go`）
 
 ```go
-func validTransition(from, to TaskState) bool {
-    switch from {
-    case TaskPending:
-        return to == TaskStarting || to == TaskFailed || to == TaskStopped
-    case TaskStarting:
-        return to == TaskRunning || to == TaskFailed
-    case TaskRunning:
-        return to == TaskStopping || to == TaskStopped || to == TaskFailed
-    case TaskStopping:
-        return to == TaskStopped || to == TaskFailed
-    default:
-        return false
-    }
+type Registry struct {
+    mu        sync.RWMutex
+    agents    map[string]*Node
+    instances map[string]agentInstance // startedAt + taskID，用于识别进程重启
+    onChange  func(agentID string, from, to Status)
+    onRestart func(agentID, taskID string)
+    unhealthyThreshold, offlineThreshold time.Duration
 }
 ```
 
-**持久化策略**：
+- **Register**（`:79-125`）：gRPC 会话握手后调用；同 ID 直接覆盖为 idle 节点。实例重启检测：旧实例 `StartedAt` 与新 Hello 不同且旧实例仍持有任务 → 锁外触发 `onRestart`（`:90-94`、`:121-123`）
+- **Heartbeat**（`:128-160`）：更新 CurrentTaskID/CurrentBots；任务切换清空 `LatestStress` 防串数据；状态字符串校验（busy 必须带 currentTaskId、idle 不得带，`:167-182`）；触发 unhealthy/offline→在线恢复
+- **StartTask**（`:195-211`）：Start ACK 提交后同步节点状态，首个指标窗口无需等心跳
+- **CompleteTask**（`:215-234`）：仅在 taskID 仍是当前任务时清理；返回 false 表示报告迟到
+- **Touch**（`:237-250`）：任意请求路径刷新心跳；`touchLocked`（`:254-277`）处理 unhealthy/offline 恢复（有任务→busy，无任务→idle）
+- **Get/List/ListByStatus**（`:308-340`）：返回浅拷贝（`cloneNodeForRead`，`:349-352`）——标量字段在写锁内就地改写，裸指针会造成 data race
+- **UpdateSystem**（`:365-375`）：按快照 sequence 去重（旧帧丢弃）
+- **健康扫描**：`StartHealthChecker` 5s 轮询（`:378-393`）；`scanAndMarkStatus`（`:395-442`）标记 unhealthy/offline，**offline 标记后立即删除**（无 24h 延迟清理）；状态变更收集后在锁外 `fireOnChange`，防 AB-BA 死锁
 
-- 每次状态变更后写 `data/tasks/{id}.json`（原子写入：先写 `.tmp` 再 rename）
-- 启动时扫描所有 `*.json`：终态直接载入；active 状态（starting/running/stopping）重置为 `failed`，`errorMsg="admin restart, task lost"`
-- 清理旧版残留的 `.tmp.json` 文件
+### 4.4 Assigner（`admin/task/assignment.go`）
 
-### 4.3 AgentRegistry
+`Assign(task, idleAgents, startNumber)`：过滤 idle 且 MaxBots>0 → 容量校验 → `debugMode` 单节点优先（容量够且 MaxBots 最小；无则降级）→ `proportionalAssign` 按比例分配（基础数下取整 + 余数按最大剩余小数补齐，`sum == totalBots`）。
 
-```go
-type AgentRegistry struct {
-    mu       sync.RWMutex
-    agents   map[string]*AgentNode
-    cfg      RegistryConfig
-    onChange func(agentID string, from, to AgentStatus)
+### 4.5 命令链路（`admin/command/`）
 
-    unhealthyThreshold time.Duration
-    offlineThreshold   time.Duration
-}
-```
+- **MemoryStore**（`memory.go:22-46`）：内存命令日志，容量 100000；命令按 ID 索引、每 Agent 维持按全局递增 Sequence 的未决队列；落终态命令进 FIFO 供容量满时优先淘汰；`CreateBatch` 整批校验（身份/body/ID 唯一）后写入
+- **Bus**（`bus.go:26-43`）：写路径 `CreateBatch` 持久化 + 唤醒目标会话；读路径 `Resolve` 走 LRU 缓存（8192，返回 proto 克隆）；`PendingBatch` 以会话投递游标（非 ACK 游标）拉取补发；`Acknowledge` 校验 AgentId/Sequence/TaskId 与日志一致后落终态
+- **Dispatcher**（`dispatcher.go:34-110`）：
+  - `ScheduleStart`：`bundles.Build` 打包 → `SplitGlobalValues` 拆并发度 → share 检测注入 `SharedRuntimeAssignment` → 逐节点组装 `Dispatch`（缺省参数回退默认并打 Warn）→ 转 proto → 批量写入 Bus → 返回目标节点列表
+  - `ScheduleStop`：为目标节点生成 StopTask 命令（携带原因）
+  - `ScheduleShutdown`：为在线节点生成 Shutdown 命令；空列表报错不空投递
 
-**与计划的差异**：
-- `onChange` 回调在锁外触发（使用 `statusChange` 结构体收集变更，解锁后批量触发），避免 `agents.mu -> tasks.mu` 的 AB-BA 死锁。
-- offline 的 Agent 会被**直接删除**（而非仅标记），任务侧通过 `onChange` 回调处理。
-- 同 ID 重新注册时直接覆盖旧 entry（不拒绝），旧节点的关联任务由 `onAgentStatusChange` 处理。
+### 4.6 资源包存储（`admin/bundle/store.go`）
 
-**心跳超时分级**：
+- `Build`（`:91-161`）：flow/flow.json + proto/* + scripts/* + adapter/*_codec.json + adapter/errors.json 组装为 Deflate zip（条目排序保证确定性，`:163-197`），边写边算 SHA-256，临时文件 + rename 原子落盘；同摘要已存在则校验大小后复用
+- `Open`（`:216-247`）：按摘要定位归档、校验 offset、seek 后交出句柄；并发受 `streamSem`（128）限制，ctx 取消时等待让位
+- 下发分块 256KB，缓冲走 `sync.Pool` 复用（归还前清零，`:66-77`）
 
-```
-heartbeatLag = now - lastHeartbeatAt
+### 4.7 gRPC 控制面（`admin/grpcapi/`）
 
-heartbeatLag <  30s   -> idle / busy（保持业务状态）
-30s <= lag    <  60s   -> unhealthy
-60s <= lag             -> offline + 删除
-```
+- 服务器构造（`server.go:18-33`）：16MB 消息上限、keepalive（MaxConnectionIdle 30min / Time 2min / Timeout 20s / MinTime 1min / PermitWithoutStream）；**不设 MaxConnectionAge**——压测任务没有时长上限，控制连接必须能无限期存活
+- `Session`（`control_service.go:61-163`）：首帧必须 Hello → 协议版本校验 → `Sessions.Attach`（generation++，顶替旧会话）→ 注册节点 + **孤儿任务停止**（Hello 携带 currentTaskId 但 Admin 已不持有该任务 → ScheduleStop「停止孤儿压测」，`:106-123`）→ 回 Welcome（generation/heartbeatInterval/leaseDuration/serverTime）→ `Commands.Replay` 重放未决命令 → 发送循环（协程池）+ 接收循环（handler goroutine 独占 Recv）
+- **SessionRegistry**（`session.go:139-241`）：per-Agent gate 串行化 Attach 与 WithCurrent（防旧流写入新会话）；`Close(reason)` 广播 ServerClosing 并取消全部会话
+- **Session**（`session.go:17-134`）：commands/control/heartbeat 三通道；`CommandDispatchWindow = 16` 在途窗口；`orphanStop` 标记防孤儿停止命令重复下发
+- `DownloadBundle`（`bundle_service.go:24-80`）：`requireAgentID` → `store.Open(offset)` → 256KB 分块流式发送，透传取消
+- `Report`（`metrics_service.go:21-52`）：同流同 agent、generation 必须是当前会话；帧交给 `Ingestor.Offer`，结束时返回 accepted/rejected 计数
 
-阈值通过 `RegistryConfig` 配置，由 `utils.ParseDurationDefault` 解析。
+### 4.8 指标摄取与聚合（`admin/metrics/`）
 
-**关键方法**：
+- **Ingestor**（`ingestor.go:26-42`）：每 Agent×类型一个 pending 槽（latest-wins，容量 32768 键）；Recv 侧只做身份校验与槽位替换，昂贵的 monitor 转换/DDSketch 校验/落库在有界 worker（CPU 数夹 [4,32]）执行；`DropGeneration` 在会话结束时清理旧代槽位
+- **AcceptanceService**（`accept.go:37-63`）：Touch → 节点存在 → `CurrentTaskID` 匹配（不匹配静默丢弃返回 nil）→ 上报周期合法 → 活跃任务匹配 → `WindowStore.AcceptWithDrops`（窗口序列号重复判 duplicate，droppedIntervals 补账）→ 回写节点最新快照
+- **WindowStore**（`window_store.go:41-53`）：`AgentMetricState{LastSequence, DroppedIntervals, ReceivedAt(Admin 时钟，唯一新鲜度时间戳), Cumulative, LatestWindow}`
+- **Aggregator**（`aggregator.go:37-80`）：累计面合并全部上报节点窗口快照；区间报告只合并 fresh 节点（新鲜度 `max(3×ExpectedEvery, 15s)`）；DDSketch 严格合并重算百分位，绝不简单平均 P99
+- **Sampler**（`sampler.go:19-49`）：任务运行期每 10s 聚合压测+系统指标写 `task_timeseries`（含窗口指标列与 history_batch_token 幂等键）；写入失败仅 Warn
 
-| 方法 | 说明 |
-|---|---|
-| `Register(node *AgentNode) error` | 注册/重新注册 Agent（同 ID 覆盖） |
-| `Heartbeat(agentID string, req HeartbeatRequest) error` | 处理心跳，更新 CurrentTaskID/CurrentBots |
-| `Touch(agentID, appVersion string)` | 刷新心跳时间（任何 Agent 请求都视为 keepalive） |
-| `Deregister(agentID string) error` | 注销 Agent |
-| `Get(agentID string) (*AgentNode, bool)` | 获取 Agent（返回内部引用，仅只读使用） |
-| `List() []*AgentNode` | 列出所有 Agent |
-| `ListByStatus(status AgentStatus) []*AgentNode` | 按状态过滤 |
-| `UpdateStress(agentID string, snap *monitor.CollectorSnapshot, at time.Time)` | 更新压测快照 |
-| `UpdateSystem(agentID string, snap *SystemSnapshot, at time.Time)` | 更新系统快照 |
-| `StartHealthChecker(ctx context.Context)` | 启动心跳超时检测协程（5s 轮询） |
+### 4.9 CompletionService（`admin/task/completion.go`）
 
-**健康检测流程**（`scanAndMarkStatus`）：
+- `Accept(report)`：Touch → 校验汇报者在预期名单（`ExpectedAgents`：SucceededAgents 优先，空则 Assignments）→ `StageIndex>0` 为阶段报告（同节点同阶段幂等覆盖）→ 最终报告写入 Reports → 全员完毕聚合 CleanupSummary → running/stopping→stopped
+- `PermanentReportError`：汇报者不属于任务/任务不存在等不可重试错误——调用方应终态 NACK 丢弃，否则 Agent 无限重发
+- `OwnsActiveTask`：会话接管与心跳路由判定（活跃任务的待汇报成员）
 
-每 5 秒遍历所有 Agent，检查 `now - LastHeartbeatAt`：
-- 超过 `offlineThreshold` -> 标记 `offline`，**直接从 map 中删除**
-- 超过 `unhealthyThreshold` -> 标记 `unhealthy`
-- 收集所有状态变更，解锁后通过 `fireOnChange` 批量触发回调
-
-**状态恢复**（`touchLocked`）：
-
-unhealthy/offline 的 Agent 在收到任何请求（心跳/上报/done）时自动恢复：
-- `CurrentTaskID != ""` -> 恢复为 `busy`
-- `CurrentTaskID == ""` -> 恢复为 `idle`
-
-### 4.4 Assigner
-
-```go
-type Assigner struct{}
-```
-
-**分配算法**：
-
-1. 过滤 `idle` 且 `MaxBots > 0` 的 Agent
-2. 总容量校验：`sum(agent.MaxBots) >= task.TotalBots`
-3. **Debug 模式**：优先分配到单个容量足够的 Agent（选 MaxBots 最小的），无单节点容量够时降级为比例分配
-4. **比例分配**：按 `MaxBots` 比例分配 `TotalBots`，余数按最大小数部分补齐，保证 `sum(bots) == totalBots`
-
-```go
-func (a *Assigner) Assign(task *Task, agents []*AgentNode, startNumber int) ([]Assignment, error)
-func (a *Assigner) proportionalAssign(task *Task, agents []*AgentNode, startNumber int) []Assignment
-```
-
-**与计划的差异**：计划中的"均匀分配"被替换为"按 MaxBots 比例分配"，新增 Debug 模式单节点优先分配。
-
-### 4.5 MetricsAggregator
-
-```go
-type MetricsAggregator struct {
-    registry *AgentRegistry
-}
-```
-
-**聚合规则**：
-
-| 类别 | 字段 | 聚合函数 |
-|---|---|---|
-| 压测 | 所有匹配 `currentTaskID == taskID` 的 Agent 的 LatestStress | `monitor.MergeSnapshots`（重建直方图） |
-| 系统 | 所有 `status != offline` 的 Agent 的 LatestSystem | CPU 按核数加权平均、内存求和、网络求和、取最大 CPU Agent |
-
-**关键禁忌**：绝不简单平均 P99（数学错误）。必须通过 `monitor.MergeSnapshots` 重建合并直方图后插值计算百分位数。
-
-### 4.6 AgentDispatcher
-
-```go
-type AgentDispatcher struct {
-    httpClient *http.Client  // Timeout 30s
-}
-```
-
-**方法**：
-
-| 方法 | Agent 端点 | 重试次数 |
-|---|---|---|
-| `AssignTask(addr string, assignment TaskAssignment)` | `POST /agent/v1/task` | 2 |
-| `Stop(addr, taskID string)` | `POST /agent/v1/stop` | 2 |
-| `Shutdown(addr string)` | `POST /agent/v1/shutdown` | 1 |
-| `Version(addr string) (string, error)` | `GET /agent/v1/version` | 0 |
-
-**重试策略**：指数退避，初始 1s，上限 10s。
-
-**与计划的差异**：移除了 `Upgrade` 和 `Restart` 方法（自动升级已废弃）。
-
-### 4.7 HistoryStore（MySQL 历史归档）
-
-```go
-type HistoryStore struct {
-    cfg    HistoryConfig
-    db     *sql.DB
-    prune  time.Duration
-    cancel context.CancelFunc
-}
-```
-
-**关键方法**：
-
-| 方法 | 说明 |
-|---|---|
-| `Archive(ctx, task, finalStress, finalSys)` | 终态归档（事务写入 6 张表） |
-| `List(ctx, filter)` | 分页查询 + 多维过滤 |
-| `Get(ctx, id)` | 查询详情（含分配/报告/聚合/事件） |
-| `GetConfig(ctx, id)` | 查询配置归档 |
-| `GetTimeseries(ctx, id)` | 查询时序采样数据 |
-| `AllTags(ctx)` | 全部去重标签（JSON_TABLE 或降级扫描） |
-| `UpsertMeta(ctx, id, stageIndex, req)` | 更新 starred/tags/note（stageIndex<=0=任务级，>=1=段落级，统一写 task_meta） |
-| `Delete(ctx, id, force)` | 删除（starred 需要 force=true） |
-| `AppendTimeseries(ctx, taskID, point)` | 追加时序采样点 |
-| `PruneExpired(ctx, now)` | 清理过期记录（事务级联删除） |
-| `StartPruneLoop(ctx)` | 启动定时清理协程（24h 间隔） |
-| `Close()` | cancel context + db.Close() |
-
-**归档事务**（6 张表，按顺序写入）：
-
-1. `task_history`（ON DUPLICATE KEY UPDATE）
-2. `task_assignment`（批量 INSERT）
-3. `task_report`（批量 INSERT；含 reset 段落报告，按连续段号写入；末段额外写最终报告）
-4. `task_aggregated`（ON DUPLICATE KEY UPDATE；`-1` 整体 + 各 reset 段落 `MergeSnapshots` 聚合）
-5. `task_config_archive`（ON DUPLICATE KEY UPDATE）
-6. `task_agent_events`（批量 INSERT）
-
-**阶段段落归档**（`admin/stage_plan.go` + `history.go`）：含 `reset=true` 的渐进式加压任务，
-`buildStagePlan` 把 reset 边界映射为连续 1-based 段落号；`task_report` / `task_aggregated` / `task_timeseries`
-均按段号写入，三者对齐，支持按 `stageIndex` 查询单段详情与时序。reset 任务的 `stage_index=-1` 等于末段
-（Agent 每段 `Reset()` 采集器）。详见 `docs/ramp-up.md` §6.6。新增索引 `task_report.idx_task_stage`、
-`task_timeseries.idx_task_stage_elapsed`；旧库升级见 `deploy/upgrade.sql` 的 `sb_upgrade_stage_history()`（幂等）。
-
-**与计划的差异**：
-- 使用标准 `database/sql` 而非 `sqlx`
-- 事务内先插入再提交，无显式幂等检查（依赖 ON DUPLICATE KEY UPDATE）
-- 启动时自动移除旧版本遗留的物理外键约束（`dropLegacyForeignKeys`）
-
-### 4.8 Sampler（运行期时序采集）
-
-```go
-type Sampler struct {
-    interval   time.Duration        // 默认 10s
-    aggregator *MetricsAggregator
-    history    *HistoryStore
-    registry   *AgentRegistry
-    tasks      *TaskStore           // 读取活跃任务的 reset 进度，为采样点打段号
-
-    mu      sync.Mutex
-    current *samplerJob
-}
-
-type samplerJob struct {
-    taskID    string
-    startedAt time.Time
-    cancel    context.CancelFunc
-}
-```
-
-每 `interval` 秒执行：
-1. `AggregateStress(taskID)` -> JSON -> `AppendTimeseries`
-2. `AggregateSystem()` -> JSON -> `AppendTimeseries`
-3. `currentStageIndex(taskID)`：reset 任务按「已观测 reset 上报数 + 1」给采样点打段号（非 reset/非 ramp 为 -1）
-
-写入失败仅 log warn，不影响下次采样。
-
-### 4.9 Agent 状态变更处理
-
-AdminServer 注册了 `onAgentStatusChange` 回调，当 Agent 状态变更时触发：
+### 4.10 Agent 状态变更处理（`admin/app.go:421-546`）
 
 | 场景 | 处理 |
 |---|---|
-| busy/unhealthy -> idle（重新注册） | 合成 `failed` report，记录 `restarted` 事件，检查是否所有节点失效 |
-| offline -> idle/busy（恢复） | 记录 `reconnected` 事件 |
-| * -> offline（离线） | 记录 `offline` 事件；stopping 状态下合成 report 并可能转 stopped；running 状态下检查是否所有节点失效 |
+| offline → idle/busy（恢复） | 记录 `reconnected` 事件 |
+| 分配节点离线（→offline） | 记录 `offline` 事件；stopping 中合成 failed report（CleanupStatus=未知），全报即转 stopped；running 中 `checkAndStopIfAllLost` |
+| 实例重启（onRestart） | 记录 `restarted` 事件 + 合成 failed report（「节点进程重启，任务已丢失」）+ `checkAndStopIfAllLost` |
 
-**autoStopTask**（自动停止任务）：
-- 触发条件：所有分配节点都已失效（offline 或已合成 report）
-- TaskStarting 阶段：直接转 TaskFailed
-- TaskRunning 阶段：转 TaskStopping -> 发送 stop -> 合成 report -> 转 TaskFailed
+`checkAndStopIfAllLost`（`admin/app.go:689-717`）：预期节点全部（已有 report / 已删除 / offline / CurrentTaskID 不匹配）→ `autoStopTask`。
 
-**stopTimeout**（停止超时安全网）：
-- 停止任务后启动 30s 定时器
-- 30s 后任务仍在 stopping，为未上报节点合成 report 并转 stopped
+`autoStopTask`（`admin/app.go:720-788`）：starting 直接转 failed；running→stopping → 对目标节点 ScheduleStop → 为未上报节点合成 failed report → stopping→failed。
+
+**停止超时安全网**（`admin/app.go:616-683`）：`stopWaitTimeout = 60s`（≥ Agent closeRobotsTimeout 15s + Robot.Close 兜底 10s + 上报延迟，否则 Agent 真实上报到达前 Admin 已合成 fake report 并归档）；超时后为未上报节点合成 stopped report 并转 stopped；`GoWithStop` + `waitStopGuard` 让进程关闭时立即放弃等待。
+
+### 4.11 终态归档（`admin/app.go:322-370`）
+
+`onTaskTerminal`：停 Sampler → `cleanupSharedState`（Redis 命名空间清理登记）→ 协程池异步：优先 `buildFinalStressFromReports`（Agent 终止报告聚合，过滤空快照），空则兜底窗口聚合；`AggregateSystem`；`history.Archive`。history 未启用时 `metricsWindows.DropTask` 释放窗口状态。
 
 ---
 
 ## 5. HTTP API 完整路由表
 
-### 5.1 Agent 上行 API（7 个端点）
+路由注册：`admin/httpapi/routes.go:21-127`；契约：`api/admin/openapi.yaml`。共 **62 个操作 / 45 个路径**，另有 `/sbot/docs`、`/sbot/openapi.yaml` 与根路径静态托管。
+
+### 5.1 任务（7）
 
 | 方法 | 路由 | Handler | 说明 |
 |---|---|---|---|
-| `POST` | `/sbot/agent/register` | `handleAgentRegister` | Agent 注册 |
-| `POST` | `/sbot/agent/{id}/heartbeat` | `handleAgentHeartbeat` | 心跳 |
-| `POST` | `/sbot/agent/{id}/deregister` | `handleAgentDeregister` | 主动注销 |
-| `POST` | `/sbot/agent/stress` | `handleAgentStressReport` | 压测指标上报 |
-| `POST` | `/sbot/agent/system` | `handleAgentSystemReport` | 系统指标上报 |
-| `POST` | `/sbot/agent/{id}/task/{tid}/done` | `handleAgentTaskDone` | 任务完成上报 |
-| `GET` | `/sbot/agent/{id}/pending-task` | `handleAgentPendingTask` | 拉取待执行任务 |
+| `POST` | `/sbot/tasks` | `handleCreateTask` | 创建任务（multipart ≤32MB；flow.json 必需；codec 走 Schema 校验；rampUp 之和=totalBots；deadline 可选；flowTemplateId 可选校验存在；资源写磁盘基线） |
+| `GET` | `/sbot/tasks` | `handleListTasks` | 列表（state 过滤 + offset/limit 分页） |
+| `GET` | `/sbot/tasks/{id}` | `handleGetTask` | 详情（PublicCopy 剥离 sketch） |
+| `GET` | `/sbot/tasks/{id}/config/{path}` | `handleGetTaskConfig` | 配置文件下载（flow/flow.json、config.json 摘要、adapter/*、proto、scripts） |
+| `POST` | `/sbot/tasks/{id}/start` | `handleStartTask` | 启动（见 §7） |
+| `POST` | `/sbot/tasks/{id}/stop` | `handleStopTask` | 停止（仅 running；停止命令创建失败回滚 stopping→running） |
+| `DELETE` | `/sbot/tasks/{id}` | `handleDeleteTask` | 删除（仅终态，204） |
 
-### 5.2 前端-资源基线（1 个端点）
+### 5.2 节点管理（5）
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `POST` | `/sbot/resources/baseline` | `handleUpdateBaseline` | 前端推送 IDB 资源到磁盘基线 |
+| 方法 | 路由 | 说明 |
+|---|---|---|
+| `GET` | `/sbot/agents` | 列出全部节点（含简要指标） |
+| `GET` | `/sbot/agents/{id}` | 节点详情 |
+| `DELETE` | `/sbot/agents/{id}` | 删除节点（仅 offline 可删） |
+| `POST` | `/sbot/agents/{id}/shutdown` | 下发 Shutdown 命令（单个） |
+| `POST` | `/sbot/agents/shutdown-all` | 下发 Shutdown 命令（全部在线） |
 
-### 5.3 前端-任务（7 个端点）
+### 5.3 指标（7）
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `POST` | `/sbot/tasks` | `handleCreateTask` | 创建任务（multipart） |
-| `GET` | `/sbot/tasks` | `handleListTasks` | 列出任务（支持 state 过滤 + 分页） |
-| `GET` | `/sbot/tasks/{id}` | `handleGetTask` | 任务详情 |
-| `GET` | `/sbot/tasks/{id}/config/{path...}` | `handleGetTaskConfig` | 下载任务配置文件（Agent 也用此 URL） |
-| `POST` | `/sbot/tasks/{id}/start` | `handleStartTask` | 启动任务（分配 + 推送） |
-| `POST` | `/sbot/tasks/{id}/stop` | `handleStopTask` | 停止任务 |
-| `DELETE` | `/sbot/tasks/{id}` | `handleDeleteTask` | 删除任务（仅终态） |
+`GET /sbot/metrics`（集群压测聚合 + 覆盖率）、`/sbot/metrics/summary`（文本摘要）、`/sbot/metrics/agents`、`/sbot/metrics/agents/{id}`、`/sbot/system`（集群系统聚合）、`/sbot/system/agents`、`/sbot/system/agents/{id}`。
 
-### 5.4 前端-Agent（5 个端点）
+### 5.4 历史归档（11）
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `GET` | `/sbot/agents` | `handleListAgents` | 列出所有 Agent（含简要指标） |
-| `GET` | `/sbot/agents/{id}` | `handleGetAgent` | Agent 详情 |
-| `DELETE` | `/sbot/agents/{id}` | `handleDeleteAgent` | 删除 Agent（仅 offline 可删） |
-| `POST` | `/sbot/agents/{id}/shutdown` | `handleShutdownAgent` | 关机命令 |
-| `POST` | `/sbot/agents/shutdown-all` | `handleShutdownAllAgents` | 全部关机 |
+`GET /sbot/history`（分页过滤）、`/sbot/history/tags`、`/sbot/history/compare`（多任务对比）；`GET/PUT/DELETE /sbot/history/{id}`（PUT 更新 starred/tags/note，DELETE starred 需 force=true）；`GET /sbot/history/{id}/agents`、`/config`（摘要）、`/config/archive`（原始归档）、`/timeseries`（maxPoints 采样降采样）；`POST /sbot/history/{id}/clone`（创建 pending 新任务，不自动启动）。
 
-### 5.5 前端-指标（7 个端点）
+### 5.5 基线资源（7）
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `GET` | `/sbot/metrics` | `handleGetMetrics` | 当前任务的集群压测聚合 |
-| `GET` | `/sbot/metrics/summary` | `handleGetMetricsSummary` | 文本摘要 |
-| `GET` | `/sbot/metrics/agents` | `handleGetAgentMetrics` | 各 Agent 最新压测快照 |
-| `GET` | `/sbot/metrics/agents/{id}` | `handleGetSingleAgentMetrics` | 指定 Agent 压测快照 |
-| `GET` | `/sbot/system` | `handleGetSystem` | 集群系统聚合 |
-| `GET` | `/sbot/system/agents` | `handleGetSystemAgents` | 各 Agent 系统快照 |
-| `GET` | `/sbot/system/agents/{id}` | `handleGetSystemAgent` | 指定 Agent 系统快照 |
+`GET /sbot/baseline/proto/index.json`、`/sbot/baseline/proto/{name}`、`scripts/index.json`、`scripts/{name}`、`adapter/index.json`、`adapter/{name}`（多 `*_codec.json` + errors.json 透传）、`flow/flow.json`。
 
-### 5.6 历史归档（10 个端点）
+### 5.6 流程模板（7）
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `GET` | `/sbot/history` | `handleListHistory` | 历史任务列表（分页 + 过滤） |
-| `GET` | `/sbot/history/tags` | `handleGetHistoryTags` | 全部去重标签 |
-| `GET` | `/sbot/history/{id}` | `handleGetHistory` | 历史任务详情 |
-| `PUT` | `/sbot/history/{id}` | `handleUpdateHistory` | 更新 starred/tags/note |
-| `DELETE` | `/sbot/history/{id}` | `handleDeleteHistory` | 删除（starred 需要 force=true） |
-| `GET` | `/sbot/history/{id}/agents` | `handleGetHistoryAgents` | 各 Agent 完成报告 |
-| `GET` | `/sbot/history/{id}/config` | `handleGetHistoryConfig` | 任务配置归档 |
-| `GET` | `/sbot/history/{id}/timeseries` | `handleGetHistoryTimeseries` | 时序采样数据 |
-| `POST` | `/sbot/history/{id}/clone` | `handleCloneHistory` | 用历史配置创建新任务（pending） |
-| `GET` | `/sbot/history/compare` | `handleCompareHistory` | 多任务对比（2~5 个） |
+`GET/POST /sbot/flows`、`GET/PUT /sbot/flows/snapshot`（快照整体读取/替换）、`GET/PUT/DELETE /sbot/flows/{id}`。
 
-### 5.7 日志（6 个端点）
+### 5.7 动作模板（7）与监听模板（7）
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `GET` | `/sbot/logs/admin` | `handleGetAdminLogs` | Admin 本地 Ring buffer 日志 |
-| `GET` | `/sbot/logs/agents/{id}` | `handleGetAgentLogs` | 代理转发 Agent 日志 |
-| `GET` | `/sbot/logs/admin/files` | `handleListAdminLogFiles` | 列出 Admin 日志文件 |
-| `GET` | `/sbot/logs/admin/files/{name}` | `handleDownloadAdminLogFile` | 下载 Admin 日志文件 |
-| `GET` | `/sbot/logs/agents/{id}/files` | `handleListAgentLogFiles` | 代理列出 Agent 日志文件 |
-| `GET` | `/sbot/logs/agents/{id}/files/{name}` | `handleDownloadAgentLogFile` | 代理下载 Agent 日志文件 |
+`/sbot/action-templates`、`/sbot/action-templates/snapshot`、`/sbot/action-templates/{id}` 与 `/sbot/listen-templates`、`/sbot/listen-templates/snapshot`、`/sbot/listen-templates/{id}`，方法组合与流程模板一致。
 
-### 5.8 基线资源读取（8 个端点）
+### 5.8 其它（4）
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `GET` | `/sbot/baseline/proto/index.json` | `handleBaselineProtoIndex` | 列出 proto 文件 |
-| `GET` | `/sbot/baseline/proto/{name}` | `handleBaselineProtoFile` | 下载 proto 文件 |
-| `GET` | `/sbot/baseline/scripts/index.json` | `handleBaselineScriptIndex` | 列出 Lua 脚本 |
-| `GET` | `/sbot/baseline/scripts/{name}` | `handleBaselineScriptFile` | 下载 Lua 脚本 |
-| `GET` | `/sbot/baseline/adapter/index.json` | `handleBaselineCodecIndex` | 列出 adapter 基线文件 |
-| `GET` | `/sbot/baseline/adapter/{name}` | `handleBaselineCodecFile` | 下载指定 codec/errors 文件 |
-| `GET` | `/sbot/baseline/flow/flow.json` | `handleBaselineFlow` | 下载 flow.json |
-| `GET` | `/sbot/baseline/config.json` | `handleBaselineConfig` | 下载 config.json |
+`GET /sbot/api/error-codes`（错误码索引）、`GET /sbot/capabilities`（sharedState/flowLibrary/templateLibrary 能力探测，Redis 地址脱敏展示）、`POST /sbot/codec/preview`（声明式 codec 纯计算预览）、`GET /sbot/codec/algorithms`（算法元数据）。
 
-### 5.9 错误码（1 个端点）
+### 5.9 静态资源与文档
 
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `GET` | `/sbot/api/error-codes` | `handleErrorCodeIndex` | 列出所有错误码 |
-
-### 5.10 静态资源（1 个端点）
-
-| 方法 | 路由 | Handler | 说明 |
-|---|---|---|---|
-| `*` | `/` | `http.FileServer` | 前端静态资源托管 |
-
-**总计：53 个端点**
+`GET /sbot/docs`（Swagger UI）、`GET /sbot/openapi.yaml`（契约本体，`admin/httpapi/routes.go:23-24`）；`/` 由 `http.FileServer` 托管前端构建产物（`routes.go:111-112`）。
 
 ---
 
-## 6. 完整 MySQL DDL（8 张表）
+## 6. MySQL 结构（11 张表）
 
-```sql
--- ===== 1. 任务历史主表 =====
-CREATE TABLE IF NOT EXISTS task_history (
-    id              VARCHAR(32)  NOT NULL PRIMARY KEY,
-    name            VARCHAR(255) NOT NULL DEFAULT '',
-    state           VARCHAR(32)  NOT NULL DEFAULT '',
-    total_bots      INT          NOT NULL DEFAULT 0,
-    agent_count     INT          NOT NULL DEFAULT 0,
-    created_at      DATETIME(3)  NOT NULL,
-    started_at      DATETIME(3)  NULL,
-    stopped_at      DATETIME(3)  NULL,
-    duration_sec    INT          NOT NULL DEFAULT 0,
-    error_msg       TEXT,
-    debug_mode      TINYINT(1)   NOT NULL DEFAULT 0,
-    config_summary  JSON         NULL,
-    stage_count     INT          NOT NULL DEFAULT 0,
-    INDEX idx_state (state),
-    INDEX idx_created (created_at DESC),
-    INDEX idx_started (started_at),
-    INDEX idx_stopped (stopped_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
--- 注：starred/tags/note 已迁出到 task_meta（见第 8 表），task_history 不再保存元数据。
+内嵌 DDL：`admin/mysql/schema_definition.go:8-172`。启动时 `mysql.InitializeSchema` 建当前结构；**首版不维护迁移版本链**（`conf/admin.toml:84`）。
 
--- ===== 2. 集群分配快照 =====
-CREATE TABLE IF NOT EXISTS task_assignment (
-    id              BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    task_id         VARCHAR(32)  NOT NULL,
-    agent_id        VARCHAR(64)  NOT NULL,
-    start_number    INT          NOT NULL DEFAULT 0,
-    total_bots      INT          NOT NULL DEFAULT 0,
-    INDEX idx_task (task_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ===== 3. Agent 完成报告 =====
-CREATE TABLE IF NOT EXISTS task_report (
-    id              BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    task_id         VARCHAR(32)  NOT NULL,
-    agent_id        VARCHAR(64)  NOT NULL,
-    agent_name      VARCHAR(255) NOT NULL DEFAULT '',
-    result          VARCHAR(32)  NOT NULL DEFAULT '',
-    error_msg       TEXT,
-    finished_at     DATETIME(3)  NULL,
-    final_snapshot  JSON         NULL,
-    stage_index     INT          NOT NULL DEFAULT -1,
-    INDEX idx_task (task_id),
-    INDEX idx_task_stage (task_id, stage_index)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ===== 4. 集群聚合终态快照 =====
-CREATE TABLE IF NOT EXISTS task_aggregated (
-    task_id         VARCHAR(32)  NOT NULL,
-    stage_index     INT          NOT NULL DEFAULT -1,
-    final_stress    JSON         NULL,
-    final_system    JSON         NULL,
-    PRIMARY KEY (task_id, stage_index)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ===== 5. 时序采样数据 =====
-CREATE TABLE IF NOT EXISTS task_timeseries (
-    id              BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    task_id         VARCHAR(32)  NOT NULL,
-    sampled_at      DATETIME(3)  NOT NULL,
-    elapsed_sec     INT          NOT NULL DEFAULT 0,
-    data_type       VARCHAR(32)  NOT NULL,
-    snapshot        JSON         NOT NULL,
-    stage_index     INT          NOT NULL DEFAULT -1,
-    INDEX idx_task_type (task_id, data_type, elapsed_sec),
-    INDEX idx_task_stage_elapsed (task_id, stage_index, elapsed_sec)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ===== 6. 任务配置归档 =====
-CREATE TABLE IF NOT EXISTS task_config_archive (
-    task_id         VARCHAR(32)  NOT NULL PRIMARY KEY,
-    flow_json       MEDIUMBLOB   NULL,
-    proto_files     MEDIUMBLOB   NULL,
-    lua_scripts     MEDIUMBLOB   NULL,
-    robot_config    JSON         NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ===== 7. Agent 事件记录 =====
-CREATE TABLE IF NOT EXISTS task_agent_events (
-    id              BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    task_id         VARCHAR(32)  NOT NULL,
-    agent_id        VARCHAR(64)  NOT NULL,
-    agent_name      VARCHAR(255) NOT NULL DEFAULT '',
-    event_type      VARCHAR(32)  NOT NULL,
-    timestamp       DATETIME(3)  NOT NULL,
-    detail          TEXT,
-    INDEX idx_task (task_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ===== 8. 统一元数据（收藏/标签/备注）=====
--- 与 task_report/aggregated/timeseries 同构：(task_id, stage_index) 键，stage_index=-1 为任务级
--- （所有任务），>=1 为 reset 渐进式加压的各阶段段落。行按需懒创建。
-CREATE TABLE IF NOT EXISTS task_meta (
-    task_id         VARCHAR(32)  NOT NULL,
-    stage_index     INT          NOT NULL DEFAULT -1,
-    starred         TINYINT(1)   NOT NULL DEFAULT 0,
-    tags            JSON         NULL,
-    note            TEXT,
-    updated_at      DATETIME(3)  NOT NULL,
-    PRIMARY KEY (task_id, stage_index),
-    INDEX idx_starred (starred)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+task_history          -- 主表：state、active_agent_count、stage_count、flow_template_id、config_summary(JSON)
+task_assignment       -- 分配快照（每节点一条）
+task_report           -- 节点报告：final_snapshot/cleanup_status(JSON)、stage_index、idx_task_stage
+task_aggregated       -- 集群终态快照，复合主键 (task_id, stage_index)
+task_timeseries       -- 运行期采样：窗口指标列、uq_task_history_batch 幂等键、idx_task_stage_elapsed
+task_config_archive   -- flow/proto/scripts/codecs/error_map(MEDIUMBLOB) + robot_config(JSON)
+task_agent_events     -- 节点状态事件
+task_meta             -- starred/tags/note，主键 (task_id, stage_index)，-1=任务级 / >=1=reset 段落
+flow_template         -- 流程模板（flow_json/layout_json）
+action_template       -- 共享动作模板（name 唯一，utf8mb4_bin）
+listen_template       -- 共享监听模板（name 唯一，default_ref_json）
 ```
 
-**与计划的差异**：
-- 主键 `id` 长度从 `VARCHAR(36)` 改为 `VARCHAR(32)`（使用 16 字节随机 hex 而非 UUID）
-- 所有子表**不使用物理外键**（符合项目约定"数据库只用逻辑外键"），启动时自动清理旧版本遗留的外键约束
-- `task_history` 新增 `stage_count` 字段（渐进式加压阶段数）
-- `task_report` 新增 `agent_name`、`stage_index` 字段
-- `task_aggregated` 使用复合主键 `(task_id, stage_index)`
-- `task_timeseries` 新增 `stage_index` 字段
-- `task_config_archive` 使用 `MEDIUMBLOB` 而非 `MEDIUMTEXT`（存储二进制数据）
-- 新增第 7 张表 `task_agent_events`（计划中无此表）
-- 新增第 8 张表 `task_meta`（统一收藏/标签/备注，主键 `(task_id, stage_index)`，`-1`=任务级、`>=1`=reset 段落）；`task_history` 的 `starred/tags/note` 三列已迁入此表
+约定：主键 `id` 为 32 字符随机 hex；**只用逻辑外键**，无 FOREIGN KEY，级联删除由应用层处理。模板库与 history 共用全局 MySQL 连接池（`admin/app.go:176-191`）：MySQL 未启用时 HistoryStore 为 nil（`/sbot/history*` 返回 `HISTORY_DISABLED`，`admin/app.go:192-195`），三个模板 store 同样为 nil。
+
+**归档事务**（`admin/history/store.go:88` 起）：task_history（幂等）+ task_assignment + task_report（含段落报告按连续段号）+ task_aggregated（-1 整体 + 各段落）+ task_config_archive + task_agent_events；reset 段落机制详见 `docs/ramp-up.md`。
+
+**数据保留**：`retentionDays`（默认 90，<=0 回退 90）裁剪，24h 周期；starred 永不自动删除（`admin/history/store.go:1451`、`:1524`）。
 
 ---
 
-## 7. 任务状态机时序
+## 7. 任务启动/停止时序
 
-```
-[创建] --create--> pending
-pending --start--> starting --任意 agent 失败--> failed
-                   '--所有 agent 接受--> running --stop/deadline--> stopping
-                                                     '--全部 agent done--> stopped
-                                                     '--全节点失效--> failed
-starting --全节点失效--> failed
-stopping --全部 agent done--> stopped
-stopping --超时 30s--> stopped（强制合成 report）
-```
+### 7.1 handleStartTask（`admin/httpapi/task_routes.go:380-463`）
 
-**完成判定**：
-- `TaskCompletionReport` 到达 -> 记入 `task.Reports[agentID]`
-- `len(task.Reports) == len(task.Assignments)` -> 所有 agent 已 done -> 转到 stopped
-- 阶段完成报告（`StageIndex > 0`）存入 `StageReports`，不触发状态转换
-- 停止超时安全网：30s 后未完成的节点自动合成 `stopped` report
+1. `tasks.StartTask`（Begin：单例约束 + pending→starting）
+2. 共享状态检测：脚本使用 share 但未配 Redis → starting→failed + `SHARED_STATE_UNAVAILABLE`
+3. `Assigner.Assign`（空闲节点分配；失败 starting→failed）
+4. `ValidateDistributedConcurrency`
+5. 保存 assignments、启动 Sampler
+6. 协程池 `startTaskBackground`（`task_routes.go:465-495`）：任务不存在即取消；`ScheduleStart` 创建 gRPC 启动命令 → 成功节点记入 `SucceededAgents` → starting→running（随后 `finishTaskIfFullyReported` 兜底瞬时完成）；命令创建失败 → starting→failed + 停 Sampler
+7. 立即返回 202 + assignments
 
-**自然完成路径**：
-1. Agent 完成任务 -> `POST /sbot/agent/{id}/task/{tid}/done`（`result=completed`）
-2. Admin 收到 report -> 存入 `task.Reports`
-3. 最后一个 report 到达 -> `running -> stopped`
+### 7.2 handleStopTask（`admin/httpapi/task_routes.go:497-548`）
 
-**手动停止路径**：
-1. 前端 -> `POST /sbot/tasks/{id}/stop` -> `running -> stopping`
-2. 向在线节点发送 stop RPC
-3. 为已离线节点合成 `stopped` report
-4. Agent 完成后上报 done（`result=stopped`）
-5. 最后一个 report 到达 -> `stopping -> stopped`
-6. 安全网：30s 后强制合成
+1. 任务必须 running
+2. running→stopping
+3. 目标节点（SucceededAgents 优先）`ScheduleStop`；失败回滚 stopping→running 并报 500
+4. `synthesizeOfflineReports`（离线节点合成 stopped report）；全报 → stopping→stopped，否则 60s 安全网
+5. 返回 202 + 任务摘要
 
-**Deadline 超时路径**：
-1. DeadlineWatchdog 每 5s 检查
-2. `task.Config.Deadline != nil && now.After(*Deadline)` -> `autoStopTask`
-3. 调用 `running -> stopping -> ...` 链路
+### 7.3 自然完成
+
+Agent 最终报告（gRPC FinalReport）→ `CompletionService.Accept` → 全员完毕 → running/stopping→stopped；阶段报告（StageIndex>0）只入 StageReports 不触发状态转换。
+
+### 7.4 Deadline 超时
+
+`startDeadlineWatchdog`（`admin/app.go:802-828`）5s 检查活跃任务 `Config.Deadline`，超时 `autoStopTask("任务超时")`。
 
 ---
 
 ## 8. 锁顺序说明
 
-Admin 中存在多个互斥锁，必须严格遵守获取顺序以避免死锁：
-
-| 锁 | 保护对象 | 持有者 |
+| 锁 | 保护对象 | 备注 |
 |---|---|---|
-| `tasks.startMu` | 串行化任务启动 | `TaskStore.StartTask` |
-| `tasks.mu` (RWMutex) | tasks map + activeID | 所有 TaskStore 方法 |
-| `agents.mu` (RWMutex) | agents map | 所有 AgentRegistry 方法 |
-| `sampler.mu` | samplerJob | `Sampler.Start/Stop` |
-| `history.db` | MySQL 连接 | 所有 HistoryStore 方法 |
+| `tasks.startMu` | 串行化启动入口 | `Repository.Begin` |
+| `tasks.mu` | tasks map + activeID | activeID 与状态同临界区（`store.go:188-211`） |
+| `agents.mu` | agents map + instances | `fireOnChange` 锁外触发回调 |
+| `sessions.gates[agentID]` | 串行化 Attach 与 WithCurrent | 防旧流写入新会话 |
+| `sampler.mu` | samplerJob | Start/Stop |
 
-**锁获取顺序**（从外到内）：
-
-```
-1. tasks.startMu -> tasks.mu（StartTask 内部）
-2. agents.mu（任何 Agent 操作）
-3. tasks.mu（任何 Task 操作）
-4. 绝不：tasks.mu -> agents.mu（AB-BA 死锁）
-```
-
-**关键防死锁设计**：
-- `AgentRegistry.fireOnChange`：在锁**外**触发回调，收集 `statusChange` 列表后解锁再调用 `onChange`
-- `handleAgentTaskDone`：先调用 `agents.Touch/Heartbeat`（操作 agents.mu），再调用 `tasks.Update`（操作 tasks.mu），最后在 Update 外部调用 `tasks.Transition`
-- `TaskStore.Transition`：终态回调通过 `json.Marshal/Unmarshal` 深拷贝后异步执行（`utils.GetWorkPool().Go`），避免在 tasks.mu 锁内触发 agents.mu 操作
+**顺序**：`agents.mu` → `tasks.mu`（`onAgentStatusChange` 由锁外回调进入 tasks 操作）；`Transition` 的终态回调经深拷贝 + 协程池异步，锁内不触发跨模块调用。
 
 ---
 
-## 9. 配置参数完整说明
-
-### 9.1 Config 结构
+## 9. 配置参数（`conf/admin.toml` / `admin/config.go`）
 
 ```go
 type Config struct {
-    Port          int            `json:"port"`          // HTTP 监听端口，默认 7718
-    PublicURL     string         `json:"publicUrl"`     // 外部可达 URL（必需）
-    StaticDir     string         `json:"staticDir"`     // 前端静态文件目录，默认 "cmd/web/dist"
-    AgentRegistry RegistryConfig `json:"agentRegistry"` // Agent 注册与健康管理
-    History       HistoryConfig  `json:"history"`       // 历史归档
-    Log           LogConfig      `json:"log"`           // 日志
-    Daemon        bool           `json:"daemon"`        // 守护进程模式（仅 Linux）
+    Server       ServerConfig        // [server] 管理面 HTTP
+    ControlPlane ControlPlaneConfig  // [controlPlane] gRPC 控制面
+    MySQL        *MySQLConfig        // [mysql]（nil 或 host 空=不启用）
+    Redis        *shared.RedisConfig // [redis]（nil 或 host 空=不启用）
+    Log          stresslog.Config    // [log]
+    Pprof        *config.PprofConfig // [pprof]（可选）
+    Daemon       bool                // 顶层 daemon（仅 Linux）
 }
 ```
 
-### 9.2 RegistryConfig
+默认值（`admin/config.go:127-161`）：server.port 7718 / listenHost 127.0.0.1 / staticDir cmd/web/dist；controlPlane.port 7720 / heartbeatInterval 10s / unhealthyAfter 30s / **leaseDuration 45s** / offlineAfter 60s；mysql retentionDays 90 + pool（10/5/1h/5s/30s/30s）；log path log/admin.log。
 
-```go
-type RegistryConfig struct {
-    UnhealthyAfter string `json:"unhealthyAfter"` // 心跳超时后标记 unhealthy，默认 "30s"
-    OfflineAfter   string `json:"offlineAfter"`   // 超过此时间标记 offline 并删除，默认 "60s"
-}
-```
+**校验规则**（`admin/config.go:176-237`）：
 
-### 9.3 HistoryConfig
+- 两个 port 必须 >0；两个 listenHost 必填
+- controlPlane 四时长强校验：`heartbeatInterval < unhealthyAfter`、`heartbeatInterval < leaseDuration`、`unhealthyAfter < offlineAfter`、`leaseDuration < offlineAfter`（租约让 Agent 侧先接管任务生死，且必须覆盖 Agent 重连最坏耗时——`reconnect.maxInterval` 的 2 倍抖动上界 + 拨号握手）
+- Redis 启用时 `Resolve()` 校验；MySQL 启用时 DSN 与连接池时长加载期校验（写错即报错），连通性校验推迟到装配阶段（`Open` + PING）
+- MySQL DSN 用驱动 `mysql.Config.FormatDSN()` 生成，密码/库名含特殊字符不会解析错位（`admin/config.go:73-102`）
 
-```go
-type HistoryConfig struct {
-    Enabled       bool        `json:"enabled"`       // 是否启用 MySQL 历史归档，默认 true
-    MySQL         MySQLConfig `json:"mysql"`         // MySQL 连接配置
-    RetentionDays int         `json:"retentionDays"` // 历史数据保留天数，默认 90
-}
-```
-
-### 9.4 MySQLConfig
-
-```go
-type MySQLConfig struct {
-    Host            string `json:"host"`            // 主机地址
-    Port            int    `json:"port"`            // 端口号，默认 3306
-    User            string `json:"user"`            // 用户名
-    Password        string `json:"password"`        // 密码
-    Database        string `json:"database"`        // 数据库名
-    MaxOpenConns    int    `json:"maxOpenConns"`    // 最大打开连接数，默认 10
-    MaxIdleConns    int    `json:"maxIdleConns"`    // 最大空闲连接数，默认 5
-    ConnMaxLifetime string `json:"connMaxLifetime"` // 连接最大存活时间，默认 "1h"
-}
-```
-
-DSN 格式：`{user}:{password}@tcp({host}:{port})/{database}?parseTime=true&loc=Local`
-
-### 9.5 LogConfig
-
-```go
-type LogConfig struct {
-    Level      string `json:"level"`      // 日志级别，默认 "info"
-    Path       string `json:"path"`       // 日志文件路径，默认 "log/admin.log"
-    MaxSizeMB  int    `json:"maxSizeMB"`  // 单个日志文件最大体积（MB），默认 100
-    MaxBackups int    `json:"maxBackups"` // 保留的旧日志文件数，默认 10
-}
-```
-
-### 9.6 完整默认值
-
-```go
-func DefaultConfig() Config {
-    return Config{
-        Port:      7718,
-        StaticDir: "cmd/web/dist",
-        AgentRegistry: RegistryConfig{
-            UnhealthyAfter: "30s",
-            OfflineAfter:   "60s",
-        },
-        History: HistoryConfig{
-            Enabled:       true,
-            RetentionDays: 90,
-            MySQL: MySQLConfig{
-                MaxOpenConns:    10,
-                MaxIdleConns:    5,
-                ConnMaxLifetime: "1h",
-            },
-        },
-        Log: LogConfig{
-            Level:      "info",
-            Path:       "log/admin.log",
-            MaxSizeMB:  100,
-            MaxBackups: 10,
-        },
-    }
-}
-```
-
-### 9.7 校验规则
-
-- `Port` 必须大于 0（必需）
-- `PublicURL` 不能为空（必需）
-- `AgentRegistry.UnhealthyAfter` 如果非空必须能被 `time.ParseDuration` 解析
-- `AgentRegistry.OfflineAfter` 如果非空必须能被 `time.ParseDuration` 解析
+配置加载为 TOML 严格模式（未知字段报错）+ 环境变量展开（`${VAR}` fail-loud / `${VAR:-default}` / `$$`，`config/load.go:30-46`、`:68`）。
 
 ---
 
-## 10. 错误系统
-
-### 10.1 Error 类型
+## 10. 错误系统（`admin/apierror/errors.go`）
 
 ```go
 type Error struct {
@@ -1289,35 +534,15 @@ type Error struct {
 }
 ```
 
-### 10.2 预定义错误码
+预定义错误码（`:39-59`）：`TASK_NOT_FOUND`(404)、`TASK_CONFLICT`(409)、`TASK_INVALID_STATE`(409)、`AGENT_NOT_FOUND`(404)、`AGENT_BUSY`(409)、`AGENT_OFFLINE`(409)、`CAPACITY_EXCEEDED`(400)、`INVALID_ARGUMENT`(400)、`HISTORY_DISABLED`(503)、`HISTORY_NOT_FOUND`(404)、`INTERNAL_ERROR`(500)、`HISTORY_STARRED`(409)、`SHARED_STATE_UNAVAILABLE`(400)、`FLOW_LIBRARY_DISABLED`(503)、`FLOW_TEMPLATE_NOT_FOUND`(404)、`FLOW_SNAPSHOT_CONFLICT`(409)、`TEMPLATE_LIBRARY_DISABLED`(503)、`ACTION_TEMPLATE_NOT_FOUND`(404)、`LISTEN_TEMPLATE_NOT_FOUND`(404)、`TEMPLATE_NAME_CONFLICT`(409)、`TEMPLATE_SNAPSHOT_CONFLICT`(409)。
 
-| 变量 | Code | HTTP Status | 说明 |
-|---|---|---|---|
-| `ErrTaskNotFound` | `TASK_NOT_FOUND` | 404 | 任务不存在 |
-| `ErrTaskConflict` | `TASK_CONFLICT` | 409 | 任务单例冲突 |
-| `ErrTaskInvalidState` | `TASK_INVALID_STATE` | 409 | 任务状态不允许此操作 |
-| `ErrAgentNotFound` | `AGENT_NOT_FOUND` | 404 | Agent 不存在 |
-| `ErrAgentBusy` | `AGENT_BUSY` | 409 | Agent 忙碌 |
-| `ErrAgentOffline` | `AGENT_OFFLINE` | 409 | Agent 离线 |
-| `ErrCapacityExceeded` | `CAPACITY_EXCEEDED` | 400 | 集群容量不足 |
-| `ErrInvalidArgument` | `INVALID_ARGUMENT` | 400 | 参数错误 |
-| `ErrHistoryDisabled` | `HISTORY_DISABLED` | 503 | 历史模块未启用 |
-| `ErrHistoryNotFound` | `HISTORY_NOT_FOUND` | 404 | 历史记录不存在 |
-| `ErrInternal` | `INTERNAL_ERROR` | 500 | 内部错误 |
-| `ErrStarredProtected` | `HISTORY_STARRED` | 409 | 已标星记录受保护 |
-
-### 10.3 错误响应格式
+错误响应示例（单例冲突，Details 由 `ConflictDetails` 生成，`admin/task/admin_store.go:33-40`）：
 
 ```json
 {
   "code": "TASK_CONFLICT",
-  "message": "another task is currently active",
-  "details": {
-    "activeTaskId": "abc123",
-    "activeName": "200v200",
-    "activeState": "running",
-    "startedAt": "2026-05-23T10:00:00+08:00"
-  }
+  "message": "",
+  "details": {"activeTaskId": "...", "activeName": "...", "activeState": "running", "startedAt": "..."}
 }
 ```
 
@@ -1325,243 +550,79 @@ type Error struct {
 
 ## 11. 持久化方案
 
-### 11.1 任务（JSON 文件）
-
-```
-data/tasks/
-  {taskID}.json       -- Task 完整 JSON（格式化缩进）
-```
-
-- 写入时机：每次 `TaskStore.Update/Transition` 完成后
-- 原子写入：先写 `{id}.json.tmp`，再 `os.Rename` 为 `{id}.json`
-- 启动时扫描：终态直接载入；active 状态重置为 failed
-- 清理旧版残留的 `.tmp.json` 文件
-
-### 11.2 MySQL 历史归档
-
-- 终态时事务写入 6 张表
-- 运行期 Sampler 每 10s 写入 `task_timeseries`
-- 每天自动清理过期记录（starred 的不受清理影响）
-
-### 11.3 不持久化
-
-- AgentRegistry：所有 Agent 重启后重新注册
-- 指标快照：仅内存，前端轮询时取最新
-- 升级进度：仅内存（升级中 Admin 重启视为放弃）
+- **任务**：`data/tasks/{id}.json`，`Create/Update/Transition` 后原子写入（tmp + rename），启动加载恢复（`admin/task/persist.go`）
+- **命令**：内存命令日志（重启丢失）；Agent 未确认命令随会话重建重放，Admin 重启后 Agent Hello 触发孤儿任务停止
+- **最终报告**：Task.Reports 随任务 JSON 持久化 + 归档 MySQL
+- **共享状态清理**：`SharedCleanup` 待清理队列持久化（data 目录），重启后续试（`admin/task/shared_cleanup.go`）
+- **不持久化**：AgentRegistry（节点重连即重注册）、指标窗口（内存，任务终态 DropTask 或 MarkTaskTerminal 释放）、资源包（内容寻址，可重建）
 
 ---
 
-## 12. 进程入口（cmd/admin/main.go）
+## 12. 进程入口（`cmd/admin/main.go`）
 
 ```go
-var Version = "dev"  // 编译时注入：-ldflags "-X main.Version=v1.0.0"
+var Version = "dev"  // -ldflags "-X main.Version=v1.0.0" 注入
 
-func main() {
-    // 1. 进程级顶层 recover
-    // 2. 解析 -config 和 -d 参数
-    // 3. -d 模式：fork 子进程
-    // 4. 加载配置（LoadConfig）
-    // 5. 初始化日志（zap + RingBuffer 5000 条）
-    // 6. NewAdminServer(cfg)
-    // 7. srv.Run()
+func run(args []string) (exitCode int) {
+    // 1. 进程级顶层 recover（stderr + 日志，exit 2）
+    // 2. 解析 -config / -d 参数（默认 conf/admin.toml）
+    // 3. -d 或配置 daemon：daemon.Daemon fork 子进程（仅 Linux）
+    // 4. admin.LoadConfig（TOML 严格 + 校验）
+    // 5. stresslog.InitLog（zap + lumberjack）
+    // 6. admin.NewServer(cfg)（装配失败即退出，不提供半健康服务）
+    // 7. 可选 pprof（默认 6060）
+    // 8. server.Run(ctx)：阻塞至信号/监听面退出
 }
 ```
 
-**启动命令**：
+启动命令：
 
 ```bash
-# 前台运行
-go run ./cmd/admin -config conf/admin-config.json
-
-# 守护进程（仅 Linux）
-go run ./cmd/admin -config conf/admin-config.json -d
-
-# 编译
+go run ./cmd/admin -config conf/admin.toml
+go run ./cmd/admin -config conf/admin.toml -d          # 守护进程（仅 Linux）
 go build -o admin.exe ./cmd/admin -ldflags "-X main.Version=v1.0.0"
 ```
 
 ---
 
-## 13. 与计划的差异汇总
-
-| 差异项 | 计划设计 | 实际实现 | 原因 |
-|---|---|---|---|
-| BinaryStore / UpgradeOrchestrator | 完整实现 | **未实现** | 自动升级改为运维手动重启 |
-| 路由前缀 | `/api/` | `/sbot/` | 前后端统一路径规划 |
-| 任务 ID | UUID（36 字符） | 随机 hex（32 字符） | 使用 `crypto/rand` 生成 |
-| 分配算法 | 均匀分配 | 按 MaxBots 比例分配 + Debug 单节点优先 | 更合理的负载分布 |
-| MySQL 交互 | sqlx | 标准 database/sql | 减少依赖 |
-| Agent 重新注册 | 拒绝（要求先 deregister） | 覆盖（同 ID 直接覆盖） | Agent 异常重启场景更友好 |
-| Agent offline 处理 | 标记 offline 保留 | 标记 offline + **删除** | 防止注册表无限增长 |
-| 外键约束 | 物理外键 + CASCADE | 无物理外键，应用层级联 | 符合项目约定 |
-| 新增表 | 5 张 | 7 张（新增 task_agent_events） | Agent 状态变化事件追踪 |
-| StageReports | 无 | 有 | 渐进式加压阶段完成报告 |
-| AgentEvents | 无 | 有 | 任务期间 Agent 状态变化事件 |
-| TaskConfig.Codecs/ErrorMap | 无 | 有 | 声明式 codec 与错误码映射上传 |
-| TaskAssignment 字段 | 简化 | 完整（含 ConfigURL/ConfigFiles/RampUp） | Agent 配置下载机制 |
-| Sampler interval 配置 | 从 config 读取 | 硬编码 10s | 简化实现 |
-| PruneRunAt 配置 | HH:MM 格式 | 固定 24h 间隔 | 简化实现 |
-| handlers_history.go | 独立文件 | 独立文件（已实现） | 按计划 |
-| 基线资源 API | 无 | 8 个端点 | 前端 IDB 与磁盘基线同步 |
-| Shutdown Agent API | 无 | 2 个端点（单个 + 全部） | 运维需要远程关机能力 |
-
----
-
-## 14. HTTP 状态码约定
+## 13. HTTP 状态码约定
 
 | 场景 | 状态 |
 |---|---|
 | 成功（查询/返回数据） | `200` |
-| 资源创建成功 | `201` |
+| 资源创建成功（任务/克隆/模板） | `201` |
 | 异步接受（启动/停止任务） | `202` |
-| 无内容（删除成功/无待执行任务） | `204` |
+| 无内容（删除任务） | `204` |
 | 客户端参数错误 | `400` |
 | 资源未找到 | `404` |
-| 状态冲突（单例/状态不允许） | `409` |
-| 服务不可用（历史模块未启用） | `503` |
+| 状态冲突（单例/状态不允许/名称冲突） | `409` |
+| 服务不可用（历史/模板库未启用） | `503` |
 | 服务端内部错误 | `500` |
 
 ---
 
-## 15. Panic 安全网
+## 14. Panic 安全网
 
-所有 HTTP handler 被 `recoverMiddleware` 包裹：
-
-```go
-func recoverMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        defer func() {
-            if rec := recover(); rec != nil {
-                stresslog.Error("[ADMIN] HTTP handler panic",
-                    zap.String("path", r.URL.Path),
-                    zap.String("method", r.Method),
-                    zap.Any("panic", rec),
-                    zap.String("stack", string(debug.Stack())))
-                writeError(w, ErrInternal.WithMessage("internal server error"))
-            }
-        }()
-        next.ServeHTTP(w, r)
-    })
-}
-```
-
-进程级顶层 recover（`cmd/admin/main.go`）：
-
-```go
-defer func() {
-    if rec := recover(); rec != nil {
-        fmt.Fprintf(os.Stderr, "[ADMIN] 顶层 panic: %v\n%s\n", rec, debug.Stack())
-        stresslog.Error("[ADMIN] 顶层 panic", ...)
-        os.Exit(2)
-    }
-}()
-```
+- 所有 `/sbot/` handler 被 `Wrap` 中间件包裹（`admin/httpapi/routes.go:114-126`）：捕获 panic → 写日志（path/method/panic/stack）→ 返回标准 500 JSON；请求体先经 OpenAPI Schema 校验，非法返回 `REQUEST_SCHEMA_INVALID`
+- gRPC 会话循环由协程池双层恢复兜底（`internal/workpool`）
+- 进程级顶层 recover（`cmd/admin/main.go:51-64`）：stderr + 日志后 exit 2
 
 ---
 
-## 16. 协议契约（强约束）
+## 15. 协议契约（强约束）
 
-### 16.1 Admin 必须遵守
+### 15.1 Admin 必须遵守
 
-1. 所有暴露给 Agent 的接口（`/sbot/agent/*`、`/sbot/tasks/{id}/config/*`）**禁止做用户认证**
-2. `RegisterResponse.HeartbeatTtl` 必须等于 `agentRegistry.unhealthyAfter`
-3. 任务下发 `TaskAssignment.ConfigURL` 必须可被 Agent 直接 GET（不带任何 header）
-4. ConfigURL 拼接：`{publicUrl}/sbot/tasks/{id}/config/{path}`，`publicUrl` 必须配置正确
+1. `Welcome.HeartbeatIntervalNanos` / `LeaseDurationNanos` 必须与 controlPlane 配置一致（Agent 据此对齐心跳与租约）
+2. StartTask 命令携带的 BundleDescriptor（SHA-256 + 大小）必须与 `AgentBundleService.DownloadBundle` 可下载的归档一致
+3. Shutdown 命令的 `CommandReceipt` 回执必须持久化 ACK 之后才发——Agent 的进程退出延迟到该回执（`controlplane/proto/control.proto:122-128`）
+4. 指标聚合只接受当前会话 generation 的帧；会话顶替后旧代帧整体丢弃（`admin/grpcapi/metrics_service.go:38-43`）
 
-### 16.2 Admin 假定 Agent 提供
+### 15.2 Admin 假定 Agent 提供
 
-1. 监听 `/agent/v1/{task,stop,shutdown,version,status,logs,logs/files}` 全部端点
-2. 任务下发后异步执行，202 Accepted 立即返回
-3. 任务完成后通过 `/sbot/agent/{id}/task/{tid}/done` 上报结果
+1. 首帧 Hello（协议版本一致），心跳按 Welcome 下发间隔（Agent 本地配置兜底）
+2. 命令串行执行、`CommandAck` 至少一次送达（重放幂等由 Admin 命令日志 + Agent 结果 outbox 保证）
+3. 任务最终报告重发直至 `ReportAck`（accepted 或永久拒绝）
+4. `monitor.CollectorSnapshot` 字段与 `controlpb.CollectorSnapshot` 转换完全一致（`controlplane/monitor.go`）；DDSketch 配置两侧一致（`conf/agent.toml:60-66` 注释明确要求与 Admin 一致，否则合并结果错误）
 
-### 16.3 跨模块字段对齐
-
-| 来源 | 对齐对象 | 备注 |
-|---|---|---|
-| `monitor.CollectorSnapshot` | Agent stress 上报 + Admin 聚合 | 字段必须完全一致 |
-| `SystemSnapshot` | Agent system 上报 + Admin 聚合 | 同上 |
-| `TaskAssignment` | Admin 下发 + Agent 接收 | 在 `agent/types.go` 与 `admin/types.go` 镜像 |
-| `RegisterRequest/Response` | 双向同步 | 同上 |
-
-任何一方修改字段必须同时改另一方。
-
----
-
-## 17. 关键 Handler 行为说明
-
-### 17.1 handleAgentStressReport
-
-- 丢弃过期 stress 报告：`agent.CurrentTaskID` 为空或 `report.TaskID != currentTaskID` 时返回 `{"status":"stale"}`
-- 任何 Agent 请求都视为 keepalive（调用 `agents.Touch`）
-- 心跳时间更新在 stress 数据更新之前
-
-### 17.2 handleCreateTask
-
-- multipart/form-data，最大 32MB
-- flow.json 为必需文件
-- proto 文件：字段名前缀 `proto/` 或 `proto`
-- lua 脚本：字段名前缀 `scripts/` 或 `scripts`
-- adapter 下接收多份 `*_codec.json`，`errors.json` 可选
-- rampUp 校验：stages count 之和必须等于 totalBots
-- 自动将上传资源写入磁盘基线目录（`conf/`），使前端下次同步时 IDB 与基线一致
-
-### 17.3 handleStartTask
-
-1. `TaskStore.StartTask`（单例约束入口）
-2. `Assigner.Assign`（分配 Agent）
-3. 启动 Sampler
-4. 异步 `startTaskBackground`：
-   - 读取任务配置，构建 `TaskAssignment`
-   - 按 `scaleRampUp` 缩放各 Agent 的 rampUp 阶段
-   - 向各 Agent 发送 AssignTask RPC（2 次重试）
-   - 全部成功 -> `starting -> running`
-   - 任一失败 -> 向已接受任务的 Agent 发送 stop，`starting -> failed`
-
-### 17.4 handleStopTask
-
-1. 校验任务状态为 running
-2. `running -> stopping`
-3. 向在线节点发送 stop RPC
-4. 为已离线节点合成 `stopped` report（`synthesizeOfflineReports`）
-5. 如果全部节点已有 report -> 直接 `stopping -> stopped`
-6. 否则启动 30s 超时安全网（`startStopTimeout`）
-
-### 17.5 handleAgentTaskDone
-
-1. Touch + Heartbeat 刷新心跳，标记 Agent 回 idle
-2. 如果 `StageIndex > 0`：存入 `StageReports`（阶段完成报告），不触发状态转换
-3. 如果是最终报告：存入 `Reports`，检查是否全部完成
-4. Transition 在 Update 外部调用，避免死锁
-
-### 17.6 handleCloneHistory
-
-1. 从 MySQL 获取原始任务配置
-2. 创建新 pending 任务（名称追加 " (clone)"，支持 body 中 name 覆盖）
-3. **不自动启动**，留给用户确认参数
-
----
-
-## 18. 辅助工具函数
-
-| 函数 | 文件 | 说明 |
-|---|---|---|
-| `stringOr(v, fallback, label)` | helpers.go | 字符串配置默认值（空则用 fallback，打印警告） |
-| `intOr(v, fallback, label)` | helpers.go | 整数配置默认值（<=0 则用 fallback，打印警告） |
-| `secsOr(v, fallback, label)` | helpers.go | int 秒数 -> Go duration 字符串（如 "5s"） |
-| `parseLogQueryParams(r)` | helpers.go | 解析日志查询参数（afterSeq, limit） |
-| `parseUint64OrDefault(s, def)` | helpers.go | 解析 uint64 参数 |
-| `parseIntOrDefault(s, def)` | handlers.go | 解析 int 参数 |
-| `parseBoolOrDefault(s, def)` | handlers.go | 解析 bool 参数 |
-| `parseTimeOrDefault(s, def)` | handlers.go | 解析 RFC3339 时间参数 |
-| `parseTagsFromQuery(r, key)` | handlers.go | 解析 URL query 中的 tag 列表 |
-| `normalizeAddr(addr)` | agent_dispatcher.go | 去除 http:// 和 https:// 前缀 |
-| `safeWriteFile(dir, name, data)` | handlers.go | 安全写文件（防路径穿越，自动创建目录） |
-| `listDirFiles(dir, ext)` | handlers.go | 列出目录中指定后缀的文件 |
-| `serveBaselineFile(w, r, dir, key)` | handlers.go | 提供基线文件（防路径穿越） |
-| `listLogFiles(logPath)` | handlers.go | 列出日志文件（同目录同前缀） |
-| `serveLogFile(w, r, dir, name)` | handlers.go | 提供日志文件下载 |
-| `scaleRampUp(cfg, totalBots, assignedBots)` | handlers.go | 按比例缩放各 stage 的 count（分布式分配） |
-| `generateID()` | admin.go | 生成 32 字符随机 hex ID |
-| `buildFinalStressFromReports(task)` | admin.go | 从 agent 终止报告聚合最终快照（优先于心跳聚合） |
-| `buildConfigSummary(task)` | history.go | 从 Task 构建 ConfigSummary |
-| `buildListWhere(f HistoryFilter)` | history.go | 构建历史列表查询 WHERE 子句（防注入） |
+任何一方修改 wire 字段必须同时改 `controlplane/proto/control.proto` 并重新生成 `controlplane/pb`。
