@@ -15,7 +15,6 @@ const KEY_FLOW = 'stressbot-editor-draft-flow-v2';
 const KEY_LAYOUT = 'stressbot-editor-draft-layout-v2';
 
 interface PersistedDraft {
-  defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
@@ -32,12 +31,11 @@ let timer: number | null = null;
 
 type PersistedSource = Pick<
   FlowState,
-  'defaultDelayMs' | 'nodes' | 'actions' | 'listens' | 'layout'
+  'nodes' | 'actions' | 'listens' | 'layout'
 >;
 
 function selectPersistedSource(state: FlowState): PersistedSource {
   return {
-    defaultDelayMs: state.defaultDelayMs,
     nodes: state.nodes,
     actions: state.actions,
     listens: state.listens,
@@ -47,7 +45,6 @@ function selectPersistedSource(state: FlowState): PersistedSource {
 
 function isSamePersistedSource(left: PersistedSource, right: PersistedSource): boolean {
   return (
-    left.defaultDelayMs === right.defaultDelayMs &&
     left.nodes === right.nodes &&
     left.actions === right.actions &&
     left.listens === right.listens &&
@@ -133,7 +130,6 @@ export function loadDraft(): DraftSnapshot | null {
       : { nodePositions: {}, viewport: { x: 0, y: 0, zoom: 1 } };
     return {
       flow: {
-        defaultDelayMs: draft.defaultDelayMs,
         nodes: draft.nodes,
         actions: draft.actions,
         listens: draft.listens,

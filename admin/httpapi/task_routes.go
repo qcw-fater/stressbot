@@ -163,6 +163,13 @@ func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 校验节点执行间隔覆盖：写错直接拒绝，不回退默认值。0 = 不覆盖（合法）。
+	if d := cfg.RobotConfig.DefaultDelayMs; d != 0 && d != -1 && (d < 0 || d > 600000) {
+		writeError(w, apierror.ErrInvalidArgument.WithMessage(
+			fmt.Sprintf("robotConfig.defaultDelayMs 取值无效（%d）：仅允许 -1（禁用等待）或 0~600000 毫秒，0 表示沿用流程配置", d)))
+		return
+	}
+
 	// 校验 rampUp 配置
 	if cfg.RobotConfig.RampUp != nil {
 		if len(cfg.RobotConfig.RampUp.Stages) == 0 {

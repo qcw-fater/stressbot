@@ -269,7 +269,7 @@ Admin 装配阶段（`NewServer` / `Run`）会用 `ParsePositiveDuration` **再�
 
 | Schema | 顶层属性 | 必填 | `$defs` 主要条目 |
 | --- | --- | --- | --- |
-| `flow.schema.json`（175 行） | `defaultDelayMs` / `nodes` / `actions` / `listens` | `nodes`、`actions`（`flow.schema.json:6`） | node / switchCase / weightedOption / retry / onError / action / binding / filter / store / listen 等 |
+| `flow.schema.json` | `nodes` / `actions` / `listens` | `nodes`、`actions`（`flow.schema.json:6`） | node / switchCase / weightedOption / retry / onError / action / binding / filter / store / listen 等 |
 | `codec.schema.json`（165 行） | `version` / `endianDefault` / `frame` / `header` / `routeKeyTemplate` / `pipeline` / `heartbeat` | 前五项（`codec.schema.json:6`） | frame / field / flagBit / valueSource / step / offset / produce / condition / guard / heartbeat 等 |
 
 ### 6.3 调用点与前端同源

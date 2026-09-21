@@ -90,7 +90,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - `conf/stressbot.toml` — 单机模式运行配置：`log`/`monitor`/`pprof`/`standalone`（`bot`/`stateExtra`/`rampUp`）+ 可选 `redis`/`network`/`daemon`；资源路径（`flow`/`proto`/`scripts`/`adapter`）为 CLI flag（默认回退 `<conf>` 下子目录）。TOML 格式，支持注释和环境变量展开（`${VAR}`/`${VAR:-default}`）。
 - `conf/agent.toml` — Agent 节点配置：`log`/`monitor`/`pprof`/`agent`（含 `reconnect` 子段）/`network`/`daemon`
 - `conf/admin.toml` — Admin 服务器配置：`server`（HTTP 管理面）/`controlPlane`（gRPC 控制面 + Agent 健康判定）/`mysql`（含 `retentionDays` 和 `pool`）/`redis`/`log`/`pprof`/`daemon`
-- `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
+- `conf/flow/flow.json` — 流程图（`nodes` + `actions` + `listens`）— 主要配置产物
 - `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。编解码统一由纯 Go `protocol/codec/` 引擎驱动，无 Lua codec 路径。
 - `conf/proto/` — 启动时动态加载的 `.proto` 文件
 - `conf/scripts/` — 复杂行为的 Lua 脚本
@@ -137,7 +137,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - `flow.json` 的 nodes 按 ID 反序列化为 `map[string]*Node`。
 - Adapter 接口 9 方法（含 `DescribeError`）。`DecodeTCP` 和 `DecodeUDP` 独立方法。
 - UDP 加密使用偏移量部分加密：前 N 字节保持明文供服务端查密钥表，剩余部分加密。偏移量由 `<proto>_<service>_codec.json` 的 `encrypt.offset.{encode,decode}` 单向配置（如 `udp:battle` 发送偏移 11、接收偏移 0）。
-- 默认节点延迟由 `TaskFlow.DefaultDelayMs` 控制。`delayMs: -1` 禁用，`delayMs: 0` 使用 defaultDelayMs。
+- 节点执行间隔不在 flow.json 中，也不在 `TaskFlow` 结构里：它是任务级运行参数，与 `mainService` 同级走 `robot.ManagerConfig.DefaultDelayMs` 传递（分布式由任务启动配置 `robotConfig.defaultDelayMs` 下发、单机由 `standalone.bot.defaultDelayMs` 配置），`engine.NewExecutor` 接第 4 参注入，未配置（0）时引擎默认 1000ms。节点级 `delayMs: -1` 禁用，`delayMs: 0` 使用该全局间隔。
 - `onError` 控制 action 失败后的错误链路：`ignoreCodes` 命中后 warn 并继续流程但 monitor 保留失败样本；`handler` 是普通节点调用边（不写入 next）；`retry.maxRetries` 是当前 action 的额外重试次数；`strategy` 支持空/`resume` 继续、`skip` 结束当前分支/层级（由 sequence/loop/boolean/weighted 捕获）、`abort` 中断流程。
 - 条件表达式（节点条件、switch 分支、字段绑定 `condition`）必须带 `state:` 或 `lua:` 前缀，缺前缀在**加载期**报错而非运行期恒 false。字段绑定的 `lua:` 条件与节点条件共用 Robot 层同一个求值实现（`engine.ActionExecutor.SetLuaConditionEvaluator` 注入）。
 - `stateExtra` 不得覆盖框架保留键 `id` / `index` / `account`（命中则 Warn 忽略），否则整批机器人会共用同一身份。同一保护覆盖三层：stateExtra 覆盖、clearState 动作（加载期报错）、Lua `robot.clear()`/`robot.delete()`（Warn 忽略），保护键清单统一走 `flow.IsProtectedStateKey`。

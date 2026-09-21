@@ -1,5 +1,4 @@
 {
-  "defaultDelayMs": 1000,
   "nodes": {
     "main": {
       "type": "sequence",

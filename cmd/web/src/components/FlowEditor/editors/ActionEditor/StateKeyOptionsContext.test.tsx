@@ -35,7 +35,7 @@ vi.mock('@/services/resourcesStore', () => ({
 // 造一个引用脚本 'demo.lua' 的 lua action，使 collectUsedScriptNames 返回 { 'demo.lua' }。
 function seedScriptAction() {
   useFlowStore.getState().loadFromTaskFlow({
-    defaultDelayMs: 1000,
+
     nodes: { main: { type: 'sequence', next: ['act1'] }, act1: { type: 'action', action: 'A1' } },
     actions: { A1: { pattern: 'lua', script: 'demo.lua' } },
     listens: {},

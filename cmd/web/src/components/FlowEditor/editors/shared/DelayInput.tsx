@@ -66,7 +66,7 @@ export function DelayInput({ value, onChange }: DelayInputProps) {
       )}
       {mode === 'default' && (
         <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
-          = TaskFlow.defaultDelayMs
+          = 全局默认间隔（默认 1000ms，任务启动时配置）
         </span>
       )}
       {mode === 'disabled' && (

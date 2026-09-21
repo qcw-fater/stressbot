@@ -217,7 +217,6 @@ function assertUnique<T>(items: readonly T[], key: (item: T) => string, label: s
 
 function assertFlowJson(value: unknown, label: string): asserts value is FlowJson {
   assertRecord(value, label);
-  assertFiniteNumber(value.defaultDelayMs, `${label}.defaultDelayMs`);
   assertRecord(value.nodes, `${label}.nodes`);
   assertRecord(value.actions, `${label}.actions`);
   assertRecord(value.listens, `${label}.listens`);
@@ -365,7 +364,6 @@ function assertActionTemplate(value: unknown, index: number): asserts value is A
     throw new Error(`${label} pattern 与 data.pattern 不一致`);
   }
   const actionFlow: FlowJson = {
-    defaultDelayMs: 0,
     nodes: {
       main: { type: 'sequence', next: ['template'] },
       template: { type: 'action', action: 'template' },
@@ -402,7 +400,6 @@ function assertListenTemplate(value: unknown, index: number): asserts value is L
     throw new Error(`${label}监听模板校验失败：kind 与内容形态不一致`);
   }
   const listenErrors = validateFlow({
-    defaultDelayMs: 0,
     nodes: { main: { type: 'sequence', next: [] } },
     actions: {},
     listens: { template: listen },

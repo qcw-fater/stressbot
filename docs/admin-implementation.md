@@ -172,7 +172,7 @@ type Config struct {
 }
 ```
 
-`RobotConfig`：Concurrency、TimeoutSec、AccountPrefix、StartNumber、MainService、StateExtra、HeartbeatSec、HTTPTimeoutSec、ApdexT（毫秒）、DebugMode、LogLevel、RampUp。Config 同时实现 `bundle.Source` 接口供打包（`admin/task/types.go:110-123`）。
+`RobotConfig`：Concurrency、TimeoutSec、AccountPrefix、StartNumber、MainService、StateExtra、DefaultDelayMs（节点执行间隔，毫秒，0 = 引擎默认 1000ms / 正数 = 自定义 / -1 = 禁用等待）、HTTPTimeoutSec、ApdexT（毫秒）、DebugMode、LogLevel、RampUp。Config 同时实现 `bundle.Source` 接口供打包（`admin/task/types.go:110-123`）。
 
 ### 3.4 Assignment / Dispatch / SharedRuntimeAssignment（`admin/task/types.go:191-249`）
 

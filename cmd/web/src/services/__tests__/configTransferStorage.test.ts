@@ -295,7 +295,7 @@ describe('notepad snapshots', () => {
 describe('draft snapshots', () => {
   it('saves, loads, and clears an exact snapshot', () => {
     const snapshot: DraftSnapshot = {
-      flow: { defaultDelayMs: 7, nodes: {}, actions: {}, listens: {} },
+      flow: { nodes: {}, actions: {}, listens: {} },
       layout: { nodePositions: { start: { x: 10, y: 20 } }, showListenEdges: false },
       savedAt: 123456,
     };
@@ -310,7 +310,7 @@ describe('draft snapshots', () => {
   it('captures current in-memory flow and clones its layout', () => {
     const layout = { nodePositions: { start: { x: 10, y: 20 } }, showListenEdges: true };
     useFlowStore.setState({
-      defaultDelayMs: 12,
+
       nodes: {},
       actions: {},
       listens: {},
@@ -322,7 +322,7 @@ describe('draft snapshots', () => {
     layout.nodePositions.start.x = 99;
 
     expect(snapshot).toEqual({
-      flow: { defaultDelayMs: 12, nodes: {}, actions: {}, listens: {} },
+      flow: { nodes: {}, actions: {}, listens: {} },
       layout: { nodePositions: { start: { x: 10, y: 20 } }, showListenEdges: true },
       savedAt: 789,
     });
@@ -330,7 +330,7 @@ describe('draft snapshots', () => {
 
   it('refreshes the in-memory editor from a restored snapshot or an empty draft', () => {
     const snapshot: DraftSnapshot = {
-      flow: { defaultDelayMs: 7, nodes: {}, actions: {}, listens: {} },
+      flow: { nodes: {}, actions: {}, listens: {} },
       layout: { nodePositions: {} },
       savedAt: 123456,
     };

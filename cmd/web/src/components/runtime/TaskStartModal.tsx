@@ -846,14 +846,19 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                       style={{ width: '100%' }}
                     />
                   </Form.Item>
-                  <Form.Item label="心跳间隔（秒）">
+                  <Form.Item
+                    label="节点执行间隔（毫秒）"
+                    extra="留空或 0 = 默认 1000ms；-1 禁用节点间等待；节点自身配置延迟时以节点为准"
+                  >
                     <InputNumber
-                      min={1}
-                      max={300}
-                      value={robotConfig.heartbeatSec ?? 5}
+                      min={-1}
+                      max={600000}
+                      step={100}
+                      value={robotConfig.defaultDelayMs}
                       onChange={(v) =>
-                        setRobotConfig({ heartbeatSec: typeof v === 'number' ? v : 5 })
+                        setRobotConfig({ defaultDelayMs: typeof v === 'number' ? v : undefined })
                       }
+                      placeholder="留空 = 默认 1000ms"
                       style={{ width: '100%' }}
                     />
                   </Form.Item>

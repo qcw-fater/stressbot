@@ -60,7 +60,6 @@ func (h *executorActionTestHandler) CooperativeSleep(ctx context.Context, d time
 
 func newExecutorActionTest(handler *executorActionTestHandler) *Executor {
 	return NewExecutor(&flowdef.TaskFlow{
-		DefaultDelayMs: 1,
 		Nodes: map[string]*flowdef.Node{
 			"cleanup": {Type: flowdef.NodeAction, Action: "cleanup", DelayMs: -1},
 		},
@@ -68,7 +67,7 @@ func newExecutorActionTest(handler *executorActionTestHandler) *Executor {
 			"a":       {Name: "a", Pattern: flowdef.PatternClearState},
 			"cleanup": {Name: "cleanup", Pattern: flowdef.PatternClearState},
 		},
-	}, handler, "test")
+	}, handler, "test", 1)
 }
 
 func countActionCalls(names []string, want string) int {

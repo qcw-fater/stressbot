@@ -88,6 +88,7 @@ type Config struct {
 	HTTPTimeout    time.Duration     // HTTP 请求超时
 	RequestTimeout time.Duration     // 网络请求超时（TCP/UDP 请求-响应未显式指定时的回退值）
 	MainService    string            // 主连接服务名，意外断开时停止机器人
+	DefaultDelayMs int               // 全局节点执行间隔（毫秒）：0 = 引擎默认 1000ms，<0 = 禁用
 	Shared         shared.Store      // 任务级共享状态后端（可为 nil，表示未启用）
 }
 
@@ -183,7 +184,7 @@ func NewRobot(parent context.Context, cfg Config, flow *flowdef.TaskFlow, factor
 	handler := &robotActionHandler{robot: r, flow: flow}
 	// 字段绑定上的 lua: 条件与节点条件共用同一求值实现，避免两处语义漂移。
 	r.actionExec.SetLuaConditionEvaluator(handler.executeLuaBoolean)
-	r.executor = engine.NewExecutor(flow, handler, r.account)
+	r.executor = engine.NewExecutor(flow, handler, r.account, cfg.DefaultDelayMs)
 
 	return r, nil
 }

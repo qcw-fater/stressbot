@@ -125,14 +125,13 @@ Executor 遍历节点图 → 命中 action 节点
 
 ```json
 {
-  "defaultDelayMs": 500,
   "nodes":   { "nodeId": { ... }, ... },
   "actions": { "ActionName": { ... }, ... },
   "listens": { "ListenName": { ... }, ... }
 }
 ```
 
-- `defaultDelayMs`：全局节点间默认延迟（毫秒）。`0` = 引擎默认 1000ms，`< 0` = 禁用。
+- 节点执行间隔不在 flow.json 中：分布式在任务启动配置「节点执行间隔（毫秒）」设置（`robotConfig.defaultDelayMs`，0 = 引擎默认 1000ms，-1 = 禁用），单机在 `standalone.bot.defaultDelayMs` 配置。
 - `nodes` / `actions` / `listens`：均为 JSON 对象，key 即对应 ID/名称。
 - 入口约定：引擎从 `nodes` 中 ID 为 **`main`** 的节点开始执行。
 
@@ -237,7 +236,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `waitMin`         | wait           | 随机等待下界（毫秒，与 `waitMax` 配合使用） |
 | `waitMax`         | wait           | 随机等待上界（毫秒） |
 | `then`            | wait           | 等待完成后执行的唯一后继节点 ID（可选） |
-| `delayMs`         | action         | 节点执行后延迟（含失败收束路径）；`> 0` 使用此值，`= 0` 使用 defaultDelayMs，`< 0` 禁用 |
+| `delayMs`         | action         | 节点执行后延迟（含失败收束路径）；`> 0` 使用此值，`= 0` 使用全局间隔（任务级运行参数，未配置 = 1000ms），`< 0` 禁用 |
 
 ### 边界与加载期校验
 

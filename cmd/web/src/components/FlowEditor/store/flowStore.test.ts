@@ -3,7 +3,7 @@ import { useFlowStore } from './flowStore';
 import type { FlowJson } from '../codec/flowToJson';
 
 const flow: FlowJson = {
-  defaultDelayMs: 1000,
+
   nodes: {
     main: { type: 'sequence' as const, next: ['send'] },
     send: { type: 'action' as const, action: 'sendMessage' },
@@ -170,7 +170,7 @@ describe('flowStore incremental derivation', () => {
 
 describe('flowStore wait then references', () => {
   const waitFlow: FlowJson = {
-    defaultDelayMs: 1000,
+
     nodes: {
       main: { type: 'sequence', next: ['wait'] },
       wait: { type: 'wait', waitMs: 10 },

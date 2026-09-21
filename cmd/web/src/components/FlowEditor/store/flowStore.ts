@@ -25,7 +25,6 @@ import { normalizeOnError } from '../utils/onError';
 
 export interface FlowState {
   // ── 业务数据（与 flow.json 1:1） ────────
-  defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
@@ -93,7 +92,7 @@ export interface FlowState {
   syncDerived: () => void;
 }
 
-export type FlowHistoryState = Pick<FlowState, 'defaultDelayMs' | 'nodes' | 'actions' | 'listens'>;
+export type FlowHistoryState = Pick<FlowState, 'nodes' | 'actions' | 'listens'>;
 
 /**
  * 逐键 Object.is 比较两个 data 对象。
@@ -126,7 +125,6 @@ function keepArrayIfUnchanged<T>(prev: T[], next: T[]): T[] {
 }
 
 const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (set, get) => ({
-  defaultDelayMs: 1000,
   nodes: {},
   actions: {},
   listens: {},
@@ -141,7 +139,6 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
   loadFromTaskFlow: (flow, layout) => {
     resetFlowHistory(() => {
       const { rfNodes, rfEdges, listenRefCount, nodesByListen } = jsonToFlow({
-        defaultDelayMs: flow.defaultDelayMs,
         nodes: flow.nodes,
         actions: flow.actions,
         listens: flow.listens,
@@ -168,7 +165,6 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
         position: positions[n.id] ?? { x: 0, y: 0 },
       }));
       set({
-        defaultDelayMs: flow.defaultDelayMs,
         nodes: flow.nodes,
         actions: flow.actions,
         listens: flow.listens,
@@ -192,7 +188,6 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
     resetFlowHistory(() => {
       const pos = center ?? { x: 300, y: 300 };
       set({
-        defaultDelayMs: 1000,
         nodes: { main: { type: 'sequence', next: [], description: '入口节点' } },
         actions: {},
         listens: {},
@@ -214,7 +209,6 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
   toTaskFlow: () => {
     const s = get();
     return flowToJson({
-      defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
       listens: s.listens,
@@ -574,7 +568,6 @@ const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (
   syncDerived: () => {
     const s = get();
     const { rfNodes, rfEdges, listenRefCount, nodesByListen } = jsonToFlow({
-      defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
       listens: s.listens,
@@ -646,13 +639,11 @@ export const useFlowStore = create<FlowState>()(
   temporal(flowStateCreator, {
     limit: 50,
     partialize: (state): FlowHistoryState => ({
-      defaultDelayMs: state.defaultDelayMs,
       nodes: state.nodes,
       actions: state.actions,
       listens: state.listens,
     }),
     equality: (past, current) =>
-      past.defaultDelayMs === current.defaultDelayMs &&
       past.nodes === current.nodes &&
       past.actions === current.actions &&
       past.listens === current.listens,

@@ -54,22 +54,25 @@ func (r *connRegistry) get(gconn gnet.Conn) *Connection {
 type EventServer struct {
 	gnet.BuiltinEventEngine
 
-	registry     *connRegistry
-	adp          protocol.Adapter // 仅用于 OnTraffic 的帧切割元信息（HeaderSize/BodyLength）
-	tickInterval time.Duration
-	maxBodyLen   int // 单个包体最大允许长度（防畸形包 OOM）；Dialer 按 EngineConfig 注入，直接构造时为编译期默认
+	registry   *connRegistry
+	adp        protocol.Adapter // 仅用于 OnTraffic 的帧切割元信息（HeaderSize/BodyLength）
+	maxBodyLen int              // 单个包体最大允许长度（防畸形包 OOM）；Dialer 按 EngineConfig 注入，直接构造时为编译期默认
 }
+
+// eventServerTickInterval 是 gnet 事件循环 OnTick 的定时唤醒粒度。
+// 网络事件由 epoll 驱动，tick 只是空闲时的周期唤醒（OnTick 自身无业务逻辑；
+// 业务心跳由 codec 声明式配置驱动、Agent 会话心跳由控制面配置驱动，均与此无关）。
+const eventServerTickInterval = 5 * time.Second
 
 // Compile-time assertion: EventServer satisfies gnet.EventHandler.
 var _ gnet.EventHandler = (*EventServer)(nil)
 
 // NewEventServer 创建 gnet 事件处理器
-func NewEventServer(adp protocol.Adapter, heartbeatInterval time.Duration) *EventServer {
+func NewEventServer(adp protocol.Adapter) *EventServer {
 	return &EventServer{
-		registry:     newConnRegistry(),
-		adp:          adp,
-		tickInterval: heartbeatInterval,
-		maxBodyLen:   defaultMaxBodyLen,
+		registry:   newConnRegistry(),
+		adp:        adp,
+		maxBodyLen: defaultMaxBodyLen,
 	}
 }
 
@@ -283,7 +286,7 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 
 // OnTick gnet 定时回调。
 func (es *EventServer) OnTick() (delay time.Duration, action gnet.Action) {
-	return es.tickInterval, gnet.None
+	return eventServerTickInterval, gnet.None
 }
 
 // bindConn 将 gnet 连接的发送/关闭函数注入到业务层 Connection。
@@ -334,8 +337,8 @@ type Dialer struct {
 }
 
 // NewDialer 创建拨号器。engine 零值 = 编译期默认参数（见 EngineConfig）。
-func NewDialer(adp protocol.Adapter, heartbeatInterval time.Duration, engine EngineConfig) *Dialer {
-	server := NewEventServer(adp, heartbeatInterval)
+func NewDialer(adp protocol.Adapter, engine EngineConfig) *Dialer {
+	server := NewEventServer(adp)
 	params := engine.normalize()
 	server.maxBodyLen = params.maxBodyLen
 	return &Dialer{

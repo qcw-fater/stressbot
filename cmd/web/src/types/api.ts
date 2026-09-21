@@ -68,8 +68,12 @@ export interface RobotConfig {
   stateExtra?: Record<string, string>;
 
   // ── 性能/超时（通常用默认值即可）──
-  /** 心跳间隔秒数，默认 5 */
-  heartbeatSec?: number;
+  /**
+   * 任务级节点执行间隔覆盖（毫秒）。留空或 0 = 沿用流程配置（flow.json 的 defaultDelayMs）；
+   * 正数 = 覆盖（引擎默认为 1000，可直接填 1000）；-1 = 禁用全局节点间等待。
+   * 节点自身配置了 delayMs 时以节点值为准。
+   */
+  defaultDelayMs?: number;
   /** HTTP 请求超时秒数，默认 10 */
   httpTimeoutSec?: number;
   /** Apdex 满意阈值毫秒，默认 100 */
@@ -791,10 +795,6 @@ export interface HistoryConfigArchive extends HistoryConfigSummary {
   flowJson: unknown;
   protoFiles: Record<string, string>;
   scripts: Record<string, string>;
-}
-
-export interface HistoryCloneRequest {
-  name?: string;
 }
 
 export interface HistoryCompareTask {

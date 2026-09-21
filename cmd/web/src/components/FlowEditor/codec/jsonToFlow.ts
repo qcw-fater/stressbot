@@ -21,7 +21,6 @@ import type { ActionDef } from '@/types/action';
 
 /** flow.json 原始格式 */
 export interface FlowJsonInput {
-  defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;

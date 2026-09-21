@@ -30,11 +30,11 @@ func FromProto(src *controlpb.TaskAssignment, bundle *controlpb.BundleDescriptor
 		TaskID: src.TaskId, TaskName: src.TaskName, StartNumber: int(src.StartNumber), StartIndex: &startIndex,
 		TotalBots: int(src.TotalBots), AccountPrefix: src.AccountPrefix, ConcurrentNum: int(src.ConcurrentNum),
 		MainService: src.MainService, StateExtra: cloneStringMap(src.StateExtra),
-		HeartbeatInterval: time.Duration(src.HeartbeatIntervalNanos).String(),
-		TCPTimeout:        time.Duration(src.TcpTimeoutNanos).String(), HTTPTimeout: time.Duration(src.HttpTimeoutNanos).String(),
+		TCPTimeout: time.Duration(src.TcpTimeoutNanos).String(), HTTPTimeout: time.Duration(src.HttpTimeoutNanos).String(),
 		ApdexT: int(src.ApdexTMillis), LogLevel: src.LogLevel,
 		BundleDigest: append([]byte(nil), bundle.Sha256...), BundleSize: bundle.Size,
 		RampUp: rampUpFromProto(src.RampUp), Shared: sharedAssignmentFromProto(src.Shared),
+		DefaultDelayMs: int(src.DefaultDelayMs),
 	}
 	return out, out.Validate()
 }

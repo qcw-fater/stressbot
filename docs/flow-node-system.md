@@ -14,7 +14,7 @@
 | 全部串行 | 流程内不存在并行语义，所有节点按声明顺序执行 |
 | 单一职责 | 每种节点只做一件事：`loop` 只负责循环控制，不内嵌多节点列表；`sequence` 负责顺序编排 |
 | 干净的 JSON 格式 | `nodes` 直接使用 map 格式（key = 节点 ID），无需自定义反序列化 |
-| 两类延迟职责分离 | `defaultDelayMs`（框架负责节奏控制）与 `wait` 节点（用户负责业务等待）严格区分 |
+| 两类延迟职责分离 | 全局节点执行间隔（任务级运行参数，框架负责节奏控制）与 `wait` 节点（用户负责业务等待）严格区分 |
 | 类型精确 | 每种节点只保留与其语义相关的字段，不共用语义不明的字段 |
 | 条件加载期编译 | 所有条件表达式在 `PrepareTaskFlow` 阶段编译为不可变 AST，运行期只求值不解析（`flow/prepare.go:32-87`） |
 
@@ -43,7 +43,6 @@
 
 ```go
 type TaskFlow struct {
-    DefaultDelayMs int                   `json:"defaultDelayMs"` // 全局节点间默认延迟（毫秒）。0=引擎默认(1000ms)，<0=禁用
     Nodes          map[string]*Node      `json:"nodes"`          // 节点映射，key 为节点 ID
     Actions        map[string]*ActionDef `json:"actions"`        // 动作定义映射
     Listens        map[string]*ListenDef `json:"listens"`        // 监听定义映射
@@ -61,7 +60,6 @@ type TaskFlow struct {
 
 ```json
 {
-  "defaultDelayMs": 500,
   "nodes": {
     "main": { "type": "sequence", "next": ["init", "businessLoop"] },
     "businessLoop": { "type": "loop", "loopCount": -1, "body": "businessWeight" }
@@ -434,13 +432,13 @@ executeLoop()
 
 ### 6.1 两类延迟的职责分离
 
-**defaultDelayMs（框架负责 -- 全局节奏控制）**：
+**全局节点执行间隔（框架负责 -- 节奏控制）**：
 
-每个 action 节点执行完后，框架自动等待的最小间隔。目的：避免压测机器人执行过快，模拟真实用户的操作节奏。来源：`TaskFlow.DefaultDelayMs`，节点级 `DelayMs` 可覆盖。`DefaultDelayMs` 为 0 时引擎兜底为 1000ms（`engine/executor.go:64-70`），保证漏配的流程每个 action 节点仍有 drain 窗口（listen 回调靠节点延迟 drain）。
+每个 action 节点执行完后，框架自动等待的最小间隔。目的：避免压测机器人执行过快，模拟真实用户的操作节奏。不在 flow.json 中配置，也不属于 `TaskFlow` 结构：它是任务级运行参数，与 `mainService` 同级走 `robot.ManagerConfig.DefaultDelayMs`（分布式由任务启动配置 `robotConfig.defaultDelayMs` 下发，单机由 `standalone.bot.defaultDelayMs` 配置），`engine.NewExecutor` 第 4 参注入。节点级 `DelayMs` 可覆盖。未配置（0）时引擎兜底为 1000ms（`engine/executor.go`），保证每个 action 节点仍有 drain 窗口（listen 回调靠节点延迟 drain）。
 
 **wait 节点（用户负责 -- 业务逻辑控制）**：
 
-用户在 flow.json 中显式插入的等待步骤。目的：在特定业务节点之间插入固定等待，如等待服务器处理、等待动画等。与 defaultDelayMs 完全独立，两者叠加生效。
+用户在 flow.json 中显式插入的等待步骤。目的：在特定业务节点之间插入固定等待，如等待服务器处理、等待动画等。与全局节点执行间隔完全独立，两者叠加生效。
 
 ### 6.2 nodeDelay 方法
 
@@ -481,7 +479,7 @@ func (e *Executor) nodeDelay(ctx context.Context, node *flowdef.Node) error {
 type Executor struct {
     flow           *flowdef.TaskFlow
     handler        ActionHandler
-    defaultDelayMs int    // 解析自 flow.DefaultDelayMs，初始化后只读
+    defaultDelayMs int    // 任务级全局节点执行间隔（毫秒），NewExecutor 注入后只读
     caller         string // 调用方标识（机器人账号），用于日志追踪
 }
 ```
@@ -558,7 +556,7 @@ Node 结构体见 `flow/flow.go:35-75`。
 | `WaitMin` | int | `waitMin` | wait | 随机等待最小值 |
 | `WaitMax` | int | `waitMax` | wait | 随机等待最大值 |
 | `Then` | string | `then` | wait | 等待完成后的唯一后继节点 ID |
-| `DelayMs` | int | `delayMs` | action | 覆盖 defaultDelayMs |
+| `DelayMs` | int | `delayMs` | action | 覆盖全局节点执行间隔 |
 
 `Node` 还持有加载期编译产物 `compiledCondition` / `compiledBreakCondition`（不序列化），`SwitchCase` 同样持有 `compiledCondition`（`flow/flow.go:73-74,102`）。
 
@@ -1113,7 +1111,7 @@ ActionError 统一放在 `errcode` 包，实现 `monitor.CodedError` 接口供�
 | `DefaultRequestTimeoutSec` | 10 | tcpRequest/udpRequest 默认超时（秒） |
 | `DefaultListenTimeoutSec` | 60 | tcpListen/udpListen 默认超时（秒） |
 | `DefaultHeartbeatMs` | 3000 | 心跳默认间隔（毫秒） |
-| `defaultDelayMs` 兜底 | 1000 | `TaskFlow.DefaultDelayMs` 为 0 时的引擎默认节点延迟（`engine/executor.go:64-70`） |
+| 全局节点间隔兜底 | 1000 | 未注入 `TaskFlow.DefaultDelayMs` 时的引擎默认节点延迟（`engine/executor.go:64-70`） |
 
 ## 19. 完整 JSON 示例
 
@@ -1121,7 +1119,6 @@ ActionError 统一放在 `errcode` 包，实现 `monitor.CodedError` 接口供�
 
 ```json
 {
-  "defaultDelayMs": 500,
   "nodes": {
     "main": {
       "type": "sequence",

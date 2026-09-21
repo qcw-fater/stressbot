@@ -21,7 +21,6 @@ export const BASELINE_PREFIX: string = import.meta.env.VITE_BASELINE_PREFIX || '
  *   VITE_ROBOT_MAIN_SERVICE=logic
  *   VITE_ROBOT_CONCURRENCY=50
  *   VITE_ROBOT_TIMEOUT_SEC=60
- *   VITE_ROBOT_HEARTBEAT_SEC=5
  *   VITE_ROBOT_HTTP_TIMEOUT_SEC=10
  *   VITE_ROBOT_APDEX_T=100
  *   VITE_ROBOT_START_NUMBER=0
@@ -39,9 +38,6 @@ export const ENV_ROBOT_DEFAULTS: Partial<RobotConfig> = {
   }),
   ...(import.meta.env.VITE_ROBOT_TIMEOUT_SEC && {
     timeoutSec: Number(import.meta.env.VITE_ROBOT_TIMEOUT_SEC) || undefined,
-  }),
-  ...(import.meta.env.VITE_ROBOT_HEARTBEAT_SEC && {
-    heartbeatSec: Number(import.meta.env.VITE_ROBOT_HEARTBEAT_SEC) || undefined,
   }),
   ...(import.meta.env.VITE_ROBOT_HTTP_TIMEOUT_SEC && {
     httpTimeoutSec: Number(import.meta.env.VITE_ROBOT_HTTP_TIMEOUT_SEC) || undefined,

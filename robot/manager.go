@@ -54,9 +54,12 @@ type ManagerConfig struct {
 	CodecResolver  protocol.CodecResolver `json:"-"`
 	RequestTimeout time.Duration          `json:"requestTimeout"`
 	MainService    string                 `json:"mainService"`
-	HTTPTimeout    time.Duration          `json:"httpTimeout"`
-	RampUp         *RampUpConfig          `json:"rampUp"`
-	Duration       time.Duration          `json:"duration"` // 运行时长，0 = 一直运行
+	// DefaultDelayMs 任务级全局节点执行间隔（毫秒）：0 = 引擎默认 1000ms，
+	// 正数 = 自定义，-1 = 禁用节点间等待。节点自身 delayMs 优先于此值。
+	DefaultDelayMs int           `json:"defaultDelayMs"`
+	HTTPTimeout    time.Duration `json:"httpTimeout"`
+	RampUp         *RampUpConfig `json:"rampUp"`
+	Duration       time.Duration `json:"duration"` // 运行时长，0 = 一直运行
 	// Shared 任务级共享状态后端（可为 nil，表示未启用）。Manager 仅透传给每个 Robot，
 	// 不负责 Cleanup/Close：单机由 cmd/agent 负责，分布式由 Agent(Close)+Admin(Cleanup) 负责。
 	Shared shared.Store `json:"-"`
@@ -162,6 +165,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			HTTPTimeout:    m.cfg.HTTPTimeout,
 			RequestTimeout: m.cfg.RequestTimeout,
 			MainService:    m.cfg.MainService,
+			DefaultDelayMs: m.cfg.DefaultDelayMs,
 			Shared:         m.cfg.Shared,
 		}, m.flow, m.factory, m.cfg.CodecResolver, m.dialer, m.luaPool)
 		if err != nil {

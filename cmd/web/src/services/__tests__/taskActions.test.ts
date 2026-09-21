@@ -76,7 +76,7 @@ vi.mock('../tasksApi', () => ({
 import { startTask, type StartTaskOptions } from '../taskActions';
 
 const flow = {
-  defaultDelayMs: 1000,
+
   nodes: { main: { type: 'sequence' as const, next: [] } },
   actions: {},
   listens: {},
@@ -92,7 +92,6 @@ const options: StartTaskOptions = {
     startNumber: 0,
     mainService: 'logic',
     stateExtra: {},
-    heartbeatSec: 5,
     httpTimeoutSec: 10,
     apdexT: 100,
     logLevel: 'info',

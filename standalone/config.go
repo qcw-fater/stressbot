@@ -21,6 +21,9 @@ type BotConfig struct {
 	TotalBots     int    `toml:"totalBots"`
 	Concurrency   int    `toml:"concurrency"`
 	MainService   string `toml:"mainService"`
+	// DefaultDelayMs 节点执行间隔（毫秒）。不配置或 0 = 引擎默认 1000ms；
+	// 正数 = 自定义；-1 = 禁用全局节点间等待。
+	DefaultDelayMs int `toml:"defaultDelayMs"`
 }
 
 // Settings 保存单机模式专用配置。
@@ -73,6 +76,10 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if s.Bot.MainService == "" {
 		return nil, errors.New("standalone.bot.mainService 未配置")
+	}
+	// 节点执行间隔：写错直接报错，不回退默认值（与任务下发链路口径一致）。
+	if d := s.Bot.DefaultDelayMs; d != 0 && d != -1 && (d < 0 || d > 600000) {
+		return nil, fmt.Errorf("standalone.bot.defaultDelayMs 取值无效（%d）：仅允许 -1（禁用等待）或 0~600000 毫秒，0 表示沿用流程配置", d)
 	}
 	if s.RampUp != nil && len(s.RampUp.Stages) > 0 {
 		sum := 0

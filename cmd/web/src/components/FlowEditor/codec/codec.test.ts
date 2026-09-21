@@ -25,7 +25,7 @@ describe('codec round-trip', () => {
 
   it('节点 / 动作 / 监听数量与原文件一致', () => {
     const exported = flowToJson({
-      defaultDelayMs: raw.defaultDelayMs,
+
       nodes: raw.nodes,
       actions: raw.actions,
       listens: raw.listens,
@@ -33,7 +33,7 @@ describe('codec round-trip', () => {
     expect(Object.keys(exported.nodes).length).toBe(Object.keys(raw.nodes).length);
     expect(Object.keys(exported.actions).length).toBe(Object.keys(raw.actions).length);
     expect(Object.keys(exported.listens).length).toBe(Object.keys(raw.listens).length);
-    expect(exported.defaultDelayMs).toBe(raw.defaultDelayMs);
+
   });
 
   it('jsonToFlow 生成的 React Flow 节点数 = nodes + listens', () => {
@@ -73,7 +73,7 @@ describe('codec round-trip', () => {
 
   it('导出 onError 且不导出旧 errorStrategy 字段', () => {
     const exported = flowToJson({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: {
           type: 'action',
@@ -104,7 +104,7 @@ describe('codec round-trip', () => {
 
   it('空 onError 在导出时被裁剪', () => {
     const exported = flowToJson({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: {
           type: 'action',
@@ -124,7 +124,7 @@ describe('codec round-trip', () => {
 
   it('jsonToFlow 为 onError.handler 生成错误处理边', () => {
     const { rfEdges } = jsonToFlow({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: { type: 'sequence', next: ['act'] },
         act: { type: 'action', action: 'A1', onError: { handler: 'cleanup' } },
@@ -142,7 +142,7 @@ describe('codec round-trip', () => {
 
   it('jsonToFlow 为 wait.then 生成后继边', () => {
     const input: FlowJsonInput = {
-      defaultDelayMs: 1000,
+
       nodes: {
         main: { type: 'wait', waitMs: 10, then: 'after' },
         after: { type: 'action', action: 'After' },
@@ -158,7 +158,7 @@ describe('codec round-trip', () => {
 
   it('flowToJson 导出 wait.then', () => {
     const input: FlowJson = {
-      defaultDelayMs: 1000,
+
       nodes: {
         main: { type: 'wait', waitMs: 10, then: 'after' },
         after: { type: 'action', action: 'After' },
@@ -172,7 +172,7 @@ describe('codec round-trip', () => {
 
   it('flowToJson 裁剪空白 wait.then', () => {
     const input: FlowJson = {
-      defaultDelayMs: 1000,
+
       nodes: { main: { type: 'wait', waitMs: 10, then: '   ' } },
       actions: {},
       listens: {},
@@ -187,7 +187,7 @@ describe('codec round-trip', () => {
 
   it('jsonToFlow 不迁移旧 breakOff / errorStrategy 字段', () => {
     const legacy = {
-      defaultDelayMs: 1000,
+
       nodes: {
         main: { type: 'action', action: 'A1', breakOff: true, errorStrategy: 'abort' },
       },
@@ -202,7 +202,7 @@ describe('codec round-trip', () => {
 
   it('listenRefs 在导出时被保留', () => {
     const exported = flowToJson({
-      defaultDelayMs: raw.defaultDelayMs,
+
       nodes: raw.nodes,
       actions: raw.actions,
       listens: raw.listens,
@@ -220,7 +220,7 @@ describe('codec round-trip', () => {
 
   it('action.bindings 和 listen.store 在导出时被保留', () => {
     const exported = flowToJson({
-      defaultDelayMs: raw.defaultDelayMs,
+
       nodes: raw.nodes,
       actions: raw.actions,
       listens: raw.listens,
@@ -241,7 +241,7 @@ describe('codec round-trip', () => {
 
   it('filter mode 在导出时被保留', () => {
     const exported = flowToJson({
-      defaultDelayMs: raw.defaultDelayMs,
+
       nodes: raw.nodes,
       actions: {
         A1: {
@@ -262,7 +262,7 @@ describe('codec round-trip', () => {
 
   it('导出时按 pattern 裁剪无关字段', () => {
     const exported = flowToJson({
-      defaultDelayMs: raw.defaultDelayMs,
+
       nodes: raw.nodes,
       actions: {
         A1: {
@@ -288,7 +288,7 @@ describe('codec round-trip', () => {
 
   it('导出 JSON 写到磁盘，结构稳定', () => {
     const exported = flowToJson({
-      defaultDelayMs: raw.defaultDelayMs,
+
       nodes: raw.nodes,
       actions: raw.actions,
       listens: raw.listens,
@@ -306,7 +306,7 @@ describe('codec round-trip', () => {
 
   it('map binding entries 在导出时被保留，entry value 的 field/storeAs 被剥离，condition/wrap 保留', () => {
     const exported = flowToJson({
-      defaultDelayMs: raw.defaultDelayMs,
+
       nodes: raw.nodes,
       actions: {
         A1: {

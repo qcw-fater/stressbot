@@ -46,7 +46,7 @@ function buildFlow(opts: {
   listens?: Record<string, { script?: string }>;
 }): FlowJson {
   return {
-    defaultDelayMs: 1000,
+
     nodes: (opts.nodes ?? {}) as FlowJson['nodes'],
     actions: (opts.actions ?? {}) as FlowJson['actions'],
     listens: (opts.listens ?? {}) as FlowJson['listens'],
@@ -133,7 +133,7 @@ describe('collectFlowScriptNames', () => {
   });
 
   it('容忍 actions / listens 为 undefined（旧数据兼容）', () => {
-    const flow = { defaultDelayMs: 1000, nodes: {} } as unknown as FlowJson;
+    const flow = { nodes: {} } as unknown as FlowJson;
     expect(collectFlowScriptNames(flow)).toEqual([]);
   });
 });

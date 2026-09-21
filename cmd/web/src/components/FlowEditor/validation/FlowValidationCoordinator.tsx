@@ -14,7 +14,6 @@ import {
 export function FlowValidationCoordinator() {
   const flow = useFlowStore(
     useShallow((state) => ({
-      defaultDelayMs: state.defaultDelayMs,
       nodes: state.nodes,
       actions: state.actions,
       listens: state.listens,

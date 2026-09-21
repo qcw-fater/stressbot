@@ -1,5 +1,4 @@
 {
-  "defaultDelayMs": 1000,
   "nodes": {
     "main": { "type": "sequence", "next": ["act", "loop", "branch", "switch", "weighted", "wait", "break", "continue"] },
     "act": {

@@ -31,7 +31,7 @@ var (
 type Executor struct {
 	flow           *flowdef.TaskFlow
 	handler        ActionHandler
-	defaultDelayMs int    // 解析自 flow.DefaultDelayMs，初始化后只读
+	defaultDelayMs int // 任务级全局节点执行间隔（毫秒），NewExecutor 注入后只读
 	// caller 是调用方标识（机器人账号），日志里以 robot 键输出——不能用 caller 做键，
 	// 那是 zap 内建的源码位置键（stresslog 的 CallerKey），同名会让一行 JSON 出现两个
 	// caller，解析器取后者，源码位置被静默吃掉。
@@ -60,11 +60,10 @@ type ActionHandler interface {
 
 // NewExecutor 创建流程执行器。
 // caller 用于日志中标识调用方（如机器人账号），便于追踪问题。
-func NewExecutor(flow *flowdef.TaskFlow, handler ActionHandler, caller string) *Executor {
-	// defaultDelayMs 兜底：flow 未配置（0）时按引擎默认 1000ms，兑现 DefaultDelayMs 字段注释承诺的
-	// 「0=引擎默认(1000ms)」。保证漏配的流程每个 action 节点仍有 drain 窗口（listen 回调靠节点延迟
-	// drain，不在节点入口单独 drain）。
-	defaultDelayMs := flow.DefaultDelayMs
+// defaultDelayMs 是任务级全局节点执行间隔（毫秒）：0 = 引擎默认 1000ms，<0 = 禁用，
+// 节点自身 delayMs 优先于此值。兜底 1000ms 保证未配置的任务每个 action 节点仍有
+// drain 窗口（listen 回调靠节点延迟 drain，不在节点入口单独 drain）。
+func NewExecutor(flow *flowdef.TaskFlow, handler ActionHandler, caller string, defaultDelayMs int) *Executor {
 	if defaultDelayMs == 0 {
 		defaultDelayMs = 1000
 	}

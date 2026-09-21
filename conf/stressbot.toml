@@ -120,6 +120,11 @@ duration = "0"
   # 必须与 flow.json 中 connection 声明的服务名一致。
   mainService = "logic"
 
+  # defaultDelayMs 节点执行间隔（毫秒），不写或 0 = 引擎默认 1000ms。
+  # 正数 = 每个节点执行后的等待毫秒数；-1 = 禁用全局节点间等待。
+  # 节点自身配置了 delayMs（自定义/禁用）时以节点值为准，本配置不生效。
+  # defaultDelayMs = 500
+
   # standalone.stateExtra 初始状态注入。
   # 这里的键值对会注入每个 Robot 的初始 state，可在 Lua 脚本中通过 robot.get("key") 读取。
   # 典型用途：传递认证地址、客户端版本号、渠道号等非机器人编号类参数。

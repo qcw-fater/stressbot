@@ -55,11 +55,12 @@ func (d *Dispatcher) ScheduleStart(ctx context.Context, task *admintask.Task, as
 			StartIndex: admintask.AssignmentStartIndex(assignment, startNumber), TotalBots: assignment.TotalBots,
 			AccountPrefix: stringOr(robotConfig.AccountPrefix, "bot_", "robotConfig.accountPrefix"),
 			MainService:   robotConfig.MainService, StateExtra: robotConfig.StateExtra,
-			ConcurrentNum:     concurrencyByAgent[assignment.AgentID],
-			HeartbeatInterval: secondsOr(robotConfig.HeartbeatSec, 5, "robotConfig.heartbeatSec"),
-			TCPTimeout:        secondsOr(robotConfig.TimeoutSec, 60, "robotConfig.timeoutSec"),
-			HTTPTimeout:       secondsOr(robotConfig.HTTPTimeoutSec, 10, "robotConfig.httpTimeoutSec"),
-			ApdexT:            intOr(robotConfig.ApdexT, 100, "robotConfig.apdexT"), LogLevel: robotConfig.LogLevel,
+			ConcurrentNum: concurrencyByAgent[assignment.AgentID],
+			// DefaultDelayMs 为 0 时引擎用默认 1000ms。
+			DefaultDelayMs: robotConfig.DefaultDelayMs,
+			TCPTimeout:     secondsOr(robotConfig.TimeoutSec, 60, "robotConfig.timeoutSec"),
+			HTTPTimeout:    secondsOr(robotConfig.HTTPTimeoutSec, 10, "robotConfig.httpTimeoutSec"),
+			ApdexT:         intOr(robotConfig.ApdexT, 100, "robotConfig.apdexT"), LogLevel: robotConfig.LogLevel,
 			RampUp: admintask.ScaleRampUp(robotConfig.RampUp, task.TotalBots, assignment.TotalBots, assignments, assignment.AgentID),
 			Shared: sharedRuntime,
 		}

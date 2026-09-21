@@ -101,9 +101,9 @@ export interface ListenRef {
   queueSize?: number;
 }
 
-/** TaskFlow：编辑器主数据模型，1:1 对应 flow.json。 */
+/** TaskFlow：编辑器主数据模型，1:1 对应 flow.json。
+ *  节点执行间隔不在流程配置中（运行时参数，唯一入口为任务启动配置 / 单机 toml）。 */
 export interface TaskFlow {
-  defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
@@ -112,7 +112,6 @@ export interface TaskFlow {
 /** 创建空 TaskFlow（提供默认值） */
 export function emptyTaskFlow(): TaskFlow {
   return {
-    defaultDelayMs: 1000,
     nodes: {},
     actions: {},
     listens: {},

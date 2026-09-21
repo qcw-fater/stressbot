@@ -18,7 +18,7 @@ import {
 
 function buildFlow(actions: Record<string, unknown>): FlowJson {
   return {
-    defaultDelayMs: 1000,
+
     nodes: {},
     actions: actions as FlowJson['actions'],
     listens: {},
@@ -49,10 +49,10 @@ describe('collectFlowCodecConnections', () => {
   });
 
   it('flow.actions 缺失/为空对象时返回空数组', () => {
-    expect(collectFlowCodecConnections({ defaultDelayMs: 0, nodes: {} } as FlowJson)).toEqual([]);
+
     expect(
       collectFlowCodecConnections({
-        defaultDelayMs: 0,
+
         nodes: {},
         actions: {},
       } as unknown as FlowJson),

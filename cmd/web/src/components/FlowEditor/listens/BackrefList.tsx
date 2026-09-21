@@ -30,7 +30,6 @@ export function BackrefList({ listenName }: BackrefListProps) {
       nodes: s.nodes,
       actions: s.actions,
       listens: s.listens,
-      defaultDelayMs: s.defaultDelayMs,
     })),
   );
   const updateNode = useFlowStore((s) => s.updateNode);

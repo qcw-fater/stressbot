@@ -25,7 +25,7 @@ vi.mock('../codec/useCodecConnections', () => ({
 describe('ListenRefsTable', () => {
   beforeEach(() => {
     useFlowStore.setState({
-      defaultDelayMs: 1000,
+
       nodes: {
         connect_logic: {
           type: 'action',

@@ -5,7 +5,6 @@
   "type": "object",
   "required": ["nodes", "actions"],
   "properties": {
-    "defaultDelayMs": { "type": "integer" },
     "nodes": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/node" }

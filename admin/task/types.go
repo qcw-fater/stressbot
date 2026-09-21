@@ -139,8 +139,9 @@ type RobotConfig struct {
 	// StateExtra 初始状态额外键值对。
 	StateExtra map[string]string `json:"stateExtra,omitempty"`
 
-	// HeartbeatSec 心跳间隔秒数。
-	HeartbeatSec int `json:"heartbeatSec,omitempty"`
+	// DefaultDelayMs 任务级节点执行间隔（毫秒）。0 = 引擎默认 1000ms；
+	// 正数 = 自定义；-1 = 禁用全局节点间等待。
+	DefaultDelayMs int `json:"defaultDelayMs,omitempty"`
 	// HTTPTimeoutSec HTTP 请求超时秒数。
 	HTTPTimeoutSec int `json:"httpTimeoutSec,omitempty"`
 	// ApdexT Apdex 阈值（毫秒）。
@@ -222,8 +223,9 @@ type Dispatch struct {
 	MainService string `json:"mainService"`
 	// StateExtra 初始状态额外键值对。
 	StateExtra map[string]string `json:"stateExtra"`
-	// HeartbeatInterval 心跳间隔（duration 字符串）。
-	HeartbeatInterval string `json:"heartbeatInterval"`
+	// DefaultDelayMs 任务级节点执行间隔（毫秒）。0 = 引擎默认 1000ms；
+	// 正数 = 自定义；-1 = 禁用全局节点间等待。
+	DefaultDelayMs int `json:"defaultDelayMs,omitempty"`
 	// TCPTimeout TCP 请求超时（duration 字符串）。
 	TCPTimeout string `json:"tcpTimeout"`
 	// HTTPTimeout HTTP 请求超时（duration 字符串）。

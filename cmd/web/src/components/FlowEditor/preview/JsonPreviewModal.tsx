@@ -16,7 +16,6 @@ export function JsonPreviewModal() {
   const closePanel = useEditorStore((s) => s.closePanel);
   const flow = useFlowStore(
     useShallow((s) => ({
-      defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
       listens: s.listens,

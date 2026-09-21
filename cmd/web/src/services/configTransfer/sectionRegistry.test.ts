@@ -10,7 +10,7 @@ import { parseBackupWithRegistry } from './backupCodec';
 import { createSectionRegistry, type SectionRegistryDependencies } from './sectionRegistry';
 
 const validFlow: FlowJson = {
-  defaultDelayMs: 0,
+
   nodes: { main: { type: 'sequence', next: [] } },
   actions: {},
   listens: {},

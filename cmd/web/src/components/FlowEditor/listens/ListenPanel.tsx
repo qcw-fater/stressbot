@@ -34,7 +34,6 @@ export function ListenPanel() {
       nodes: s.nodes,
       actions: s.actions,
       listens: s.listens,
-      defaultDelayMs: s.defaultDelayMs,
     })),
   );
   const listens = flow.listens;

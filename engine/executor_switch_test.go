@@ -76,7 +76,6 @@ func (h *switchTestHandler) CooperativeSleep(ctx context.Context, _ time.Duratio
 
 func newSwitchTestExecutor(handler *switchTestHandler, switchNode *flowdef.Node) *Executor {
 	flow := &flowdef.TaskFlow{
-		DefaultDelayMs: -1,
 		Nodes: map[string]*flowdef.Node{
 			"main":     switchNode,
 			"advanced": {Type: flowdef.NodeAction, Action: "advanced", DelayMs: -1},
@@ -92,7 +91,7 @@ func newSwitchTestExecutor(handler *switchTestHandler, switchNode *flowdef.Node)
 	if err := flowdef.PrepareTaskFlow(flow); err != nil {
 		panic(err)
 	}
-	return NewExecutor(flow, handler, "switch-test")
+	return NewExecutor(flow, handler, "switch-test", -1)
 }
 
 func TestExecutorDoesNotParseUnpreparedCondition(t *testing.T) {
@@ -101,7 +100,7 @@ func TestExecutorDoesNotParseUnpreparedCondition(t *testing.T) {
 		"main": {Type: flowdef.NodeBoolean, Condition: "state:ready", TrueNext: "yes"},
 		"yes":  {Type: flowdef.NodeSequence},
 	}}
-	executor := NewExecutor(flow, handler, "test")
+	executor := NewExecutor(flow, handler, "test", -1)
 	if err := executor.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}

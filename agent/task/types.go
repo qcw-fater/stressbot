@@ -34,25 +34,27 @@ type CompletionReport struct {
 
 // Assignment 是 Admin 下发给单个 Agent 的任务分片。
 type Assignment struct {
-	TaskID            string                   `json:"taskId"`
-	TaskName          string                   `json:"taskName"`
-	StartNumber       int                      `json:"startNumber"`
-	StartIndex        *int                     `json:"startIndex"`
-	TotalBots         int                      `json:"totalBots"`
-	AccountPrefix     string                   `json:"accountPrefix"`
-	ConcurrentNum     int                      `json:"concurrentNum"`
-	MainService       string                   `json:"mainService"`
-	StateExtra        map[string]string        `json:"stateExtra"`
-	HeartbeatInterval string                   `json:"heartbeatInterval"`
-	TCPTimeout        string                   `json:"tcpTimeout"`
-	HTTPTimeout       string                   `json:"httpTimeout"`
-	ApdexT            int                      `json:"apdexT"`
-	LogLevel          string                   `json:"logLevel,omitempty"`
-	BundleDigest      []byte                   `json:"-"`
-	BundleSize        int64                    `json:"-"`
-	BundleDir         string                   `json:"-"`
-	RampUp            *RampUpConfig            `json:"rampUp,omitempty"`
-	Shared            *SharedRuntimeAssignment `json:"shared,omitempty"`
+	TaskID        string            `json:"taskId"`
+	TaskName      string            `json:"taskName"`
+	StartNumber   int               `json:"startNumber"`
+	StartIndex    *int              `json:"startIndex"`
+	TotalBots     int               `json:"totalBots"`
+	AccountPrefix string            `json:"accountPrefix"`
+	ConcurrentNum int               `json:"concurrentNum"`
+	MainService   string            `json:"mainService"`
+	StateExtra    map[string]string `json:"stateExtra"`
+	// DefaultDelayMs 任务级节点执行间隔（毫秒）。0 = 引擎默认 1000ms；
+	// 正数 = 自定义；-1 = 禁用全局节点间等待。
+	DefaultDelayMs int                      `json:"defaultDelayMs,omitempty"`
+	TCPTimeout     string                   `json:"tcpTimeout"`
+	HTTPTimeout    string                   `json:"httpTimeout"`
+	ApdexT         int                      `json:"apdexT"`
+	LogLevel       string                   `json:"logLevel,omitempty"`
+	BundleDigest   []byte                   `json:"-"`
+	BundleSize     int64                    `json:"-"`
+	BundleDir      string                   `json:"-"`
+	RampUp         *RampUpConfig            `json:"rampUp,omitempty"`
+	Shared         *SharedRuntimeAssignment `json:"shared,omitempty"`
 }
 
 // Validate 校验任务分片必须包含全局机器人起始下标。

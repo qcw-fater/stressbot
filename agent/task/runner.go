@@ -131,7 +131,7 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 		zap.Int("nodes", len(resources.Flow.Nodes)),
 		zap.Int("actions", len(resources.Flow.Actions)))
 
-	// 6. 重置监控
+	// 7. 重置监控
 	//
 	// **不能**调用 monitor.Init —— 那会新建一个 collector 替换 global，
 	// 而 a.collector / StressReporter.src 持有的还是旧引用，导致
@@ -140,13 +140,8 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 	r.collector.Reset()
 	r.collector.SetApdexT(r.assignment.ApdexT)
 
-	// 7. 解析超时参数：任务下发的时长写错就让这次任务失败，
+	// 8. 解析超时参数：任务下发的时长写错就让这次任务失败，
 	//    不能退化成默认值后跑出一份「超时窗口不是配置那个」的压测结果。
-	hbInterval, err := config.ParsePositiveDuration(r.assignment.HeartbeatInterval, 5*time.Second, "heartbeatInterval")
-	if err != nil {
-		stresslog.Error("[TASK] 解析心跳间隔失败", zap.String("taskID", taskID), zap.Error(err))
-		return runFailed(err.Error())
-	}
 	tcpTimeout, err := config.ParsePositiveDuration(r.assignment.TCPTimeout, 60*time.Second, "tcpTimeout")
 	if err != nil {
 		stresslog.Error("[TASK] 解析 TCP 超时失败", zap.String("taskID", taskID), zap.Error(err))
@@ -158,9 +153,9 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 		return runFailed(err.Error())
 	}
 
-	// 8. 启动 gnet 网络引擎
+	// 9. 启动 gnet 网络引擎
 	// Dialer 元信息源：resolver 任一 Go SchemaAdapter（HeaderSize 全局一致，T1.6 同源）。
-	dialer, err := runner.StartDialer(resources, hbInterval, r.engine)
+	dialer, err := runner.StartDialer(resources, r.engine)
 	if err != nil {
 		stresslog.Error("[TASK] 启动网络引擎失败", zap.String("taskID", taskID), zap.Error(err))
 		return runFailed(fmt.Sprintf("启动网络引擎失败: %v", err))
@@ -218,6 +213,7 @@ func (r *Runner) Run(ctx context.Context) RunResult {
 		CodecResolver:  resources.Resolver,
 		RequestTimeout: tcpTimeout,
 		MainService:    mainService,
+		DefaultDelayMs: r.assignment.DefaultDelayMs,
 		HTTPTimeout:    httpTimeout,
 		Shared:         sharedStore,
 	}

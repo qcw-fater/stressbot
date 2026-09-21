@@ -223,7 +223,7 @@ message TaskAssignment {
   int32 concurrent_num = 7;
   string main_service = 8;
   map<string, string> state_extra = 9;
-  int64 heartbeat_interval_nanos = 10;
+  int32 default_delay_ms = 10;
   int64 tcp_timeout_nanos = 11;
   int64 http_timeout_nanos = 12;
   int32 apdex_t_millis = 13;

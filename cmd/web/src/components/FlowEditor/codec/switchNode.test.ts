@@ -4,7 +4,7 @@ import { flowToJson } from './flowToJson';
 import type { FlowJson } from './flowToJson';
 
 const baseFlow: FlowJson = {
-  defaultDelayMs: 1000,
+
   nodes: {
     main: {
       type: 'switch',
@@ -60,7 +60,7 @@ describe('switch node codec', () => {
 
   it('导出保留所有 switch case（含空 condition/next），不再静默丢弃，交给校验拦截', () => {
     const exported = flowToJson({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: {
           type: 'switch',

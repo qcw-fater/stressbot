@@ -7,7 +7,7 @@ import { buildRefsGraph, routeKey } from './refsGraph';
 import type { TaskFlow } from '@/types/flow';
 
 const baseFlow: TaskFlow = {
-  defaultDelayMs: 1000,
+
   nodes: {
     main: { type: 'sequence', next: ['act1', 'act2'] },
     act1: {

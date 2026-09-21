@@ -264,7 +264,6 @@ interface WeightedOption {
 
 ```typescript
 interface TaskFlow {
-  defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
@@ -529,7 +528,6 @@ interface FlowState {
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
-  defaultDelayMs: number;
 
   // React Flow 镜像
   rfNodes: RFNode[];

@@ -123,7 +123,6 @@ const DEFAULT_ROBOT_CONFIG: RobotConfig = {
   startNumber: 0,
   mainService: 'logic',
   stateExtra: {},
-  heartbeatSec: 5,
   httpTimeoutSec: 10,
   apdexT: 100,
   logLevel: 'info',

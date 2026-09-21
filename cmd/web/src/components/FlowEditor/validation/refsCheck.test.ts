@@ -9,7 +9,7 @@ import type { TaskFlow } from '@/types/flow';
 /** 造一个最小合法 flow，用于叠加错误场景 */
 function baseFlow(overrides: Partial<TaskFlow> = {}): TaskFlow {
   return {
-    defaultDelayMs: 1000,
+
     nodes: { main: { type: 'sequence', next: ['act1'] }, act1: { type: 'action', action: 'A1' } },
     actions: {
       A1: { pattern: 'tcpSend', service: 'logic', route: { cmd: 1, act: 1 }, c2sProto: 'X.Foo' },
@@ -29,7 +29,7 @@ describe('validateFlow', () => {
   // ── 节点级 ──
 
   it('NO_MAIN：缺少 main 节点报错', () => {
-    const r = validateFlow({ defaultDelayMs: 1000, nodes: {}, actions: {}, listens: {} });
+    const r = validateFlow({ nodes: {}, actions: {}, listens: {} });
     expect(r.errors.find((e) => e.code === 'NO_MAIN')).toBeTruthy();
   });
 
@@ -1049,7 +1049,7 @@ describe('validateFlow', () => {
 describe('switch node validation', () => {
   it('accepts valid switch nodes and warns when default is missing', () => {
     const report = validateFlow({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: {
           type: 'switch',
@@ -1068,7 +1068,7 @@ describe('switch node validation', () => {
 
   it('reports missing cases, empty condition, missing next, and invalid default', () => {
     const report = validateFlow({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: {
           type: 'switch',
@@ -1091,7 +1091,7 @@ describe('switch node validation', () => {
 
   it('reports SWITCH_NO_CASES when cases is empty or absent', () => {
     const report = validateFlow({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: { type: 'switch', defaultNext: 'fallback' },
         fallback: { type: 'action', action: 'F' },
@@ -1105,7 +1105,7 @@ describe('switch node validation', () => {
 
   it('does not report switch case and default targets as orphan nodes', () => {
     const report = validateFlow({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: {
           type: 'switch',
@@ -1127,7 +1127,7 @@ describe('switch node validation', () => {
 
   it('accepts break and continue reachable through switch branches inside a loop', () => {
     const report = validateFlow({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: { type: 'loop', body: 'switchInLoop', loopCount: 1 },
         switchInLoop: {
@@ -1147,7 +1147,7 @@ describe('switch node validation', () => {
 
   it('trims whitespace in case next and defaultNext before resolving refs', () => {
     const report = validateFlow({
-      defaultDelayMs: 1000,
+
       nodes: {
         main: {
           type: 'switch',

@@ -17,7 +17,6 @@ import type {
 import { pruneActionByPattern } from '../editors/ActionEditor/actionPrune';
 
 export interface ExportInput {
-  defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
@@ -25,7 +24,6 @@ export interface ExportInput {
 
 /** flow.json 格式 */
 export interface FlowJson {
-  defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
@@ -33,8 +31,6 @@ export interface FlowJson {
 
 export function flowToJson(input: ExportInput): FlowJson {
   return {
-    // Go 端 TaskFlow.DefaultDelayMs 为 int：截断小数，避免后端 json.Unmarshal 失败。
-    defaultDelayMs: Math.trunc(input.defaultDelayMs),
     nodes: mapValues(input.nodes, cleanNode),
     actions: mapValues(input.actions, cleanAction),
     listens: mapValues(input.listens, cleanListen),

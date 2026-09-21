@@ -5,7 +5,7 @@ import { useFlowStore } from './flowStore';
 import { getHistorySize, redo, undo } from './flowHistory';
 
 const flow: FlowJson = {
-  defaultDelayMs: 1000,
+
   nodes: {
     main: { type: 'sequence', next: ['send'] },
     send: { type: 'action', action: 'send' },
@@ -55,7 +55,7 @@ describe('flow history', () => {
     useFlowStore.getState().updateAction('send', { timeout: 2500 });
     expect(getHistorySize().past).toBe(1);
 
-    useFlowStore.getState().loadFromTaskFlow({ ...flow, defaultDelayMs: 2000 });
+    useFlowStore.getState().loadFromTaskFlow({ ...flow});
     expect(getHistorySize()).toEqual({ past: 0, future: 0 });
 
     useFlowStore.getState().updateNode('main', { description: 'changed' });

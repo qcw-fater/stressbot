@@ -13,10 +13,9 @@ import (
 // 由一组 Node 组成的有向图，从 "main" 节点开始串行执行。
 // nodes 使用 JSON object（key = 节点 ID），无需自定义反序列化。
 type TaskFlow struct {
-	DefaultDelayMs int                   `json:"defaultDelayMs"` // 全局节点间默认延迟（毫秒）。0=引擎默认(1000ms)，<0=禁用
-	Nodes          map[string]*Node      `json:"nodes"`          // 节点映射，key 为节点 ID
-	Actions        map[string]*ActionDef `json:"actions"`        // 动作定义映射
-	Listens        map[string]*ListenDef `json:"listens"`        // 监听定义映射
+	Nodes   map[string]*Node      `json:"nodes"`   // 节点映射，key 为节点 ID
+	Actions map[string]*ActionDef `json:"actions"` // 动作定义映射
+	Listens map[string]*ListenDef `json:"listens"` // 监听定义映射
 }
 
 // Node 流程节点。
@@ -68,7 +67,7 @@ type Node struct {
 	Then    string `json:"then"`    // 等待完成后执行的唯一后继节点 ID；空表示流程在此结束
 
 	// ── 通用（action 节点有效）────────────────────────────
-	DelayMs int `json:"delayMs"` // > 0: 使用此值；= 0: 使用 TaskFlow.DefaultDelayMs；< 0: 禁用延迟
+	DelayMs int `json:"delayMs"` // > 0: 使用此值；= 0: 使用全局间隔（任务级运行参数，未配置=引擎默认 1000ms）；< 0: 禁用延迟
 
 	compiledCondition      *CompiledCondition
 	compiledBreakCondition *CompiledCondition

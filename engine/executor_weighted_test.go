@@ -9,7 +9,6 @@ import (
 
 func newWeightedExecutor(options []flowdef.WeightedOption, handler *executorActionTestHandler) *Executor {
 	return NewExecutor(&flowdef.TaskFlow{
-		DefaultDelayMs: -1,
 		Nodes: map[string]*flowdef.Node{
 			"pick": {Type: flowdef.NodeWeighted, Options: options},
 			"a":    {Type: flowdef.NodeAction, Action: "a", DelayMs: -1},
@@ -19,7 +18,7 @@ func newWeightedExecutor(options []flowdef.WeightedOption, handler *executorActi
 			"a":       {Name: "a", Pattern: flowdef.PatternClearState},
 			"cleanup": {Name: "cleanup", Pattern: flowdef.PatternClearState},
 		},
-	}, handler, "test")
+	}, handler, "test", -1)
 }
 
 // 权重之和 ≤ 0 时没有任何分支可选：这只可能是配置写错（全 0 / 全负），

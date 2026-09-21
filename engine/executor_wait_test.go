@@ -49,10 +49,9 @@ func newWaitTestExecutor(handler *waitTestHandler, waitNode *flowdef.Node, after
 		}
 	}
 	return NewExecutor(&flowdef.TaskFlow{
-		DefaultDelayMs: -1,
-		Nodes:          nodes,
-		Actions:        actions,
-	}, handler, "wait-test")
+		Nodes:   nodes,
+		Actions: actions,
+	}, handler, "wait-test", -1)
 }
 
 func TestWaitNodeJSONPreservesThen(t *testing.T) {

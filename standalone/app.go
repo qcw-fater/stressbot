@@ -52,6 +52,10 @@ func Run(ctx context.Context, cfg *Config, paths Paths) error {
 		zap.Int("actions", len(resources.Flow.Actions)),
 		zap.Int("listens", len(resources.Flow.Listens)))
 
+	if d := standaloneConfig.Bot.DefaultDelayMs; d != 0 {
+		stresslog.Info("[MAIN] 配置节点执行间隔", zap.Int("delayMs", d))
+	}
+
 	if cfg.Monitor != nil {
 		monitor.Init(*cfg.Monitor)
 		stresslog.Info("[MAIN] 监控已启用",
@@ -88,13 +92,14 @@ func Run(ctx context.Context, cfg *Config, paths Paths) error {
 		CodecResolver:  resources.Resolver,
 		RequestTimeout: 60 * time.Second,
 		MainService:    standaloneConfig.Bot.MainService,
+		DefaultDelayMs: standaloneConfig.Bot.DefaultDelayMs,
 		HTTPTimeout:    10 * time.Second,
 		RampUp:         standaloneConfig.RampUp,
 		Duration:       duration,
 		Shared:         sharedStore,
 	}
 
-	dialer, err := runner.StartDialer(resources, 5*time.Second, cfg.Network)
+	dialer, err := runner.StartDialer(resources, cfg.Network)
 	if err != nil {
 		return fmt.Errorf("启动网络引擎失败: %w", err)
 	}

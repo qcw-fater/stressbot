@@ -17,7 +17,7 @@ import type { TaskFlow } from '@/types/flow';
 /** 同 route 与同 server、不同 listen → 重复注册；用真实 template 时 key 应一致。 */
 function flowWithDuplicateRegister(): TaskFlow {
   return {
-    defaultDelayMs: 1000,
+
     nodes: {
       main: { type: 'sequence', next: ['n1', 'n2'] },
       n1: {
@@ -72,7 +72,7 @@ describe('routeKey 集成校验（ROUTEKEY_CODEC_MISSING）', () => {
     // template 要 act，route 只给 cmd → 不可解析 → 伪 key 降级（flow 数据问题）
     getRouteKeyTemplatesSync().set('tcp:logic', '{cmd}:{act}');
     const flow: TaskFlow = {
-      defaultDelayMs: 1000,
+
       nodes: {
         main: { type: 'sequence', next: ['n1'] },
         n1: {

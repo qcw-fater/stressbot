@@ -13,8 +13,8 @@ import (
 )
 
 // TaskAssignmentToProto 把任务分派配置转换为 proto TaskAssignment：校验
-// 任务身份与分片参数，HeartbeatInterval/TCPTimeout/HTTPTimeout 以 duration
-// 字符串解析为纳秒（必须大于 0）。
+// 任务身份与分片参数，TCPTimeout/HTTPTimeout 以 duration 字符串解析为纳秒
+// （必须大于 0）。
 func TaskAssignmentToProto(src admintask.Dispatch) (*controlpb.TaskAssignment, error) {
 	if src.TaskID == "" || src.StartIndex < 0 || src.TotalBots <= 0 {
 		return nil, errors.New("任务分配参数无效")
@@ -33,11 +33,9 @@ func TaskAssignmentToProto(src admintask.Dispatch) (*controlpb.TaskAssignment, e
 		LogLevel:      src.LogLevel,
 		RampUp:        rampUpToProto(src.RampUp),
 		Shared:        sharedAssignmentToProto(src.Shared),
+		DefaultDelayMs: int32(src.DefaultDelayMs),
 	}
 	var err error
-	if out.HeartbeatIntervalNanos, err = durationNanos(src.HeartbeatInterval); err != nil {
-		return nil, fmt.Errorf("解析 heartbeatInterval: %w", err)
-	}
 	if out.TcpTimeoutNanos, err = durationNanos(src.TCPTimeout); err != nil {
 		return nil, fmt.Errorf("解析 tcpTimeout: %w", err)
 	}
