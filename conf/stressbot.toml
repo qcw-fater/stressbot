@@ -70,8 +70,8 @@ timingDetail = "rtt"
 reportInterval = "5s"
 
   # monitor.http 监控 HTTP JSON 端点（整段省略=不启用）。
-  # 启用后可通过 http://localhost:<port>/metrics 获取实时指标 JSON，
-  # 便于外部采集系统（Prometheus 拉取等）对接。
+  # 启用后可通过 http://localhost:<port>/metrics 获取实时指标 JSON
+  # （注意是 JSON 而非 Prometheus 文本格式，接 Prometheus 需 json_exporter 中转）。
   [monitor.http]
   port = 6061
 
@@ -112,12 +112,12 @@ duration = "0"
   # totalBots 机器人总数。渐进加压模式下，各阶段 count 之和必须等于此值。
   totalBots = 100
 
-  # concurrency 并发启动数（同时创建机器人的并发度）。
-  # 0 = 不限并发（一次性全部创建）。值过大可能导致拨号阶段 CPU/内存尖峰。
+  # concurrency 机器人创建期的批量限速：每创建该数量个机器人暂停 1 秒，削平拨号阶段的瞬时峰值。
+  # 0 = 不限（一次性全部创建）。仅影响启动节奏，不影响运行期并发。
   concurrency = 20
 
-  # mainService 主服务名（必填）。对应网络层连接标识，机器人首先连接此服务。
-  # 必须与 flow.json 中 connection 声明的服务名一致。
+  # mainService 主连接服务名（必填）。机器人以该服务名建立的连接是主连接，
+  # 主连接意外断开时机器人随之停止。取值须与 flow 中连接/请求动作的 service 名一致。
   mainService = "logic"
 
   # defaultDelayMs 节点执行间隔（毫秒），不写或 0 = 引擎默认 1000ms。

@@ -133,7 +133,8 @@ func Run(ctx context.Context, cfg *Config, paths Paths) error {
 	case <-ctx.Done():
 		stresslog.Info("[MAIN] 收到退出请求，正在关闭...", zap.Error(ctx.Err()))
 	case <-manager.Done():
-		stresslog.Info("[MAIN] 运行时长已到，正在关闭...")
+		// 运行时长定时器到期 StopAll、或全部机器人流程自然结束，二者都可能先到此分支
+		stresslog.Info("[MAIN] 压测已结束，正在关闭...")
 	}
 
 	stopMonitoring()

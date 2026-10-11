@@ -36,7 +36,7 @@ go build -o agent.exe      ./cmd/agent      # Agent 节点
 go build -o admin.exe      ./cmd/admin      # Admin 服务器
 ```
 
-版本号经 `-ldflags "-X main.Version=..."` 注入（各入口均有 `var Version = "dev"`）。
+版本号经 `-ldflags "-X main.Version=..."` 注入（各入口默认 `"dev"`）。GitHub 推送 `v*` tag 打包时写入 tag 名；`make build` 用 `git describe --tags`。本地直接 `go build` / `go run` 不带 ldflags 时启动日志仍是 `dev`。三个二进制都支持 `-version` 只打印版本号。
 
 运行形式（开发期可 `go run` 等价替换）：
 
@@ -123,7 +123,22 @@ npm run build     # tsc -b && vite build → dist/
 
 ## 5. 进程守护
 
-### 5.1 supervisor（Linux）
+### 5.1 关闭透明大页（Linux，启动进程之前）
+
+施压机（跑 `agent` 或单机 `stressbot` 的 Linux）在拉起进程前关闭透明大页（THP）。开启时，内核把连续的 4KB 匿名页合并成 2MB 大页。压测任务会短时间撑起很大的堆（连接缓冲、消息体、机器人状态），这些区域很容易被提升成大页。
+
+任务结束后 Go GC 已经释放对象，pprof 里的堆占用回到低位；runtime 的 scavenger 再按页 `madvise` 把空闲内存还给内核。大页只要其中还有任意一页仍被占用，或者 `madvise` 只覆盖大页的一部分，内核就不会把整张 2MB 从进程 RSS 里划掉。于是 `AnonHugePages` 和系统已用内存仍高，和 pprof 对不上。下一轮任务再分配一轮，上一轮卡住的大页不会按 4KB 交还，系统内存就台阶式升高。这不是堆上还留着对象。
+
+```bash
+cat /sys/kernel/mm/transparent_hugepage/enabled
+cat /sys/kernel/mm/transparent_hugepage/defrag
+echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+```
+
+`enabled` 与 `defrag` 都要是 `never`。改开关不会拆开已经提升的大页，改完重启进程。开机保持关闭可以用一次性 systemd 单元，在业务进程之前执行上面两条 `echo`。任务跑完后用 `grep AnonHugePages /proc/meminfo` 看大页是否还在涨；pprof 正常而这项居高不下，就是 THP 还开着。
+
+### 5.2 supervisor（Linux）
 
 用 supervisor 等 init 系统守护 Admin/Agent 的要点（以下为可直接使用的正确示例，换其它 init 系统时同样适用）：
 
@@ -149,9 +164,9 @@ stdout_logfile_backups=5
 
 supervisor 的 stdout 只是兜底输出，进程自身文件日志另有路径（§7.1）。
 
-### 5.2 Windows
+### 5.3 Windows
 
-- 三个入口均支持 `-d` flag 或配置 `daemon = true` 守护进程化，但**仅 Linux 生效，Windows 下忽略**（`internal/daemon`）。
+- 三个入口的 `-d` 与配置 `daemon = true` 只在 Linux 上 fork。Windows 上 `daemon.Daemon` 向 stderr 打印「不支持守护进程模式，进程即将退出」后返回 nil，调用方随即 `return 0`，进程退出，不会转成前台继续跑。Windows 长期运行不要加 `-d`，配置保持 `daemon = false`。
 - Windows 长期运行建议用 `nssm` 等工具注册系统服务（等价于 supervisor 的「自动重启 + 日志重定向」），或开独立窗口直接运行——注意相对配置路径依赖当前工作目录；停止靠 Ctrl+C / 进程终止。
 
 ## 6. 反向代理与静态托管

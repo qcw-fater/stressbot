@@ -79,7 +79,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	// 节点执行间隔：写错直接报错，不回退默认值（与任务下发链路口径一致）。
 	if d := s.Bot.DefaultDelayMs; d != 0 && d != -1 && (d < 0 || d > 600000) {
-		return nil, fmt.Errorf("standalone.bot.defaultDelayMs 取值无效（%d）：仅允许 -1（禁用等待）或 0~600000 毫秒，0 表示沿用流程配置", d)
+		return nil, fmt.Errorf("standalone.bot.defaultDelayMs 取值无效（%d）：仅允许 -1（禁用等待）或 0~600000 毫秒，0 表示引擎默认 1000ms", d)
 	}
 	if s.RampUp != nil && len(s.RampUp.Stages) > 0 {
 		sum := 0

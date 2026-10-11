@@ -1,5 +1,8 @@
 // Package daemon 提供把当前进程转为守护进程的能力：父进程 fork 子进程后
-// 立即返回，子进程以 ppid=1 继续执行原逻辑；Windows 不支持，保持前台运行。
+// 立即返回，子进程以 ppid=1 继续执行原逻辑。
+// Windows 无法 fork。本函数只向 stderr 打印提示并返回 nil；三个入口在调用后
+// 都直接 return 0，因此 Windows 上 -d 或配置 daemon=true 会打印提示后退出，
+// 不会转成前台继续运行。
 package daemon
 
 import (
@@ -20,7 +23,7 @@ import (
 // 的路径 return 0——那会让 fork 失败的进程看起来像启动成功。
 func Daemon(skip ...string) error {
 	if runtime.GOOS == "windows" {
-		fmt.Fprintln(os.Stderr, "[DAEMON] Windows 不支持守护进程模式，将以前台模式运行")
+		fmt.Fprintln(os.Stderr, "[DAEMON] Windows 不支持守护进程模式，进程即将退出。请去掉 -d、保持配置 daemon = false，或改用服务包装器前台运行")
 		return nil
 	}
 

@@ -12,7 +12,7 @@
 
 | 进程 | 配置文件 | 顶层段 | 结构定义 |
 | --- | --- | --- | --- |
-| `cmd/stressbot`（单机） | `conf/stressbot.toml` | `daemon` / `log` / `monitor` / `pprof` / `standalone` / 可选 `redis` / `network` | `standalone/config.go:42-50` |
+| `cmd/stressbot`（单机） | `conf/stressbot.toml` | `daemon` / `log` / `monitor` / `pprof` / `standalone` / 可选 `redis` / `network` | `standalone/config.go:38-46` |
 | `cmd/agent`（Agent 节点） | `conf/agent.toml` | `daemon` / `log` / `monitor` / `pprof` / `agent` | `agent/config.go:17-24` |
 | `cmd/admin`（Admin 服务器） | `conf/admin.toml` | `server` / `controlPlane` / 可选 `mysql` / `redis` / `log` / `pprof` / `daemon` | `admin/config.go:18-27` |
 
@@ -22,32 +22,32 @@
 
 ### 1.2 单机模式 `conf/stressbot.toml`
 
-根结构 `standalone.Config`（`standalone/config.go:42-50`）：
+根结构 `standalone.Config`（`standalone/config.go:38-46`）：
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `daemon` | bool | `false` | 守护进程模式（仅 Linux，Windows 忽略）；`-d` flag 或该字段任一触发（`cmd/stressbot/main.go:80-93`） |
+| `daemon` | bool | `false` | 守护进程模式（仅 Linux）；`-d` flag 或该字段任一触发（`cmd/stressbot/main.go:80-93`）；Windows 下打印 `[DAEMON] Windows 不支持守护进程模式…` 后进程直接退出（`internal/daemon/daemon.go:25-28`），不是忽略 |
 | `log` | `*stresslog.Config` | nil | 日志配置，见 §1.5.1；nil 时入口用 `log/stressbot.log` 兜底（`cmd/stressbot/main.go:100-104`） |
-| `monitor` | `*monitor.CollectorConfig` | nil | nil = 不启用监控（`standalone/app.go:54-59` 仅在非 nil 时 `monitor.Init`） |
+| `monitor` | `*monitor.CollectorConfig` | nil | nil = 不启用监控（`standalone/app.go:59-64` 仅在非 nil 时 `monitor.Init`；控制台摘要与 `/metrics` HTTP 在机器人全部创建完成后才启动，`standalone/app.go:126`、`198-224`） |
 | `pprof` | `*config.PprofConfig` | nil | nil = 不启用 pprof，见 §5.2 |
 | `standalone` | `*Settings` | 非_nil_ | 单机压测参数，见下表 |
 | `redis` | `*shared.RedisConfig` | nil | host 空 = 不启用；脚本用 `share` 时必填，见 §1.5.3 |
 | `network` | `network.EngineConfig` | 零值=默认 | gnet 引擎调优参数，经 `runner.StartDialer` 注入（`network/engine_config.go`）；任一项 ≤ 0 回退编译期默认（读/写缓冲 32KB、并发拨号上限 512、maxBodyLen 16MB、事件循环 `runtime.NumCPU()`）。stressbot.toml 与 agent.toml 均支持 |
 
-`[standalone]` 段（`Settings`，`standalone/config.go:24-30`）：
+`[standalone]` 段（`Settings`，`standalone/config.go:30-35`）：
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `bot.accountPrefix` | string | `"bot_"` | 账号前缀（`standalone/config.go:78-80` 回填） |
-| `bot.startNumber` | int | `1` | 起始编号（`standalone/config.go:72-74` 回填） |
-| `bot.totalBots` | int | `1` | 机器人总数（`standalone/config.go:75-77` 回填） |
-| `bot.concurrency` | int | `0` | 并发启动数，0 = 不限 |
-| `bot.mainService` | string | **必填** | 缺失即启动报错（`standalone/config.go:81-83`） |
-| `stateExtra` | map[string]string | 无 | 注入每个 Robot 的初始 state；不得覆盖保留键 `id`/`index`/`account`，命中 Warn 并忽略（`robot/robot.go:165-177`，保留键表 `robot/robot.go:301-306`） |
-| `duration` | string | `"0"` | Go duration 文本；空或 `"0"` = 一直运行到信号（`standalone/app.go:136-145`） |
+| `bot.accountPrefix` | string | `"bot_"` | 账号前缀（空串回填，`standalone/config.go:74-76`） |
+| `bot.startNumber` | int | `1` | 起始编号（0 回填，`standalone/config.go:68-70`） |
+| `bot.totalBots` | int | `1` | 机器人总数（0 回填，`standalone/config.go:71-73`） |
+| `bot.concurrency` | int | `0` | 创建期批量限速：每创建 N 个暂停 1 秒，≤ 0 = 不限速（`robot/manager.go:186-195`）；不是运行期并发 |
+| `bot.mainService` | string | **必填** | 缺失即启动报错（`standalone/config.go:77-79`）；仅以它命名的 TCP 连接意外断开会停止机器人 |
+| `stateExtra` | map[string]string | 无 | 注入每个 Robot 的初始 state；不得覆盖保留键 `id`/`index`/`account`，命中后每个机器人各 Warn 一次并忽略（`robot/robot.go:166-178`，保留键表 `flow/prepare.go:10-14`）；值只能是字符串，TOML 整数报 `toml: cannot decode TOML integer into string` |
+| `duration` | string | `"0"` | Go duration 文本；空或 `"0"` = 不限时（运行到信号或全部机器人流程自然结束），必须带单位（`"10"` 报错），负数等同不限时（`standalone/app.go:147-156`）；在全部机器人创建完成（含整个渐进加压）后才开始计时（`robot/manager.go:244`、`353`） |
 | `rampUp` | `*robot.RampUpConfig` | nil | 渐进加压；配置了 stages 时各阶段 `count` 之和必须等于 `totalBots`，否则启动报错（`standalone/config.go:84-92`） |
 
-`rampUp.stages[]` 每阶段字段（`robot/manager.go:31-37`）：`count`（必填）、`concurrency`（0 = 用全局值）、`holdSec`（0 表示未填、回退默认 30s，`robot/manager.go:26-29`）、`reset`（本阶段开始前清空已有机器人）。渐进加压的执行语义与阶段段落归档见 `docs/ramp-up.md`。
+`rampUp.stages[]` 每阶段字段（`robot/manager.go:32-37`）：`count`（必填）、`concurrency`（0 = 用全局值）、`holdSec`（0 表示未填、回退默认 30s，`robot/manager.go:29`、`293-298`；负数不校验、等同不保持；最后一阶段不保持）、`reset`（本阶段开始前清空已有机器人，仅当仍有运行中机器人时生效）。渐进加压的执行语义与阶段段落归档见 `docs/ramp-up.md`。
 
 ### 1.3 Agent `conf/agent.toml`
 
@@ -113,14 +113,14 @@ Agent 没有 `enabled`、`publicUrl` 或本地 HTTP 控制面；任务运行参�
 | --- | --- | --- | --- |
 | `path` | string | `log/stressbot.log`（入口另有按进程兜底） | 日志文件路径 |
 | `level` | string | `debug` | debug / info / warn / error；段提供但 level 空 → `debug`（`internal/stresslog/logger.go:95-97`） |
-| `printConsole` | bool | `true` | 是否同时输出 stdout |
+| `printConsole` | bool | `true` | 是否同时输出 stdout；**写了 `[log]` 段却没写此键时为 `false`**（段提供时直接用文件值，只有 level/maxSizeMB/maxBackups/maxAge 四项有空值回填，`internal/stresslog/logger.go:91-107`） |
 | `maxSizeMB` | int | `500` | 单文件轮转阈值（`internal/stresslog/logger.go:98-100`） |
 | `maxBackups` | int | `1` | 旧文件保留数 |
 | `maxAge` | int | `7` | 旧文件保留天数 |
-| `localTime` / `compress` | bool | `true` | 轮转文件名时区 / gzip 压缩 |
+| `localTime` / `compress` | bool | `true` | 轮转文件名时区 / gzip 压缩；同理，段提供但未写时为 `false` |
 | `weChatToken` | string | 空 | DPanic 级严重错误推送企业微信（`internal/stresslog/logger.go:190-195`） |
 
-段省略时的默认来自 `defaultConfig()`（`internal/stresslog/logger.go:78-89`）。Admin 的 `Defaults()` 在 TOML 层预填了更紧的值（admin.log / info / 100MB / 10 份 / 30 天，`admin/config.go:153-159`），因此 Admin 的实际默认以 `admin.Defaults()` 为准。
+段省略时的默认来自 `defaultConfig()`（`internal/stresslog/logger.go:78-89`）。文件日志为 JSON，`timestamp` 恒为 UTC（`internal/stresslog/logger.go:129-131`）。Admin 的 `Defaults()` 在 TOML 层预填了更紧的值（admin.log / info / 100MB / 10 份 / 30 天，`admin/config.go:153-159`），因此 Admin 的实际默认以 `admin.Defaults()` 为准。
 
 #### 1.5.2 `[monitor]`（`monitor.CollectorConfig`，`monitor/collector.go:239-245`）
 
@@ -128,8 +128,8 @@ Agent 没有 `enabled`、`publicUrl` 或本地 HTTP 控制面；任务运行参�
 | --- | --- | --- | --- |
 | `apdexThresholdMs` | int | `100` | Apdex T 阈值；<= 0 回填 100（`monitor/collector.go:340-344`）；分布式任务运行期可被任务参数 `apdexT` 覆盖（`agent/task/runner.go:138`） |
 | `timingDetail` | string | `"rtt"` | 三档 `rtt` / `codec` / `full`（`monitor/collector.go:216-220`）；空串或非法值 Warn 后回退 `rtt`（`monitor/collector.go:302-314`、`325-327`） |
-| `reportInterval` | string | `"5s"` | 控制台摘要打印间隔，仅单机模式消费；非法或 <= 0 启动报错（`standalone/config.go` `LoadConfig` 校验 + `standalone/app.go` `startMonitoring`） |
-| `http.port` | int | 无默认 | 监控 HTTP JSON 端点（`/metrics`），整段省略 = 不启用（`standalone/app.go:201-208`） |
+| `reportInterval` | string | `"5s"` | 控制台摘要打印间隔，仅单机模式消费；非法或 <= 0 启动报错（`standalone/config.go:93-97` + `standalone/app.go:202-205`）；摘要经 stdout 打印、不进日志文件，在机器人全部创建完成后才开始，首行累计自 `monitor.Init` 起 |
+| `http.port` | int | 无默认 | 监控 HTTP JSON 端点（`/metrics`），整段省略 = 不启用（`standalone/app.go:210-217`）；端口启动失败只打 error、压测继续 |
 | `sketch.relativeAccuracy` | float64 | `0.01` | DDSketch 相对误差；**Admin 与所有 Agent 必须一致，否则 sketch 合并结果错误**（`monitor/collector.go:247-252` 注释） |
 | `sketch.maxBins` | int | `2048` | 最大桶数 |
 
@@ -137,7 +137,7 @@ Agent 没有 `enabled`、`publicUrl` 或本地 HTTP 控制面；任务运行参�
 
 单机与 Admin 共用同一结构。`host` 空 = 不启用（`state/shared/config.go:60-63`）。默认值：`port` 6379、`keyPrefix` `"stressbot"`、`defaultClaimTTL` 30s、`opTimeout` 2s、pool dial 5s / read 2s / write 2s / `connMaxLifetime` 0（`state/shared/config.go:19-25`、`67-109`）。
 
-单机模式特有行为：启动时扫描脚本目录检测 `share` 模块使用（`standalone/app.go:233-258`），脚本用了 `share` 但未配置 Redis 会直接失败（`standalone/app.go:156-157`）；Admin 侧配置了 Redis 则启动 PING 验证连通性（`admin/app.go:201-211`）。
+单机模式特有行为：启动时扫描脚本目录检测 `share` 模块使用（`standalone/app.go:242-267`，剥离注释后匹配 `require("share")`），未使用时即使配置了 Redis 也不连接；脚本用了 `share` 但未配置 Redis 会直接失败（`standalone/app.go:167-169`），runId 为 `standalone-<毫秒时间戳>-<pid>`，退出时 `Cleanup`（`standalone/app.go:174`、`185-196`）；Admin 侧配置了 Redis 则启动 PING 验证连通性（`admin/app.go:201-211`）。
 
 #### 1.5.4 连接池 `[*.pool]`（`config.ConnPoolConfig`，`config/pool.go:5-12`）
 
@@ -145,7 +145,7 @@ MySQL 与 Redis 共用同一形态：`dialTimeout` / `readTimeout` / `writeTimeo
 
 #### 1.5.5 `[pprof]`（`config.PprofConfig`，`config/pprof.go:25-27`）
 
-仅一个字段 `port`（默认 6060，<= 0 时入口回填，`cmd/stressbot/main.go:111-118`）。指针为 nil = 不启用，三种模式行为一致。
+仅一个字段 `port`（默认 6060，<= 0 时入口回填，`cmd/stressbot/main.go:111-118`）。指针为 nil = 不启用，三种模式行为一致。端口被占用时只打 `[DEBUG] pprof 服务启动失败`，进程继续运行。
 
 ---
 

@@ -126,8 +126,8 @@ func robotGet(L *lua.LState) int {
 // 与 robot.get 的分工（也是给脚本作者的使用边界）：
 //   - get：给你一棵独立 Lua 表，任何 Lua 语法随便用，可加工后 set 回——
 //     成本是整树物化（∝ 树大小），适合"整份拿来加工/修改"；
-//   - get_view：返回 wire 惰性视图 userdata（与 await_listen 给脚本的同一种
-//     东西），proto.get_path/list_size/list_get/iter_list/serialize 按需扫描，
+//   - get_view：返回 wire 惰性视图 userdata（与 network.tcp_listen / udp_listen
+//     给脚本的同一种东西），proto.get_path/list_size/list_get/iter_list/serialize 按需扫描，
 //     零物化零分配——适合"大消息只读挑着看"。视图永远只读，是当时那份不可变
 //     字节的快照引用，key 被覆盖不影响已借出的视图。
 //
