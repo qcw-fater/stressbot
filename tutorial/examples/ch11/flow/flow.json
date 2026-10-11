@@ -1,0 +1,66 @@
+{
+  "nodes": {
+    "main": {
+      "type": "sequence",
+      "next": ["connect", "login", "fetchPlayer", "readyGate", "close"]
+    },
+    "connect":     { "type": "action", "action": "ConnectArena" },
+    "login":       { "type": "action", "action": "LoginArena" },
+    "fetchPlayer": { "type": "action", "action": "FetchPlayer" },
+    "close":       { "type": "action", "action": "CloseArena" },
+
+    "readyGate": {
+      "type": "boolean",
+      "condition": "lua:check_ready.lua",
+      "trueNext": "smartBuy",
+      "falseNext": "skipNote"
+    },
+    "smartBuy": { "type": "action", "action": "SmartBuy" },
+    "skipNote": { "type": "action", "action": "NoteSkip" }
+  },
+  "actions": {
+    "ConnectArena": {
+      "pattern": "tcpConnect",
+      "service": "arena",
+      "address": "state:arenaAddr"
+    },
+    "LoginArena": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 100, "act": 1 },
+      "c2sProto": "arena.LoginAccountC2S",
+      "bindings": [
+        { "field": "account", "type": "state", "source": "account" },
+        { "field": "version", "type": "fixed", "value": "0.31.49" }
+      ],
+      "s2cProto": "arena.LoginAccountS2C",
+      "store": [ { "field": "playerId", "setter": "playerId" } ],
+      "timeout": 5
+    },
+    "FetchPlayer": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 100, "act": 2 },
+      "c2sProto": "arena.FetchPlayerC2S",
+      "bindings": [ { "field": "playerId", "type": "state", "source": "playerId" } ],
+      "s2cProto": "arena.FetchPlayerS2C",
+      "store": [
+        { "setter": "playerData" },
+        { "field": "level", "setter": "playerLevel" }
+      ],
+      "timeout": 5
+    },
+    "SmartBuy": {
+      "pattern": "lua",
+      "script": "smart_buy.lua"
+    },
+    "NoteSkip": {
+      "pattern": "setState",
+      "bindings": [ { "field": "buySkipped", "type": "fixed", "value": 1 } ]
+    },
+    "CloseArena": {
+      "pattern": "tcpClose",
+      "service": "arena"
+    }
+  }
+}

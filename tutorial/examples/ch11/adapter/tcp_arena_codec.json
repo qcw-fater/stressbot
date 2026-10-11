@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "endianDefault": "le",
+  "frame": { "headerSize": 9, "trailerSize": 0, "lengthIncludesHeader": false, "lengthIncludesTrailer": false },
+  "header": [
+    { "name": "bodyLen", "offset": 0, "size": 4, "type": "u32", "endian": "le", "role": "length" },
+    { "name": "errCode", "offset": 4, "size": 2, "type": "u16", "role": "errorCode" },
+    { "name": "cmd",     "offset": 6, "size": 2, "type": "u16", "role": "route" },
+    { "name": "act",     "offset": 8, "size": 1, "type": "u8",  "role": "route" }
+  ],
+  "routeKeyTemplate": "{cmd}:{act}",
+  "pipeline": []
+}

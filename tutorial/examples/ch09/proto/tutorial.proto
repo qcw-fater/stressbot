@@ -1,0 +1,68 @@
+// 第 9 章示例协议：竞技场 (ArenaQuest) + 商店/战斗/签到（供 onError 演示）
+syntax = "proto3";
+
+package arena;
+
+message LoginAccountC2S {
+  string account = 1;
+  string version = 2;
+}
+
+message LoginAccountS2C {
+  int64 playerId = 1;
+  int64 serverTime = 2;
+}
+
+// ── 商店 ──────────────────────────────────────────────
+
+message ShopListC2S {
+  int32 category = 1;
+}
+
+message ShopItem {
+  int32 itemId = 1;
+  int32 price = 2;
+  int32 stock = 3;
+}
+
+message ShopListS2C {
+  repeated ShopItem items = 1;
+}
+
+message BuyItemC2S {
+  int32 itemId = 1;
+  int32 count = 2;
+}
+
+message BuyItemS2C {
+  int64 orderId = 1;
+}
+
+// ── 战斗 ──────────────────────────────────────────────
+
+message BattleStartC2S {
+  int32 stageId = 1;
+}
+
+message BattleResultS2C {
+  int32 win = 1;
+  int32 staminaLeft = 2;
+}
+
+// ── 每日任务 ──────────────────────────────────────────
+
+message SigninC2S {
+  int32 day = 1;
+}
+
+message SigninS2C {
+  int32 rewardCoins = 1;
+}
+
+message MailClaimC2S {
+  int32 mailId = 1;
+}
+
+message MailClaimS2C {
+  int32 coins = 1;
+}

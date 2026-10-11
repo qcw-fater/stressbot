@@ -1,0 +1,9 @@
+// 第 1 章示例附带的最小 proto。
+// 加载器要求 proto 目录至少有一个 .proto 文件；本流程没有网络动作，此文件仅作占位。
+syntax = "proto3";
+
+package demo;
+
+message Placeholder {
+  string text = 1;
+}

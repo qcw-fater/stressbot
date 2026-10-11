@@ -1,0 +1,34 @@
+@startuml ch12-rampup-timeline
+skinparam defaultFontName "Microsoft YaHei"
+title 渐进加压时间线（示例 ch12：三阶段 2/2/2，holdSec 4/4/0，duration 15s）
+
+concise "加压阶段" as S
+concise "活跃机器人" as R
+concise "控制台监控" as M
+concise "duration 计时" as D
+
+@0
+S is "阶段1：创建 2 个 → 保持 4s"
+R is "2"
+M is "未启动"
+D is "未开始"
+
+@4
+S is "阶段2：创建 2 个 → 保持 4s"
+R is "4"
+
+@8
+S is "阶段3：创建 2 个（最后阶段不保持）"
+R is "6"
+M is "每 reportInterval 打印"
+D is "15s 倒计时"
+
+@23
+S is {-}
+R is "0"
+M is {-}
+D is "到期 → 停止全部机器人 → 导出 CSV"
+
+@8 <-> @23 : standalone.duration = 15s
+@0 <-> @8 : 加压全程（创建耗时 + 各阶段 holdSec）
+@enduml

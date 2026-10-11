@@ -2,7 +2,7 @@
 
 本目录是 stressbot 的**技术设计文档库**：每份文档对照实际代码编写、随代码演进维护，反映**已实施状态**（不是愿望清单）。历史设计过程归档在 `docs/superpowers/` 与 `docs/modernization/`，不随代码更新，仅作考古参考。
 
-用户侧使用手册见[根 README](../README.md)；前端专项见 [cmd/web/README.md](../cmd/web/README.md)；仓库级开发约定见 [AGENTS.md](../AGENTS.md)。
+使用教程（面向压测使用者与部署者，从零到集群）见仓库根目录 [tutorial/](../tutorial/README.md)；用户侧使用手册见[根 README](../README.md)；前端专项见 [cmd/web/README.md](../cmd/web/README.md)；仓库级开发约定见 [AGENTS.md](../AGENTS.md)。
 
 ---
 

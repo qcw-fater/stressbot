@@ -1,0 +1,151 @@
+{
+  "nodes": {
+    "main": {
+      "type": "sequence",
+      "next": ["connect", "login", "dailyOptional", "dailyRoutine", "close"]
+    },
+
+    "connect": {
+      "type": "action",
+      "action": "ConnectArena",
+      "onError": { "retry": { "maxRetries": 2, "retryDelayMs": 500 }, "strategy": "abort" }
+    },
+    "login": {
+      "type": "action",
+      "action": "LoginArena",
+      "onError": { "strategy": "abort" }
+    },
+    "close": {
+      "type": "action",
+      "action": "CloseArena",
+      "onError": { "strategy": "resume" }
+    },
+
+    "dailyOptional": {
+      "type": "sequence",
+      "next": ["signin", "claimMail"]
+    },
+    "signin": {
+      "type": "action",
+      "action": "Signin",
+      "onError": { "strategy": "skip" }
+    },
+    "claimMail": {
+      "type": "action",
+      "action": "ClaimMail",
+      "onError": { "strategy": "resume" }
+    },
+
+    "dailyRoutine": {
+      "type": "sequence",
+      "next": ["browseShop", "buyItem", "battleOnce"]
+    },
+    "browseShop": {
+      "type": "action",
+      "action": "BrowseShop",
+      "onError": { "strategy": "resume" }
+    },
+    "buyItem": {
+      "type": "action",
+      "action": "BuyItem",
+      "onError": { "ignoreCodes": [2001, 3002], "strategy": "resume" }
+    },
+    "battleOnce": {
+      "type": "action",
+      "action": "BattleOnce",
+      "onError": { "handler": "recover", "strategy": "resume" }
+    },
+
+    "recover": {
+      "type": "sequence",
+      "next": ["reconnect", "noteFailure"]
+    },
+    "reconnect":   { "type": "action", "action": "ConnectArena" },
+    "noteFailure": { "type": "action", "action": "NoteBattleFailure" }
+  },
+  "actions": {
+    "ConnectArena": {
+      "pattern": "tcpConnect",
+      "service": "arena",
+      "address": "state:arenaAddr"
+    },
+    "LoginArena": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 100, "act": 1 },
+      "c2sProto": "arena.LoginAccountC2S",
+      "bindings": [
+        { "field": "account", "type": "state", "source": "account" },
+        { "field": "version", "type": "fixed", "value": "0.31.49" }
+      ],
+      "s2cProto": "arena.LoginAccountS2C",
+      "store": [ { "field": "playerId", "setter": "playerId" } ],
+      "timeout": 5
+    },
+    "BrowseShop": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 500, "act": 1 },
+      "c2sProto": "arena.ShopListC2S",
+      "bindings": [ { "field": "category", "type": "fixed", "value": 0 } ],
+      "s2cProto": "arena.ShopListS2C",
+      "store": [ { "field": "items", "setter": "shopItems" } ],
+      "timeout": 5
+    },
+    "BuyItem": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 500, "act": 2 },
+      "c2sProto": "arena.BuyItemC2S",
+      "bindings": [
+        {
+          "field": "itemId",
+          "type": "stateRandom",
+          "source": "shopItems",
+          "filters": [ { "path": "price", "op": "lt", "value": 100 } ]
+        },
+        { "field": "count", "type": "randomInt", "min": 1, "max": 2 }
+      ],
+      "s2cProto": "arena.BuyItemS2C",
+      "store": [ { "field": "orderId", "setter": "lastOrderId" } ],
+      "timeout": 5
+    },
+    "BattleOnce": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 200, "act": 1 },
+      "c2sProto": "arena.BattleStartC2S",
+      "bindings": [ { "field": "stageId", "type": "randomInt", "min": 1, "max": 3 } ],
+      "s2cProto": "arena.BattleResultS2C",
+      "store": [ { "field": "win", "setter": "lastWin" } ],
+      "timeout": 10
+    },
+    "Signin": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 700, "act": 1 },
+      "c2sProto": "arena.SigninC2S",
+      "bindings": [ { "field": "day", "type": "randomInt", "min": 1, "max": 7 } ],
+      "s2cProto": "arena.SigninS2C",
+      "store": [ { "field": "rewardCoins", "setter": "signinReward" } ],
+      "timeout": 5
+    },
+    "ClaimMail": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 700, "act": 2 },
+      "c2sProto": "arena.MailClaimC2S",
+      "bindings": [ { "field": "mailId", "type": "randomInt", "min": 1, "max": 100 } ],
+      "s2cProto": "arena.MailClaimS2C",
+      "timeout": 5
+    },
+    "NoteBattleFailure": {
+      "pattern": "setState",
+      "bindings": [ { "field": "battleRecovered", "type": "fixed", "value": 1 } ]
+    },
+    "CloseArena": {
+      "pattern": "tcpClose",
+      "service": "arena"
+    }
+  }
+}

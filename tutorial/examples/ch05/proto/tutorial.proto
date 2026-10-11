@@ -1,0 +1,35 @@
+// 第 5 章示例协议：竞技场 (ArenaQuest)
+// 放在 proto/ 目录下即可被启动时动态加载，无需生成 Go 代码。
+syntax = "proto3";
+
+package arena;
+
+// ── 登录 ──────────────────────────────────────────────
+
+message LoginAccountC2S {
+  string account = 1;   // 账号名（绑定 state:account，框架自动注入 bot_1140000）
+  string version = 2;   // 客户端版本号
+}
+
+message LoginAccountS2C {
+  int64 playerId = 1;   // 玩家 ID
+  int64 serverTime = 2; // 服务器时间戳
+}
+
+// ── 角色数据 ──────────────────────────────────────────
+
+message FetchPlayerC2S {
+  int64 playerId = 1;
+}
+
+message PlayerItem {
+  int32 itemId = 1;
+  int32 count = 2;
+}
+
+message FetchPlayerS2C {
+  string name = 1;
+  int32 level = 2;
+  int64 coins = 3;
+  repeated PlayerItem items = 4;
+}

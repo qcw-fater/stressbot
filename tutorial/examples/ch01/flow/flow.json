@@ -1,0 +1,20 @@
+{
+  "nodes": {
+    "main": {
+      "type": "sequence",
+      "next": ["hello1", "hello2", "hello3"]
+    },
+    "hello1": { "type": "action", "action": "SayHello" },
+    "hello2": { "type": "action", "action": "SayHello" },
+    "hello3": { "type": "action", "action": "SayHello" }
+  },
+  "actions": {
+    "SayHello": {
+      "pattern": "setState",
+      "bindings": [
+        { "field": "greeting", "type": "fixed", "value": "hello stressbot" },
+        { "field": "round", "type": "randomInt", "min": 1, "max": 100 }
+      ]
+    }
+  }
+}

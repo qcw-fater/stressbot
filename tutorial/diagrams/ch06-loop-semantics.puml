@@ -1,0 +1,30 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title loop 节点一次完整执行
+
+start
+if (loopCount == 0（含省略）?) then (是)
+  :直接跳过，不执行 body;
+  stop
+endif
+repeat
+  if (loopCount > 0 且已执行满 N 次?) then (是)
+    stop
+  endif
+  if (condition 非空且为 false?) then (是)
+    :前置条件不成立，退出;
+    stop
+  endif
+  :执行 body 节点;
+  if (body 返回 break / skip?) then (是)
+    :退出循环（视为正常完成）;
+    stop
+  elseif (body 返回其他错误?) then (是)
+    #pink:错误继续向上传播;
+    stop
+  endif
+  note right: continue 也会走到下面的 breakCondition 检查
+repeat while (breakCondition 为空或为 false?) is (继续) not (true)
+:后置条件成立，退出;
+stop
+@enduml

@@ -1,0 +1,25 @@
+{
+  "nodes": {
+    "main": {
+      "type": "sequence",
+      "next": ["tickLoop"]
+    },
+    "tickLoop": {
+      "type": "loop",
+      "loopCount": -1,
+      "body": "tick"
+    },
+    "tick": {
+      "type": "action",
+      "action": "Tick"
+    }
+  },
+  "actions": {
+    "Tick": {
+      "pattern": "setState",
+      "bindings": [
+        { "field": "beat", "type": "randomInt", "min": 1, "max": 100 }
+      ]
+    }
+  }
+}

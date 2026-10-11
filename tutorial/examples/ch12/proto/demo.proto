@@ -1,0 +1,8 @@
+// 第 12 章示例附带的最小 proto（占位，本章流程不使用网络）。
+syntax = "proto3";
+
+package demo;
+
+message Placeholder {
+  string text = 1;
+}

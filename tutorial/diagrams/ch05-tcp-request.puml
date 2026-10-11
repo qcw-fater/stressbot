@@ -1,0 +1,31 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title tcpRequest 动作一次往返
+
+participant "Executor\n（engine）" as E
+participant "ActionExecutor" as A
+database "state" as S
+participant "codec\n（tcp_arena_codec.json）" as C
+participant "游戏服务器" as G
+
+E -> A : ExecuteAction(FetchPlayer)
+A -> S : 按 bindings 取值\n（state / 随机 / fixed）
+S --> A : playerId
+A -> A : 组装 c2sProto 消息并序列化
+A -> C : 编码消息头（route → cmd/act）
+C -> G : 发送
+note right of A : 同 routeKey 登记响应通道\n开始计时（timeout 秒，缺省用连接默认 60s）
+G --> C : 响应帧
+C --> A : 解码消息头，按 routeKey 匹配
+alt 消息头错误码 ≠ 0
+  A -> S : 仍按 store 写入解析到的字段
+  A --> E : 业务错误（错误码 ≥ 100）
+else 超时
+  A --> E : [4] RECV_TIMEOUT
+else 成功
+  A -> A : 按 s2cProto 校验响应字节
+  A -> S : 按 store 逐条写入\n（field 为空 = 整条消息）
+  A --> E : 成功
+end
+E -> E : 节点间隔（delayMs / defaultDelayMs）
+@enduml

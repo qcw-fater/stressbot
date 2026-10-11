@@ -1,0 +1,55 @@
+# 第 12 章示例：渐进加压（三阶段 2/2/2，阶梯节奏看 [MANAGER] 日志的时间戳；
+# 控制台监控摘要在加压结束后才开始打印）
+# ─────────────────────────────────────────────────────
+# 运行方式（在仓库根目录执行）：
+#   go run ./cmd/stressbot -config tutorial/examples/ch12/stressbot.toml
+#
+# 时长说明（重要）：standalone.duration 在全部加压阶段结束后才开始计时，
+# 实际总运行时长 ≈ 各阶段创建与 holdSec 之和 + duration。本示例约 8s（加压）+ 15s = 23s。
+
+[log]
+path = "log/tutorial-ch12.log"
+level = "info"
+printConsole = true
+maxSizeMB = 100
+maxBackups = 5
+maxAge = 7
+localTime = true
+compress = true
+
+[monitor]
+apdexThresholdMs = 100
+timingDetail = "rtt"
+reportInterval = "1s"
+
+[pprof]
+port = 6060
+
+[standalone]
+duration = "15s"
+
+  [standalone.bot]
+  accountPrefix = "bot_"
+  startNumber = 1140000
+  # 各阶段 count 之和必须等于 totalBots，否则启动报错
+  totalBots = 6
+  concurrency = 2
+  # 本章流程不建连
+  mainService = "demo"
+
+  # 教程演示用小数值快速看到阶梯；真实压测按目标定（如 1000/2000/7000）
+  [[standalone.rampUp.stages]]
+  count = 2
+  holdSec = 4
+
+  [[standalone.rampUp.stages]]
+  count = 2
+  holdSec = 4
+
+  [[standalone.rampUp.stages]]
+  count = 2
+  # 最后阶段不保持；0 会在日志里显示为回退默认值 30，但不会真的等待
+  holdSec = 0
+
+[redis]
+host = ""

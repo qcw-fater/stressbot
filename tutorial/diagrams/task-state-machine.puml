@@ -1,0 +1,32 @@
+@startuml task-state-machine
+!pragma layout smetana
+skinparam defaultFontName "Microsoft YaHei"
+skinparam shadowing false
+title 分布式任务状态机（admin/task/store.go 转换矩阵 + 实际触发点）
+
+[*] --> pending : POST /sbot/tasks
+
+pending --> starting : POST /sbot/tasks/{id}/start\n（单例检查通过）
+
+starting --> running : 启动命令全部写入命令日志\n（不等节点 ACK）
+starting --> failed : 用了 share 但未配 Redis\n/ 没有可用的空闲节点\n/ 并发拆分非法\n/ 启动命令创建失败\n/ 分配节点全部失效、超过 deadline
+
+running --> stopped : 所有预期节点的最终报告到齐\n（自然完成）
+running --> stopping : POST /sbot/tasks/{id}/stop\n/ 分配节点全部失效\n/ 超过 deadline
+
+stopping --> running : 停止命令创建失败（回滚）
+stopping --> stopped : 报告到齐\n/ 60s 安全网替未上报节点合成报告
+stopping --> failed : 自动停止（节点全部失效 / deadline）\n立即为未上报节点合成 failed 报告
+
+starting --> failed : admin 重启
+running --> failed : admin 重启
+stopping --> failed : admin 重启
+
+stopped --> [*]
+failed --> [*]
+
+note right of running
+  单个节点离线或进程重启不会停任务；
+  只有全部分配节点都失效才自动停止
+end note
+@enduml

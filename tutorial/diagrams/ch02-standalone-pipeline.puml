@@ -1,0 +1,36 @@
+@startuml ch02-standalone-pipeline
+skinparam defaultFontName "Microsoft YaHei"
+skinparam shadowing false
+title 单机模式（stressbot）启动到退出的内部顺序
+
+start
+:解析命令行参数\n-config / -flow / -proto / -scripts / -adapter / -d;
+if (-d 或 daemon = true ?) then (是)
+  :派生后台子进程后本进程退出\n（Windows：打印提示后直接退出）;
+  stop
+endif
+:加载 stressbot.toml\n严格键名校验 + 环境变量展开 + 默认值回填\nmainService / defaultDelayMs / rampUp 合计 / reportInterval 校验;
+note right: 失败：stderr 打印「加载配置失败: ...」，退出码 1
+:解析资源路径（未指定的回退到配置所在目录）;
+:初始化日志；可选启动 pprof;
+:codec：按文件名推断连接映射\n加载 *_codec.json 与可选 errors.json;
+:proto：动态加载 .proto;
+:flow.json：Schema 校验 → 解码 → 条件编译与 clearState 校验;
+note right: 以上任一步失败：日志「[MAIN] 单机模式运行失败」，退出码 1
+:初始化监控采集器（配置了 [monitor] 时）;
+:Lua 脚本预编译（失败只打 warn，不中断）;
+:解析 standalone.duration;
+:扫描脚本是否 require("share")\n用了就连接 Redis，未配置或连不上即失败;
+:启动 gnet 网络引擎;
+if (配置了 rampUp.stages ?) then (是)
+  :StartWithRampUp\n逐阶段创建 + 阶段保持;
+else (否)
+  :StartAll\n按 concurrency 限速一次性创建;
+endif
+:创建结束后才开始 duration 计时;
+:启动控制台监控摘要与可选 [monitor.http];
+:等待：Ctrl+C / SIGTERM，或 duration 到期，或全部机器人流程走完;
+:停止监控输出 → 停止全部机器人 → 导出 CSV;
+:关闭网络引擎、Redis 共享状态清理、协程池关闭;
+stop
+@enduml

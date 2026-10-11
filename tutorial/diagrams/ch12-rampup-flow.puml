@@ -1,0 +1,31 @@
+@startuml ch12-rampup-flow
+skinparam defaultFontName "Microsoft YaHei"
+skinparam shadowing false
+title StartWithRampUp 每个阶段做了什么
+
+start
+:「[MANAGER] 开始渐进式加压」;
+repeat :取下一个阶段 i;
+  if (reset = true 且 当前仍有运行中的机器人?) then (是)
+    :「阶段重置，停止所有机器人」;
+    :并发停止全部现存机器人（整体最多等 15 秒）;
+    :「阶段重置完成，已停止机器人」;
+    :歇 1 秒;
+  endif
+  :本阶段限速 = stage.concurrency > 0 ? stage.concurrency : bot.concurrency\n保持时长 = holdSec == 0 ? 30 : holdSec;
+  :「启动阶段」(stage/of/count/offset/concurrency/holdSec/reset);
+  :创建 count 个机器人，身份从 offset 接着往后编号\n每创建「限速」个暂停 1 秒（「批量进度」）;
+  :「阶段完成」(created/offset/activeBots);
+  if (不是最后一个阶段?) then (是)
+    :「阶段保持」，等待 holdSec 秒;
+  endif
+repeat while (还有阶段?) is (是)
+:「渐进式加压完成」;
+:「定时停止已设定」（duration > 0 时）\nduration 从这里开始计时;
+:启动控制台监控摘要;
+stop
+note right
+  任何等待点（限速暂停、reset 后 1 秒、阶段保持）
+  收到 Ctrl+C 都会立即返回
+end note
+@enduml

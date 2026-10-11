@@ -1,0 +1,31 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title flow.json 加载三步与运行期才发现的问题
+
+start
+:读取 flow.json;
+:① JSON Schema 结构校验
+（必填 nodes/actions、type/pattern 枚举、
+未知字段、数值下限、binding 必须写 type）;
+if (通过?) then (否)
+  #pink:flow 配置结构校验失败: ...;
+  stop
+endif
+:② 解码为 TaskFlow;
+:③ PrepareTaskFlow 业务校验
+（编译全部条件表达式、listenRefs 引用、
+clearState 保护键）;
+if (通过?) then (否)
+  #pink:准备流程条件: ...;
+  stop
+endif
+:启动机器人，从 main 开始执行;
+note right
+  以下问题加载期不检查，运行到才报错并结束该机器人流程：
+  - next / body / trueNext 等指向不存在的节点 → 节点不存在
+  - action 指向不存在的动作 → 动作不存在
+  - break / continue 不在 loop 内 → break / continue
+  - weighted 权重和为 0
+end note
+stop
+@enduml

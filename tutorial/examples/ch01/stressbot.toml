@@ -1,0 +1,44 @@
+# 第 1 章示例：最小单机压测（零依赖首跑）
+# ─────────────────────────────────────────────────────
+# 本目录自带全部资源（flow/ proto/ scripts/ adapter/），资源路径 flag 全部留空，
+# 自动回退到 <本目录> 下的同名子目录。
+#
+# 运行方式（在仓库根目录执行）：
+#   go run ./cmd/stressbot -config tutorial/examples/ch01/stressbot.toml
+#
+# 本流程只有 setState 动作（往机器人状态里写两个值），不连接任何服务器，
+# 不需要 Redis / MySQL / 目标服务器，必定能跑通。
+
+[log]
+path = "log/tutorial-ch01.log"
+level = "info"
+printConsole = true
+maxSizeMB = 100
+maxBackups = 5
+maxAge = 7
+localTime = true
+compress = true
+
+[monitor]
+apdexThresholdMs = 100
+timingDetail = "rtt"
+# 教程为让短运行也能看到周期输出调小为 1s；正式压测建议默认 5s
+reportInterval = "1s"
+
+[pprof]
+port = 6060
+
+[standalone]
+# duration 是运行上限：全部机器人流程走完后进程会提前退出
+duration = "10s"
+
+  [standalone.bot]
+  accountPrefix = "bot_"
+  startNumber = 1140000
+  totalBots = 3
+  concurrency = 3
+  # 本示例不建连，mainService 只需非空；第 5 章起它与动作的 service 对应
+  mainService = "demo"
+
+[redis]
+host = ""

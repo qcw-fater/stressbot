@@ -1,0 +1,43 @@
+# 第 9 章示例：onError 错误链路
+# ─────────────────────────────────────────────────────
+# 本目录自带全部资源，资源路径 flag 全部留空即可回退到 <本目录> 下：
+#   flow/flow.json  proto/tutorial.proto  adapter/tcp_arena_codec.json
+#
+# 运行方式（在仓库根目录执行）：
+#   go run ./cmd/stressbot -config tutorial/examples/ch09/stressbot.toml
+
+[log]
+path = "log/tutorial-ch09.log"
+level = "info"
+printConsole = true
+maxSizeMB = 100
+maxBackups = 5
+maxAge = 7
+localTime = true
+compress = true
+
+[monitor]
+apdexThresholdMs = 100
+timingDetail = "rtt"
+reportInterval = "5s"
+
+[pprof]
+port = 6060
+
+[standalone]
+duration = "30s"
+
+  [standalone.bot]
+  accountPrefix = "bot_"
+  startNumber = 1140000
+  totalBots = 2
+  concurrency = 2
+  # 与 flow.json 中 ConnectArena/LoginArena 动作的 service 名一致
+  mainService = "arena"
+
+  [standalone.stateExtra]
+  # 教程虚构的竞技场服务器地址；换成你的目标服务器即可
+  arenaAddr = "127.0.0.1:18888"
+
+[redis]
+host = ""

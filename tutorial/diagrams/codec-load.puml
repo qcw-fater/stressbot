@@ -1,0 +1,43 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title 启动时三件套的加载顺序（任一步失败进程退出）
+
+start
+:扫描 adapter 目录下的 *_codec.json;
+note right
+  文件名去掉 _codec.json 后按首个 "_" 拆分
+  tcp_arena_codec.json → 连接键 "tcp:arena"
+  tcp_rank_team_codec.json → "tcp:rank_team"
+end note
+if (一个都没有 / 拆不出 proto 与 service?) then (是)
+  :推断 codec 映射失败;
+  stop
+endif
+if (adapter 目录里有 errors.json?) then (有)
+  :加载 errors.json
+  （key 必须是数字，且 ≥ 100）;
+else (没有)
+  :Warn：未找到 errors.json 错误码表，
+  错误码将不显示中文描述;
+endif
+:逐个 codec 文件校验与编译;
+partition "每个 codec 文件" {
+  :① JSON Schema 结构校验
+  （未知键、枚举值、必填项）;
+  :② 领域校验
+  （区间越界/重叠、role 数量、flag 引用、when 必须配 flag ……）;
+  :③ 编译
+  （算法存在性、f32/f64 与 over 拒绝、routeKeyTemplate 解析）;
+}
+:比对所有 codec 的帧切割规则
+（headerSize / trailerSize / 长度字段位置、宽度、字节序、
+lengthIncludesHeader / lengthIncludesTrailer）;
+if (完全一致?) then (否)
+  :帧切割规则不一致，启动失败;
+  stop
+endif
+:加载 proto 目录（递归扫描 .proto 并编译）;
+:加载 flow.json;
+:[MAIN] 运行资源已加载 connections=N;
+stop
+@enduml

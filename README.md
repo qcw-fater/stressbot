@@ -6,6 +6,8 @@
 
 一套 `conf/flow/flow.json + conf/scripts/*.lua` 即可驱动任意带类似协议头的游戏服务器压测。
 
+> **文档导航**：使用教程（从快速开始到集群部署与前端操作）见 [tutorial/](tutorial/README.md)；本文件与其余 `docs/*.md` 是面向维护者的开发参考。
+
 ---
 
 ## 目录结构
@@ -49,7 +51,7 @@ stressbot/
     └── deploy/           部署中间件配置（nginx / Loki / Grafana / Vector）
 ```
 
-> `data/`（运行时数据）、`log/`（日志输出）、`docs/`（技术知识库，入口见 [docs/README.md](docs/README.md)；`docs/superpowers/` 为历史归档不随代码维护）为辅助目录。
+> `data/`（运行时数据）、`log/`（日志输出）、`tutorial/`（使用教程，入口见 [tutorial/README.md](tutorial/README.md)）、`docs/`（技术知识库，入口见 [docs/README.md](docs/README.md)；`docs/superpowers/` 为历史归档不随代码维护）为辅助目录。
 
 ---
 

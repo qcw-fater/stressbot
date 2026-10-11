@@ -1,0 +1,55 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title 一个包的编码与解码：pipeline 正序编码、按 flag 逆序解码
+
+|发送（encode）|
+start
+:动作的 route + protobuf body + 连接当前密钥;
+repeat :取 pipeline 下一步（数组正序）;
+  if (有 when？) then (有)
+    :判定 minBodyLen / requireKey / guards / appliesWith;
+  else (无)
+    :无条件生效;
+  endif
+  if (生效？) then (是)
+    if (compress) then
+      :压缩；onlySmaller 时变大则放弃;
+    else (encrypt)
+      :requireKey 时还要求 密钥长度 ≥ keyLen;
+      :先按加密前明文计算 produces（如 bcc）;
+      :加密 body[offset.encode:]，失败则放弃本步;
+    endif
+    :本步成功 → 在 flags 中置该步的 flag 位;
+  endif
+repeat while (还有下一步？) is (是)
+:写头：length、route、flags、checksumOut、value，
+errorCode/reserved/trailer 写 0;
+:发送;
+
+|接收（decode）|
+:按 length 字段切出一帧;
+:读头：errorCode、route 字段、flags、checksumOut;
+repeat :取 pipeline 上一步（数组逆序）;
+  if (步骤绑定了 flag 且该位未置位？) then (是)
+    :跳过（不重算 when）;
+  else (否)
+    if (encrypt) then
+      :解密 body[offset.decode:];
+      :offset.encode == offset.decode 时校验 bcc;
+    else (compress)
+      :解压;
+    endif
+    if (失败？) then (是)
+      if (onError) then (fail，默认)
+        :丢弃整帧，Warn [CODEC] 解码失败;
+        stop
+      else (keep)
+        :保留当前字节继续;
+      endif
+    endif
+  endif
+repeat while (还有上一步？) is (是)
+:按 routeKeyTemplate 拼路由键，例如 "100:1";
+:交给请求-响应匹配 / 监听队列;
+stop
+@enduml

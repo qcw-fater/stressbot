@@ -1,0 +1,29 @@
+@startuml ch03-robot-lifecycle
+skinparam defaultFontName "Microsoft YaHei"
+skinparam shadowing false
+title 一个机器人的一生
+
+start
+:Manager 计算身份\nindex = 分片起点 + 序号\nid = startNumber + index\naccount = accountPrefix + id;
+:从 Lua 运行时池借出一个独占 LState;
+:写入 stateExtra（跳过 id/index/account，\n每个冲突键打一条 warn）;
+:写入保留键 id / index / account;
+:提交到协程池执行;
+:日志「[ROBOT] 启动」;
+:从 flow.json 的 main 节点开始走图;
+repeat
+  :执行节点（action / sequence / loop / ...）;
+  :action 节点执行完后协作式等待节点间隔\n（节点 delayMs > 全局 defaultDelayMs > 1000ms）;
+repeat while (流程还有下一步 且 未被取消?) is (是)
+if (怎么结束的?) then (流程自然走完)
+  :计入「停止」;
+elseif (流程返回错误\n如 onError abort、节点不存在) then
+  :日志「[ROBOT] 流程异常退出」\n计入「错误」;
+else (被取消)
+  :主 TCP 连接意外断开\n/ duration 到期 / Ctrl+C\n/ 渐进加压 reset / 任务停止;
+  :计入「停止」;
+endif
+:清理：关闭全部连接（10 秒超时）\n归还 LState、清空状态;
+:日志「[ROBOT] 已停止 cleanup=ok」;
+stop
+@enduml

@@ -1,0 +1,38 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName "Microsoft YaHei"
+skinparam classAttributeIconSize 0
+hide empty methods
+
+title flow.json 三张表的引用关系
+
+class "nodes（必填）" as Nodes {
+  "main" ← 唯一固定入口
+  key = 节点 ID
+  type ∈ 9 种
+}
+
+class "actions（必填）" as Actions {
+  key = 动作名
+  pattern ∈ 14 种
+  bindings / store / timeout ...
+}
+
+class "listens（可选）" as Listens {
+  key = 监听名
+  script（可选 Lua）
+}
+
+class "节点（Node）" as Node {
+  next[] / body / trueNext / falseNext
+  cases[].next / defaultNext
+  options[].node / then
+  action
+  listenRefs[].listen
+}
+
+Nodes *-- Node : 每个 key 一个
+Node --> Nodes : next / body / trueNext ...\n（运行期才解析，写错报「节点不存在」）
+Node --> Actions : action\n（运行期才解析，写错报「动作不存在」）
+Node --> Listens : listenRefs[].listen\n（加载期校验）
+@enduml

@@ -1,0 +1,112 @@
+{
+  "listens": {
+    "matchFound": {
+      "s2cProto": "arena.MatchFoundS2C"
+    },
+    "guildNotice": {
+      "s2cProto": "arena.GuildNoticeS2C",
+      "store": [ { "field": "notice", "setter": "guildNotice" } ]
+    }
+  },
+  "nodes": {
+    "main": {
+      "type": "sequence",
+      "next": ["connect", "login", "matchLoop", "close"]
+    },
+    "connect": { "type": "action", "action": "ConnectArena" },
+    "login": {
+      "type": "action",
+      "action": "LoginArena",
+      "listenRefs": [
+        {
+          "route": { "cmd": 400, "act": 2 },
+          "server": "tcp:arena",
+          "listen": "guildNotice"
+        }
+      ]
+    },
+    "close": { "type": "action", "action": "CloseArena" },
+
+    "matchLoop": {
+      "type": "loop",
+      "loopCount": 3,
+      "body": "matchTry"
+    },
+    "matchTry": {
+      "type": "sequence",
+      "next": ["applyMatch", "waitMatch", "checkMatch"]
+    },
+
+    "applyMatch": {
+      "type": "action",
+      "action": "MatchApply",
+      "listenRefs": [
+        {
+          "route": { "cmd": 400, "act": 3 },
+          "server": "tcp:arena",
+          "listen": "matchFound",
+          "queueSize": 3
+        }
+      ]
+    },
+    "waitMatch": { "type": "action", "action": "WaitMatch" },
+    "checkMatch": {
+      "type": "boolean",
+      "condition": "state:battleId > 0",
+      "trueNext": "enterBattle",
+      "falseNext": "giveUp"
+    },
+    "enterBattle": { "type": "action", "action": "MarkReady" },
+    "giveUp":     { "type": "action", "action": "MarkGiveUp" }
+  },
+  "actions": {
+    "ConnectArena": {
+      "pattern": "tcpConnect",
+      "service": "arena",
+      "address": "state:arenaAddr"
+    },
+    "LoginArena": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 100, "act": 1 },
+      "c2sProto": "arena.LoginAccountC2S",
+      "bindings": [
+        { "field": "account", "type": "state", "source": "account" },
+        { "field": "version", "type": "fixed", "value": "0.31.49" }
+      ],
+      "s2cProto": "arena.LoginAccountS2C",
+      "store": [ { "field": "playerId", "setter": "playerId" } ],
+      "timeout": 5
+    },
+    "MatchApply": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 400, "act": 1 },
+      "c2sProto": "arena.MatchApplyC2S",
+      "bindings": [ { "field": "mode", "type": "randomInt", "min": 1, "max": 2 } ],
+      "s2cProto": "arena.MatchApplyS2C",
+      "store": [ { "field": "ticket", "setter": "matchTicket" } ],
+      "timeout": 5
+    },
+    "WaitMatch": {
+      "pattern": "tcpListen",
+      "service": "arena",
+      "route": { "cmd": 400, "act": 3 },
+      "s2cProto": "arena.MatchFoundS2C",
+      "store": [ { "field": "battleId", "setter": "battleId" } ],
+      "timeout": 10
+    },
+    "MarkReady": {
+      "pattern": "setState",
+      "bindings": [ { "field": "mood", "type": "fixed", "value": "ready" } ]
+    },
+    "MarkGiveUp": {
+      "pattern": "setState",
+      "bindings": [ { "field": "mood", "type": "fixed", "value": "giveup" } ]
+    },
+    "CloseArena": {
+      "pattern": "tcpClose",
+      "service": "arena"
+    }
+  }
+}

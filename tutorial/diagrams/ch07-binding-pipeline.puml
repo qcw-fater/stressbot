@@ -1,0 +1,33 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title 协议动作中单条 binding 的处理顺序
+
+start
+:取下一条 binding;
+if (condition 非空且为 false?) then (是)
+  :跳过这一条（不报错）;
+  stop
+endif
+:按 type 取值
+（stateRandom / stateMapValue 先做 filters 过滤）;
+if (type 支持 path?) then (是)
+  :按 path 下钻;
+  :wrap=true 时包成单元素列表;
+endif
+if (值为 nil?) then (是)
+  if (required=true，或 type 为 state 系且未写 optional=true?) then (是)
+    #pink:报错 [22] action=X field=Y，动作失败;
+    stop
+  else (否)
+    :静默跳过;
+    stop
+  endif
+endif
+if (storeAs 非空?) then (是)
+  :写入 state[storeAs];
+endif
+if (field 非空?) then (是)
+  :按 proto 字段类型转换后写入消息;
+endif
+stop
+@enduml

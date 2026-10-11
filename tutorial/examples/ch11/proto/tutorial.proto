@@ -1,0 +1,54 @@
+// 第 11 章示例协议：竞技场 (ArenaQuest) + 商店（供 Lua 脚本演示）
+syntax = "proto3";
+
+package arena;
+
+message LoginAccountC2S {
+  string account = 1;
+  string version = 2;
+}
+
+message LoginAccountS2C {
+  int64 playerId = 1;
+  int64 serverTime = 2;
+}
+
+message FetchPlayerC2S {
+  int64 playerId = 1;
+}
+
+message PlayerItem {
+  int32 itemId = 1;
+  int32 count = 2;
+}
+
+message FetchPlayerS2C {
+  string name = 1;
+  int32 level = 2;
+  int64 coins = 3;
+  int32 bagSlots = 4;            // 背包总格子
+  repeated PlayerItem items = 5; // 背包物品
+}
+
+message ShopListC2S {
+  int32 category = 1;
+}
+
+message ShopItem {
+  int32 itemId = 1;
+  int32 price = 2;
+  int32 stock = 3;
+}
+
+message ShopListS2C {
+  repeated ShopItem items = 1;
+}
+
+message BuyItemC2S {
+  int32 itemId = 1;
+  int32 count = 2;
+}
+
+message BuyItemS2C {
+  int64 orderId = 1;
+}

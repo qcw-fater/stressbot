@@ -1,0 +1,65 @@
+{
+  "nodes": {
+    "main": {
+      "type": "sequence",
+      "next": ["connect", "login", "fetchPlayer", "close"]
+    },
+    "connect": {
+      "type": "action",
+      "action": "ConnectArena"
+    },
+    "login": {
+      "type": "action",
+      "action": "LoginArena"
+    },
+    "fetchPlayer": {
+      "type": "action",
+      "action": "FetchPlayer"
+    },
+    "close": {
+      "type": "action",
+      "action": "CloseArena"
+    }
+  },
+  "actions": {
+    "ConnectArena": {
+      "pattern": "tcpConnect",
+      "service": "arena",
+      "address": "state:arenaAddr"
+    },
+    "LoginArena": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 100, "act": 1 },
+      "c2sProto": "arena.LoginAccountC2S",
+      "bindings": [
+        { "field": "account", "type": "state", "source": "account" },
+        { "field": "version", "type": "fixed", "value": "0.31.49" }
+      ],
+      "s2cProto": "arena.LoginAccountS2C",
+      "store": [
+        { "field": "playerId", "setter": "playerId" },
+        { "field": "serverTime", "setter": "loginServerTime" }
+      ],
+      "timeout": 5
+    },
+    "FetchPlayer": {
+      "pattern": "tcpRequest",
+      "service": "arena",
+      "route": { "cmd": 100, "act": 2 },
+      "c2sProto": "arena.FetchPlayerC2S",
+      "bindings": [
+        { "field": "playerId", "type": "state", "source": "playerId" }
+      ],
+      "s2cProto": "arena.FetchPlayerS2C",
+      "store": [
+        { "setter": "playerData" }
+      ],
+      "timeout": 5
+    },
+    "CloseArena": {
+      "pattern": "tcpClose",
+      "service": "arena"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+// 第 6 章示例协议：竞技场 (ArenaQuest) + 体力与战斗
+syntax = "proto3";
+
+package arena;
+
+// ── 登录 ──────────────────────────────────────────────
+
+message LoginAccountC2S {
+  string account = 1;
+  string version = 2;
+}
+
+message LoginAccountS2C {
+  int64 playerId = 1;
+  int64 serverTime = 2;
+}
+
+// ── 角色数据 ──────────────────────────────────────────
+
+message FetchPlayerC2S {
+  int64 playerId = 1;
+}
+
+message PlayerItem {
+  int32 itemId = 1;
+  int32 count = 2;
+}
+
+message FetchPlayerS2C {
+  string name = 1;
+  int32 level = 2;
+  int64 coins = 3;
+  int32 stamina = 4;
+  repeated PlayerItem items = 5;
+}
+
+// ── 战斗 ──────────────────────────────────────────────
+
+message BattleStartC2S {
+  int32 stageId = 1;
+}
+
+message BattleResultS2C {
+  int32 win = 1;         // 1 胜 0 负
+  int32 staminaLeft = 2; // 战后剩余体力
+  int64 coinsGained = 3; // 本场收益
+}

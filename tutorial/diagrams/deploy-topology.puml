@@ -1,0 +1,50 @@
+@startuml deploy-topology
+!pragma layout smetana
+skinparam defaultFontName "Microsoft YaHei"
+skinparam shadowing false
+skinparam componentStyle rectangle
+title 生产部署拓扑：nginx + admin（服务器）+ N 台 agent（节点）
+
+actor "浏览器" as browser
+
+node "入口机" as edge {
+  component "nginx :80/:443\n/stressbot/ → dist 静态文件\n/sbot/ → 反代 admin:7718\nclient_max_body_size ≥ 32m" as nginx
+}
+
+node "admin 机（工作目录 /opt/stressbot）" as adminhost {
+  component "admin\n[server] HTTP :7718\n[controlPlane] gRPC :7720" as admin
+  folder "conf/\nadmin.toml + 基线资源\n（创建任务时被写回）" as conf
+  folder "data/\ntasks/*.json\nbundles/*.zip\nshared-cleanup-pending.json" as data
+  folder "log/admin.log" as alog
+  component "pprof :6060（可选）\n/debug/*" as approf
+}
+
+database "MySQL（可选）\n库需预先创建\n启动自动建 11 张表" as mysql
+database "Redis（可选）\nshare 共享状态" as redis
+
+node "施压机 1..N（THP=never）" as agenthost {
+  component "agent\n无入站控制端口" as agent
+  folder "<taskWorkDir>/stressbot-bundles/\n<sha256>.zip + 解压目录" as cache
+  component "pprof :6060\n/debug/* + /metrics" as gpprof
+}
+
+cloud "目标游戏服务器" as game
+
+browser --> nginx : HTTP(S)
+nginx --> admin : /sbot/ 反代
+admin --> mysql : TCP 3306
+admin --> redis : 启动 PING + 终态清理
+agent --> admin : gRPC 长连接（节点主动连 7720）
+agent --> redis : Lua share（Redis 配置随启动命令下发）
+agent --> game : TCP / UDP / HTTP 压测流量
+admin -[hidden]- conf
+conf -[hidden]- data
+data -[hidden]- alog
+agent -[hidden]- cache
+
+note bottom of admin
+  两个监听面都没有鉴权，gRPC 为明文：
+  7718 只给 nginx / 内网访问，
+  7720 只对施压机所在私网开放
+end note
+@enduml

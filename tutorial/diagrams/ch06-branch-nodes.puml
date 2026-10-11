@@ -1,0 +1,40 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title boolean / switch / weighted 的选路规则
+
+start
+switch (节点类型)
+case (boolean)
+  if (condition 为空或为 true?) then (是)
+    :target = trueNext;
+  else (否 / 求值出错)
+    :target = falseNext;
+  endif
+case (switch)
+  :按 cases 顺序求值，取第一个为 true 的 case;
+  if (有命中?) then (是)
+    :target = 该 case 的 next;
+  elseif (defaultNext 非空?) then (是)
+    :target = defaultNext;
+  else (否)
+    :warn：switch 无 case 命中且未配置 default;
+    stop
+  endif
+case (weighted)
+  if (options 为空?) then (是)
+    stop
+  elseif (权重之和 ≤ 0?) then (是)
+    #pink:报错，机器人流程异常退出;
+    stop
+  else (否)
+    :按权重随机选一个 option.node;
+  endif
+endswitch
+if (target 为空字符串?) then (是)
+  :本分支结束;
+  stop
+endif
+:执行 target;
+:target 返回 skip → 在此吞掉;
+stop
+@enduml

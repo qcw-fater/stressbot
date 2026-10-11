@@ -1,0 +1,49 @@
+@startuml ch02-topology
+!pragma layout smetana
+skinparam defaultFontName "Microsoft YaHei"
+skinparam shadowing false
+skinparam componentStyle rectangle
+title 分布式拓扑：一个服务器（admin）+ N 个节点（agent）
+
+actor "浏览器" as browser
+
+node "admin（服务器）" as admin {
+  component "管理面 HTTP :7718\n/sbot/ API + 静态页面" as mgmt
+  component "控制面 gRPC :7720\nSession / DownloadBundle / Report" as cp
+  folder "data/\n任务记录、资源包缓存" as data
+}
+
+database "MySQL（可选）\n历史归档 + 模板库\n启动时自动建 11 张表" as mysql
+database "Redis（可选）\n跨节点共享状态\n启用时启动即 PING" as redis
+
+node "agent-1（节点）" as a1 {
+  component "机器人 × n" as r1
+}
+node "agent-2（节点）" as a2 {
+  component "机器人 × n" as r2
+}
+node "agent-N（节点）" as an {
+  component "机器人 × n" as rn
+}
+
+cloud "目标游戏服务器" as game
+
+browser --> mgmt : HTTP
+a1 --> cp : gRPC 长连接（节点主动连）
+a2 --> cp
+an --> cp
+admin --> mysql
+admin --> redis
+r1 --> redis : Lua share
+r1 --> game : 压测流量 TCP/UDP/HTTP
+r2 --> game
+rn --> game
+mgmt -[hidden]- data
+
+note right of cp
+  Hello/Welcome 握手
+  心跳、任务租约、命令下发
+  资源包按需下载
+  指标流式上报
+end note
+@enduml

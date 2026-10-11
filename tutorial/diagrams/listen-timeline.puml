@@ -1,0 +1,37 @@
+@startuml
+skinparam defaultFontName "Microsoft YaHei"
+title 监听预注册与队列时序（纯缓存形态）
+
+participant "机器人主流程\n(Executor)" as R
+participant "连接\n(Connection)" as C
+participant "收包协程\n(connectionPump)" as P
+participant "游戏服务器" as S
+
+R -> C : MatchApply（tcpRequest 400:1）
+C -> S : 申请匹配
+S --> P : 回执 400:1
+P -> R : 交给在途请求（响应优先）
+note over R : 动作成功
+R -> C : 注册 listenRefs\n路由键 400:3 → 队列(queueSize=3)
+note over R : 节点间隔 / 其它节点
+
+S --> P : 推送 400:3（匹配结果）
+P -> C : 无在途请求、有登记、无回调\n→ 入队（满则覆盖最旧）
+
+R -> C : WaitMatch（tcpListen 400:3）
+alt 队列已有消息
+  C --> R : 立即取出（计 listenReadyCount）
+else 队列为空
+  R -> R : 挂起：等队列通知 / 执行任务队列 / 超时
+  S --> P : 推送 400:3
+  P -> C : 入队并通知
+  C --> R : 取出（listenWait 样本）
+else 超时
+  C --> R : 错误码 31 LISTEN_TIMEOUT
+end
+R -> R : 按 WaitMatch 自己的 s2cProto + store 存状态
+
+== 注册之前到达的推送 ==
+S --> P : 推送 400:3
+P -> P : 无在途请求、无登记 → 丢弃（Debug 日志）
+@enduml
