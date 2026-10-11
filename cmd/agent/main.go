@@ -32,6 +32,7 @@ func main() {
 type options struct {
 	configPath string
 	daemon     bool
+	version    bool
 }
 
 func parseOptions(args []string) (options, error) {
@@ -40,6 +41,7 @@ func parseOptions(args []string) (options, error) {
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&opts.configPath, "config", "conf/agent.toml", "Agent 配置文件路径")
 	flags.BoolVar(&opts.daemon, "d", false, "以守护进程模式运行")
+	flags.BoolVar(&opts.version, "version", false, "打印版本号并退出")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -67,6 +69,10 @@ func run(args []string) (exitCode int) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "解析启动参数失败: %v\n", err)
 		return 1
+	}
+	if opts.version {
+		fmt.Println(Version)
+		return 0
 	}
 
 	if opts.daemon {

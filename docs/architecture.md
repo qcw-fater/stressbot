@@ -253,7 +253,7 @@ Executor.Run("main")                    engine/executor.go:92
 ### 6.2 发布（.github/workflows/release.yml）
 
 - **触发**：推送 `v*` tag（release.yml:3-6）。
-- **矩阵**：6 平台交叉编译——linux/amd64、linux/arm64、windows/amd64、windows/arm64、darwin/amd64、darwin/arm64（release.yml:15-21），CGO_ENABLED=0，版本取 tag 名注入 `main.Version`。
+- **矩阵**：6 平台交叉编译——linux/amd64、linux/arm64、windows/amd64、windows/arm64、darwin/amd64、darwin/arm64（release.yml:15-21），CGO_ENABLED=0，版本取 tag 名注入 `main.Version`，并用本机 `linux/amd64` 产物跑 `-version` 断言等于 tag。
 - **产物**：每平台编译 **stressbot / agent / admin 三个二进制**（release.yml:46-48）；先 `npm ci && npm run build` 构建前端（release.yml:35-36）。
 - **打包**：二进制 + `conf/`（含 flow/proto/scripts/adapter/deploy，加载期断言存在，release.yml:77-85）+ 包根 `dist/`（断言 index.html），Windows 打 zip、其余 tar.gz，逐项 `test -f/-x` 自检（release.yml:62-93）。
 - **发布**：`softprops/action-gh-release@v3`，自动生成 release notes，上传全部归档（release.yml:96-102）。

@@ -30,6 +30,20 @@ func TestParseOptions(t *testing.T) {
 		overrides.adapterDir != "adapter" || !overrides.daemon {
 		t.Fatalf("覆盖参数错误: %+v", overrides)
 	}
+
+	printed, err := parseOptions([]string{"-version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !printed.version {
+		t.Fatalf("version 参数未解析: %+v", printed)
+	}
+}
+
+func TestRunPrintsVersion(t *testing.T) {
+	if code := run([]string{"-version"}); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
 }
 
 func TestRunReturnsConfigError(t *testing.T) {

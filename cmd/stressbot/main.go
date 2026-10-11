@@ -22,7 +22,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Version 编译时注入：-ldflags "-X main.Version=v1.0.0"
+// Version 编译时注入。GitHub Release 推送 v* tag 时写入 tag 名；未注入则为 dev。
 var Version = "dev"
 
 func main() {
@@ -36,6 +36,7 @@ type options struct {
 	scriptsDir string
 	adapterDir string
 	daemon     bool
+	version    bool
 }
 
 func parseOptions(args []string) (options, error) {
@@ -48,6 +49,7 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&opts.scriptsDir, "scripts", "", "Lua 脚本目录路径（默认 <conf>/scripts）")
 	flags.StringVar(&opts.adapterDir, "adapter", "", "适配器目录路径（默认 <conf>/adapter）")
 	flags.BoolVar(&opts.daemon, "d", false, "以守护进程模式运行")
+	flags.BoolVar(&opts.version, "version", false, "打印版本号并退出")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -75,6 +77,10 @@ func run(args []string) (exitCode int) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "解析启动参数失败: %v\n", err)
 		return 1
+	}
+	if opts.version {
+		fmt.Println(Version)
+		return 0
 	}
 
 	if opts.daemon {

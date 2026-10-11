@@ -38,14 +38,26 @@ jobs:
       - name: Build release binaries
         env:
           CGO_ENABLED: 0
+          VERSION: ${{ github.ref_name }}
         run: |
+          if [ -z "$VERSION" ] || [ "$VERSION" = "dev" ]; then
+            echo "VERSION 必须是发布 tag 名，当前为空或 dev" >&2
+            exit 1
+          fi
           for target in $RELEASE_TARGETS; do
             IFS=/ read -r goos goarch <<< "$target"
             staging="build/staging/$goos-$goarch"
             mkdir -p "$staging"
             GOOS="$goos" GOARCH="$goarch" go build \
-              -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" \
+              -trimpath -ldflags "-X main.Version=${VERSION}" \
               -o "$staging/" ./cmd/stressbot ./cmd/agent ./cmd/admin
+          done
+          for bin in stressbot agent admin; do
+            got="$(./build/staging/linux-amd64/$bin -version)"
+            if [ "$got" != "$VERSION" ]; then
+              echo "$bin -version 得到 '$got'，期望 '$VERSION'" >&2
+              exit 1
+            fi
           done
 
       - name: Package release archives
